@@ -233,6 +233,7 @@ export interface QuoteLineInfoForPDF {
   sku: string | null;
   msrp: number | null;
   unit_msrp: number | null;
+  dealer_price_total?: number | null;
   area?: string | null;
   position?: string | null;
   product_type?: string | null;
@@ -338,7 +339,7 @@ export async function fetchProposalDetailData(proposalId: string): Promise<Propo
   if (proposal.quote_id) {
     const { data: qlData, error: qlError } = await supabase
       .from('QuoteLines')
-      .select('id, quantity, name, sku, msrp, unit_msrp_total_snapshot, area, position, product_type, product_type_id, collection_name, variant_name, drive_type, width_m, height_m, configured_product_id')
+      .select('id, quantity, name, sku, msrp, unit_msrp_total_snapshot, dealer_price_total, area, position, product_type, product_type_id, collection_name, variant_name, drive_type, width_m, height_m, configured_product_id')
       .eq('quote_id', proposal.quote_id);
 
     if (qlError) throw new Error(qlError.message || 'Error loading quote lines');
@@ -354,6 +355,7 @@ export async function fetchProposalDetailData(proposalId: string): Promise<Propo
         sku: ql.sku ?? null,
         msrp: lineMsrp,
         unit_msrp: unitMsrp,
+        dealer_price_total: ql.dealer_price_total != null ? Number(ql.dealer_price_total) : null,
         area: ql.area ?? null,
         position: ql.position ?? null,
         product_type: ql.product_type ?? null,

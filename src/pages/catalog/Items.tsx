@@ -527,52 +527,31 @@ export default function Items() {
         }
       }
 
-      // Normalize MSRP for display (list should show normalized unit, not raw yd/ft)
-      const rawUom = (item.unit_of_measure || item.uom || 'ea').toString();
-      const rawUomLower = rawUom.toLowerCase();
+      // CatalogItemsMSRP.msrp is ALWAYS stored per normalized unit (pricing_uom='m'
+      // for linear, 'm' for area, per-ea for unit). No conversion needed — display directly.
       const pricingMode = ((item as any).roll_pricing_mode || null) as string | null;
       const widthM = (() => {
         const v = (item as any).roll_width_m ?? (item as any).roll_width ?? null;
         const n = v != null ? Number(v) : null;
         return n != null && !isNaN(n) ? n : null;
       })();
-      const toPerMeter = (price: number, uom: string): number | null => {
-        const u = (uom || '').toLowerCase();
-        if (u === 'm' || u === 'meter' || u === 'meters') return price;
-        if (u === 'yd' || u === 'yard' || u === 'yards') return price / 0.9144;
-        if (u === 'ft' || u === 'foot' || u === 'feet') return price / 0.3048;
-        return null;
-      };
       let msrpDisplay = msrpValue;
       let msrpUnitLabel = '';
       if (msrpValue != null) {
-        // Default to showing per meter for linear rolls/items
-        const perM = toPerMeter(msrpValue, rawUomLower);
         if (pricingMode === 'per_square_meter' || item.measure_basis === 'area') {
-          if (perM != null && widthM != null && widthM > 0) {
-            msrpDisplay = perM / widthM;
+          if (widthM != null && widthM > 0) {
+            msrpDisplay = msrpValue / widthM;
             msrpUnitLabel = '/m²';
-          } else if (perM != null) {
-            msrpDisplay = perM;
-            msrpUnitLabel = '/m';
           } else {
             msrpDisplay = msrpValue;
-            msrpUnitLabel = `/${rawUomLower}`;
+            msrpUnitLabel = '/m';
           }
         } else if (pricingMode === 'per_linear_meter' || item.measure_basis === 'linear') {
-          if (perM != null) {
-            msrpDisplay = perM;
-            msrpUnitLabel = '/m';
-          } else {
-            msrpDisplay = msrpValue;
-            msrpUnitLabel = `/${rawUomLower}`;
-          }
-        } else {
-          // Unit items (or per_unit pricing) show MSRP per ea
           msrpDisplay = msrpValue;
-          // Normalize unit label: pack/set/box/case → ea
-          const isPackType = ['pack', 'set', 'box', 'case', 'bag', 'piece', 'pcs', 'pc'].includes(rawUomLower);
-          msrpUnitLabel = isPackType ? '/ea' : `/${rawUomLower}`;
+          msrpUnitLabel = '/m';
+        } else {
+          msrpDisplay = msrpValue;
+          msrpUnitLabel = '/ea';
         }
       }
       

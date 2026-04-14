@@ -4452,19 +4452,8 @@ export default function QuoteNew() {
                             const bomMsrp = line.bom_msrp_snapshot || 0;
                             const hasDetails = rollMsrp > 0 || bomMsrp > 0;
                             return (
-                              <div className="relative group whitespace-nowrap text-right">
+                              <div className="whitespace-nowrap text-right">
                                 <span>{formatCurrency(effective.unitPrice, watch('currency'))}</span>
-                                {hasDetails && (
-                                  <div className="absolute right-0 bottom-full mb-2 hidden group-hover:block z-10 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap shadow-lg">
-                                    <div className="text-left">
-                                      <div>Roll/Fabric: {formatCurrency(rollMsrp, watch('currency'))}</div>
-                                      <div>BOM Components: {formatCurrency(bomMsrp, watch('currency'))}</div>
-                                      <div className="border-t border-gray-700 mt-1 pt-1">
-                                        {useDealerPrice ? 'Dealer unit price (snapshot)' : 'Unit MSRP (from backend)'}
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
                               </div>
                             );
                           })()}
@@ -4477,21 +4466,13 @@ export default function QuoteNew() {
                             const bomMsrp = line.bom_msrp_snapshot || 0;
                             const hasDetails = rollMsrp > 0 || bomMsrp > 0;
                             return (
-                              <div className="relative group whitespace-nowrap text-right">
-                                <span className="font-semibold">{formatCurrency(effective.lineTotal, watch('currency'))}</span>
-                                {effective.isCommercialAdjusted && (
-                                  <div className="text-[10px] text-primary font-medium">Adjusted</div>
-                                )}
-                                {hasDetails && (
-                                  <div className="absolute right-0 bottom-full mb-2 hidden group-hover:block z-10 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap shadow-lg">
-                                    <div className="text-left">
-                                      <div>Roll/Fabric: {formatCurrency(rollMsrp, watch('currency'))}</div>
-                                      <div>BOM Components: {formatCurrency(bomMsrp, watch('currency'))}</div>
-                                      <div className="border-t border-gray-700 mt-1 pt-1">{useDealerPrice ? `Dealer line total (qty=${effective.qty})` : `Line total (qty=${effective.qty})`}</div>
-                                      <div>{formatCurrency(effective.lineTotal, watch('currency'))}</div>
-                                    </div>
-                                  </div>
-                                )}
+                              <div className="whitespace-nowrap text-right">
+                                <span className="font-semibold inline-flex items-center gap-1">
+                                  {effective.isCommercialAdjusted && (
+                                    <span className="w-1.5 h-1.5 rounded-full bg-orange-400 shrink-0" title="Adjusted" />
+                                  )}
+                                  {formatCurrency(effective.lineTotal, watch('currency'))}
+                                </span>
                               </div>
                             );
                           })()}

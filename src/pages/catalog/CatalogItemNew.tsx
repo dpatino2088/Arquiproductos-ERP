@@ -976,6 +976,7 @@ export default function CatalogItemNew() {
     }
   }, [isRoll, rollLengthUom, rollWidthUom, unitOfMeasure, setValue]);
 
+  const prevPurchaseUnitRef = useRef(purchaseUnit);
   useEffect(() => {
     if (isRoll) {
       if (purchaseUnit !== 'roll') {
@@ -986,8 +987,11 @@ export default function CatalogItemNew() {
       }
       return;
     }
+    const purchaseUnitChanged = prevPurchaseUnitRef.current !== purchaseUnit;
+    prevPurchaseUnitRef.current = purchaseUnit;
+
     const autoLinearUPPU = defaultUnitsPerPurchaseUnit(purchaseUnit);
-    if (autoLinearUPPU != null && Number(unitsPerPurchase ?? 1) !== autoLinearUPPU) {
+    if (autoLinearUPPU != null && purchaseUnitChanged) {
       setValue('units_per_purchase_unit', autoLinearUPPU);
       return;
     }
@@ -2234,7 +2238,7 @@ export default function CatalogItemNew() {
                       min="0.0001"
                       {...register('units_per_purchase_unit', { valueAsNumber: true })}
                       className="py-1 text-xs w-full"
-                      disabled={isReadOnly || isRoll || (purchaseUnit === 'each' && measureBasis !== 'linear') || isDirectLinearPurchaseUnit(purchaseUnit)}
+                      disabled={isReadOnly || isRoll || (purchaseUnit === 'each' && measureBasis !== 'linear')}
                     />
                     <p className="text-xs text-gray-500 mt-1">
                       {isRoll && 'Always 1'}

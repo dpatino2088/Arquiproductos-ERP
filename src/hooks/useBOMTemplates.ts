@@ -577,8 +577,8 @@ export function useBOMTemplates(
 
                   // Determinar si headbox es requerido basado en productType
                   const productTypeCode = productTypeId ? productTypesMap.get(productTypeId)?.code : null;
-                  const isHeadboxRequired = productTypeCode === 'dual-shade' || productTypeCode === 'triple-shade';
-                  const isRollerShade = productTypeCode === 'roller-shade';
+                  const isHeadboxRequired = productTypeCode === 'dual_shade' || productTypeCode === 'triple_shade';
+                  const isRollerShade = productTypeCode === 'roller';
 
                   if (import.meta.env.DEV) {
                     console.debug('[useBOMTemplates] PASO 4: HEAD BOX', {

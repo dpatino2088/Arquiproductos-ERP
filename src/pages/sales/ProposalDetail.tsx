@@ -48,6 +48,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { useAccessContext } from '../../hooks/useAccessContext';
 import { useProductTypes } from '../../hooks/useProductTypes';
 import { getAppUsersDisplayNames } from '../../lib/appUsersDisplayNames';
+import ProposalProfitabilityTab from '../../components/sales/ProposalProfitabilityTab';
 
 const PROPOSAL_STATUS_OPTIONS: { value: Proposal['status']; label: string }[] = [
   { value: 'draft', label: 'Draft' },
@@ -1320,6 +1321,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
 
   const tabs = [
     { id: 'overview', label: 'Overview' },
+    { id: 'profitability', label: 'Performance' },
     { id: 'timeline', label: 'Timeline' },
   ];
 
@@ -2249,6 +2251,27 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
             />
           </div>
         </div>
+      )}
+
+      {activeTab === 'profitability' && proposal && (
+        <ProposalProfitabilityTab
+          lines={displayLines}
+          quoteLinesMap={quoteLinesMap}
+          addonsMap={displayAddonsMap}
+          lineTotals={totals.lineTotals}
+          globalDiscountPct={totals.discountPct}
+          globalDiscountAmount={totals.discountAmount}
+          globalFeePct={totals.globalFeePct}
+          installationDiscountPct={totals.instDiscountPct ?? 0}
+          installationDiscountAmount={totals.laborDiscountAmount ?? 0}
+          installationFeePct={totals.instFeePct ?? 0}
+          totalProduct={totals.totalProduct}
+          installationTotal={totals.installationTotal ?? totals.installationAmount ?? 0}
+          subtotal={totals.subtotal}
+          taxAmount={totals.taxAmount}
+          total={totals.total}
+          currency={currency}
+        />
       )}
 
       {activeTab === 'timeline' && (

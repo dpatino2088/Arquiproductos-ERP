@@ -535,6 +535,20 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
     if (Object.keys(updates).length > 0) onUpdate(updates);
   }, [headboxPolicy, showSideChannel, sideChannelIsRequired, loadingHeadbox, loadingSideChannel]);
 
+  // When Side Channel is deselected, cascade to Bottom Channel
+  useEffect(() => {
+    if (!isRollerShade) return;
+    const scId = (config as any).side_channel_item_id;
+    const bcId = (config as any).bottom_channel_item_id;
+    if ((scId === 'NONE' || scId == null) && bcId != null && bcId !== 'NONE') {
+      onUpdate({
+        bottom_channel_item_id: 'NONE',
+        bottom_channel_sku: null,
+        bottom_channel: false,
+      } as any);
+    }
+  }, [(config as any).side_channel_item_id]);
+
   // ✅ DEBUG: Tri-state y conteos (solo dev)
   if (import.meta.env.DEV && hasHardwareColor && !loadingBottomBar) {
     const headboxState = headboxItemId == null ? 'UNSET' : headboxItemId === 'NONE' ? 'NONE' : 'SELECTED';
@@ -966,6 +980,9 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                       side_channel_item_id: 'NONE',
                       side_channel_sku: null,
                       side_channel: false,
+                      bottom_channel_item_id: 'NONE',
+                      bottom_channel_sku: null,
+                      bottom_channel: false,
                     } as any);
                   }
                 }}
@@ -1068,8 +1085,8 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
           </div>
         )}
 
-        {/* Add Bottom Channel — Roller only */}
-        {isRollerShade && currentHardwareColor && (config as any).bottom_bar_item_id && (
+        {/* Add Bottom Channel — Roller only, requires Side Channel selected */}
+        {isRollerShade && currentHardwareColor && (config as any).bottom_bar_item_id && String((config as any).side_channel_item_id ?? '') !== 'NONE' && (config as any).side_channel_item_id && (
           <div>
             <div className="flex items-center gap-3 mb-5">
               <Label className="text-sm font-medium block min-w-[12rem]">ADD BOTTOM CHANNEL</Label>
