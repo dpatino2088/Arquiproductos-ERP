@@ -47,6 +47,19 @@ export interface FinishedGoodsSOGroup {
   deliveredAccessories: number;
 }
 
+interface SalesOrderLookupRow {
+  id: string;
+  sales_order_no: string | null;
+  dealer_id: string | null;
+  customer_id: string | null;
+}
+
+interface CatalogItemLookupRow {
+  id: string;
+  name: string | null;
+  sku: string | null;
+}
+
 // Keep legacy export for backward compatibility
 export type FinishedGoodsGroup = FinishedGoodsSOGroup;
 
@@ -125,10 +138,12 @@ export function useFinishedGoods() {
             : Promise.resolve({ data: [] as any[] }),
         ]);
 
-        const soMap = new Map((soRows ?? []).map((s: any) => [s.id, s]));
+        const typedSoRows = (soRows ?? []) as SalesOrderLookupRow[];
+        const soMap = new Map<string, SalesOrderLookupRow>(typedSoRows.map((s) => [s.id, s]));
         const dealerMap = new Map((dealerRows ?? []).map((d: any) => [d.id, d.dealer_name]));
         const customerMap = new Map((customerRows ?? []).map((c: any) => [c.id, c.customer_name]));
-        const catMap = new Map((allCatRows ?? catRows ?? []).map((c: any) => [c.id, c]));
+        const typedCatRows = ((allCatRows ?? catRows ?? []) as CatalogItemLookupRow[]);
+        const catMap = new Map<string, CatalogItemLookupRow>(typedCatRows.map((c) => [c.id, c]));
 
         const productLines: FinishedGoodLine[] = (molRows ?? []).map((r: any) => {
           const mo = r.ManufacturingOrders;

@@ -29,6 +29,7 @@ interface SalesOrder {
   id: string;
   sales_order_no: string;
   quote_id: string | null;
+  organization_id: string;
   Quotes?: { id: string; quote_no: string } | null;
   status: string;
   /** Set when cancelled; used to restore on reactivate (org user). */

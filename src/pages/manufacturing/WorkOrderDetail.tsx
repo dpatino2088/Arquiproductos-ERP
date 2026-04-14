@@ -355,9 +355,10 @@ export default function WorkOrderDetail({ moId }: WorkOrderDetailProps) {
   useEffect(() => {
     const solIds = [...new Set(tasks.map(t => t.sales_order_line_id).filter(Boolean))] as string[];
     if (solIds.length === 0) return;
-    supabase.from('SaleOrderLines').select('id, description, variant_name, product_type').in('id', solIds).then(({ data }) => {
+    supabase.from('SaleOrderLines').select('id, description, variant_name, product_type').in('id', solIds).then((res: { data: Array<{ id: string; description: string | null; variant_name: string | null; product_type: string | null }> | null }) => {
+      const data = res.data ?? [];
       const map: Record<string, string> = {};
-      for (const sol of (data ?? [])) map[sol.id] = sol.description || sol.variant_name || sol.product_type || 'Line';
+      for (const sol of data) map[sol.id] = sol.description || sol.variant_name || sol.product_type || 'Line';
       setSolDescriptions(map);
     });
   }, [tasks]);
