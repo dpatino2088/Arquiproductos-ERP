@@ -24,26 +24,36 @@ const COLORIZABLE_ROLES = [
   'hardware',
 ] as const;
 
+export type RoleRequirement = 'required' | 'optional' | 'none';
+
 export interface BOMTemplateQuestions {
   // Required steps
   requiredSteps: {
-    variants: boolean; // Fabric/collection selection
-    hardware: boolean; // Hardware color, cassette, side channel
-    operatingSystem: boolean; // Drive type selection
-    accessories: boolean; // Accessories selection
+    variants: boolean;
+    hardware: boolean;
+    operatingSystem: boolean;
+    accessories: boolean;
   };
   
   // Boolean questions (yes/no toggles)
   booleanQuestions: {
-    cassette: boolean; // Whether to show cassette toggle
-    side_channel: boolean; // Whether to show side_channel toggle
+    cassette: boolean;
+    side_channel: boolean;
   };
   
   // Select questions (dropdown selections)
   selectQuestions: {
-    hardware_color: boolean; // Whether to show hardware color selector
-    drive_type: boolean; // Whether to show drive type selector
+    hardware_color: boolean;
+    drive_type: boolean;
   };
+
+  /**
+   * Per-role requirement derived from BOMComponents.is_required.
+   * 'required' = at least one component with this role has is_required=true
+   * 'optional' = role exists but all components with it have is_required=false
+   * 'none'     = role doesn't exist in the template
+   */
+  componentRequirements: Record<string, RoleRequirement>;
 }
 
 /**
@@ -118,11 +128,11 @@ export function useBOMTemplateQuestions(bomTemplateId: string | null | undefined
           hardware_color: true,
           drive_type: true,
         },
+        componentRequirements: {},
       };
     }
 
     const isLoading = loading || slotsLoading;
-    // If still loading, return defaults
     if (isLoading) {
       return {
         requiredSteps: {
@@ -139,6 +149,7 @@ export function useBOMTemplateQuestions(bomTemplateId: string | null | undefined
           hardware_color: false,
           drive_type: false,
         },
+        componentRequirements: {},
       };
     }
 
@@ -187,6 +198,24 @@ export function useBOMTemplateQuestions(bomTemplateId: string | null | undefined
     // Check for accessories
     const hasAccessories = hasRole('accessory');
 
+    // Derive per-role requirement from is_required flag
+    const componentRequirements: Record<string, RoleRequirement> = {};
+    for (const comp of components) {
+      const role = normalizeRole(comp.component_role) || comp.component_role || '';
+      if (!role) continue;
+      if (comp.is_required) {
+        componentRequirements[role] = 'required';
+      } else if (!(role in componentRequirements)) {
+        componentRequirements[role] = 'optional';
+      }
+    }
+    for (const slot of slots) {
+      const role = normalizeRole(slot.item_role) || slot.item_role || '';
+      if (role && !(role in componentRequirements)) {
+        componentRequirements[role] = 'optional';
+      }
+    }
+
     // Build questions object
     return {
       requiredSteps: {
@@ -206,11 +235,10 @@ export function useBOMTemplateQuestions(bomTemplateId: string | null | undefined
         side_channel: hasSideChannelComponent || hasSideChannelBlockCondition,
       },
       selectQuestions: {
-        // Show hardware_color selector if there are auto-select colorizable components
         hardware_color: hasColorizableAutoSelect,
-        // Show drive_type selector if there are drive components
         drive_type: hasDriveManual || hasDriveMotorized,
       },
+      componentRequirements,
     };
   }, [bomTemplateId, components, loading, slots, slotsLoading]);
 }

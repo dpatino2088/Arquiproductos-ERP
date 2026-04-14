@@ -348,7 +348,7 @@ export function generateProposalPDF(
       font: 'helvetica',
       fontSize: 8,
       overflow: 'linebreak',
-      cellPadding: { top: 3, bottom: 3, left: 2, right: 2 },
+      cellPadding: { top: 2, bottom: 2, left: 2, right: 2 },
     },
     headStyles: {
       fillColor: [0, 0, 0],
@@ -360,7 +360,7 @@ export function generateProposalPDF(
     bodyStyles: {
       fontSize: 8,
       textColor: [30, 30, 30],
-      minCellHeight: 20,
+      minCellHeight: 13,
       valign: 'middle',
     },
     columnStyles: {
@@ -373,13 +373,13 @@ export function generateProposalPDF(
         valign: 'middle',
         overflow: 'linebreak',
         fontSize: 8,
-        cellPadding: { top: 5, bottom: 5, left: 3, right: 3 },
-        minCellHeight: 22,
+        cellPadding: { top: 2.5, bottom: 2.5, left: 4, right: 4 },
+        minCellHeight: 13,
       },
       4: { cellWidth: W.productType, halign: 'center', valign: 'middle' },
       5: { cellWidth: W.qty, halign: 'right', valign: 'middle' },
       6: { cellWidth: W.unit, halign: 'right', valign: 'middle' },
-      7: { cellWidth: W.total, halign: 'right', valign: 'middle', cellPadding: { top: 3, bottom: 3, left: 2, right: 2 } },
+      7: { cellWidth: W.total, halign: 'right', valign: 'middle', cellPadding: { top: 2, bottom: 2, left: 5, right: 5 } },
     },
     didParseCell: (data) => {
       if (data.section === 'head') {
@@ -388,7 +388,7 @@ export function generateProposalPDF(
         if (data.column.index === 5 || data.column.index === 6) data.cell.styles.halign = 'right';
         if (data.column.index === 7) {
           data.cell.styles.halign = 'right';
-          data.cell.styles.cellPadding = { top: 2, bottom: 2, left: 2, right: 2 };
+          data.cell.styles.cellPadding = { top: 2, bottom: 2, left: 5, right: 5 };
         }
       }
       if (data.section === 'body' && data.column.index === 3) {
@@ -397,8 +397,7 @@ export function generateProposalPDF(
         const descUsableWidth = Math.max(W.desc - 6, 10);
         const wrapped = doc.splitTextToSize(text, descUsableWidth);
         const lineCount = Math.max(1, wrapped.length);
-        const minHeight = Math.max(22, 10 + lineCount * 5);
-        data.cell.styles.minCellHeight = minHeight;
+        data.cell.styles.minCellHeight = Math.max(13, 5 + Math.min(3, lineCount) * 4);
       }
     },
     didDrawCell: (data) => {

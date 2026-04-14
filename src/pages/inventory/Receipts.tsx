@@ -74,11 +74,10 @@ export default function Receipts() {
   const [receiveQtyMap, setReceiveQtyMap] = useState<Record<string, number>>({});
   const [loadingPOLines, setLoadingPOLines] = useState(false);
 
-  const { purchaseOrders: draftPOs, refetch: refetchDraftPOs } = usePurchaseOrders({ status: 'DRAFT' as PurchaseOrderStatus });
   const { purchaseOrders: openPOs, refetch: refetchOpenPOs } = usePurchaseOrders({ status: 'OPEN' as PurchaseOrderStatus });
   const { purchaseOrders: partialPOs, refetch: refetchPartialPOs } = usePurchaseOrders({ status: 'PARTIAL' as PurchaseOrderStatus });
-  const refetchPOs = useCallback(() => { refetchDraftPOs(); refetchOpenPOs(); refetchPartialPOs(); }, [refetchDraftPOs, refetchOpenPOs, refetchPartialPOs]);
-  const receivablePOs = useMemo(() => [...draftPOs, ...openPOs, ...partialPOs], [draftPOs, openPOs, partialPOs]);
+  const refetchPOs = useCallback(() => { refetchOpenPOs(); refetchPartialPOs(); }, [refetchOpenPOs, refetchPartialPOs]);
+  const receivablePOs = useMemo(() => [...openPOs, ...partialPOs], [openPOs, partialPOs]);
   const { receivePurchaseOrder, isReceiving } = useReceivePurchaseOrder();
 
   useEffect(() => {
@@ -119,8 +118,8 @@ export default function Receipts() {
         refetchPOs();
         return;
       }
-      if (poRow.status !== 'DRAFT' && poRow.status !== 'OPEN' && poRow.status !== 'PARTIAL') {
-        setPoLoadError(`This purchase order is ${poRow.status}. Only DRAFT, OPEN or PARTIAL orders can receive goods.`);
+      if (poRow.status !== 'OPEN' && poRow.status !== 'PARTIAL') {
+        setPoLoadError(`This purchase order is ${poRow.status}. Only OPEN or PARTIAL orders can receive goods.`);
         setPoLines([]);
         refetchPOs();
         return;
@@ -191,22 +190,11 @@ export default function Receipts() {
         .select('id, status')
         .eq('id', selectedPOId)
         .maybeSingle();
-      if (!freshPO || (freshPO.status !== 'DRAFT' && freshPO.status !== 'OPEN' && freshPO.status !== 'PARTIAL')) {
+      if (!freshPO || (freshPO.status !== 'OPEN' && freshPO.status !== 'PARTIAL')) {
         addNotification({ type: 'error', title: 'Cannot receive', message: `Purchase order is ${freshPO?.status ?? 'missing'}. It may have been received or closed since you opened this page.` });
         refetchPOs();
         setPoLines([]);
         return;
-      }
-      if (freshPO.status === 'DRAFT') {
-        const { error: openErr } = await supabase
-          .from('PurchaseOrders')
-          .update({ status: 'OPEN', updated_at: new Date().toISOString() })
-          .eq('id', selectedPOId);
-        if (openErr) {
-          addNotification({ type: 'error', title: 'Cannot receive', message: `Failed to open draft purchase order before receiving: ${openErr.message}` });
-          refetchPOs();
-          return;
-        }
       }
       const selectedPO = receivablePOs.find((po) => po.id === selectedPOId);
       const result = await receivePurchaseOrder(selectedPOId, toReceive);
@@ -420,7 +408,7 @@ export default function Receipts() {
                         const uppu = Number(l.units_per_purchase_unit_snapshot ?? 1);
                         const puNorm = (l.purchase_unit_snapshot ?? l.unit ?? '').toLowerCase();
                         const isPackaged = uppu > 1 && !l.is_roll_snapshot
-                          && !['each','ea','unit','units','pc','pcs'].includes(puNorm);
+                          && !['each','ea','unit','units','pc','pcs','m','m2','ft','yd','in','cm','mm','sqft','sqm'].includes(puNorm);
                         const rcvQty = receiveQtyMap[l.id] ?? l.remaining;
                         const stockQty = isPackaged ? rcvQty * uppu : null;
                         return (
@@ -464,7 +452,7 @@ export default function Receipts() {
                           <td className="px-4 py-3 text-right tabular-nums">
                             {stockQty != null ? (
                               <span className="text-green-700 font-medium">
-                                {stockQty.toFixed(0)} ea
+                                {stockQty.toLocaleString('en-US', { maximumFractionDigits: 2 })} ea
                               </span>
                             ) : (
                               <span className="text-gray-400">—</span>

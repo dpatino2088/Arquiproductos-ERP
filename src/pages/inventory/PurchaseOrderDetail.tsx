@@ -22,7 +22,7 @@ import { useUIStore } from '../../stores/ui-store';
 import { supabase } from '../../lib/supabase/client';
 import { useCostSettings } from '../../hooks/useCosts';
 import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
-import { convertPurchaseQtyToInternal } from '../../lib/inventoryUnitModel';
+import { convertInternalToPurchaseQty, convertPurchaseQtyToInternal, resolveInventoryUnitModel, type MeasureBasis } from '../../lib/inventoryUnitModel';
 import { ArrowLeft, Plus, Trash2, Search, Package, FileDown, Eye, ChevronDown, CheckCircle2, XCircle, Archive } from 'lucide-react';
 import Input from '../../components/ui/Input';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
@@ -67,6 +67,7 @@ interface DraftLine {
   stock_basis_snapshot: 'ea' | 'linear_m' | null;
   purchase_uom_snapshot: string | null;
   units_per_purchase_unit_snapshot: number | null;
+  moq_snapshot: number | null;
   unit_of_measure_snapshot: string | null;
   is_roll_snapshot: boolean;
   roll_width_value_snapshot: number | null;
@@ -85,6 +86,7 @@ interface CatalogSearchResult {
   cost_exw: number | null;
   purchase_unit: string | null;
   units_per_purchase_unit: number | null;
+  moq?: number | null;
   manufacturer_id: string | null;
   is_roll: boolean;
   measure_basis: 'unit' | 'linear' | 'area' | null;
@@ -108,13 +110,36 @@ function fmtCurrency(v: number, currency = 'USD'): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(v);
 }
 
-function formatPurchaseSuffix(purchaseUnit: string | null | undefined, unitsPerPurchase: number | null | undefined): string {
-  const unit = (purchaseUnit ?? '').trim().toLowerCase();
-  const units = Number(unitsPerPurchase ?? 1);
-  if (unit === 'roll') return '(roll)';
-  if (Number.isFinite(units) && units > 1) return `(${units} unit)`;
-  if (unit && unit !== 'each') return `(${unit})`;
-  return '';
+function formatPurchaseUnitSuffix(line: DraftLine): string | null {
+  if (line.is_one_off) return null;
+  const pUnit = (line.purchase_unit_snapshot ?? '').trim().toLowerCase();
+  const upp = Number(line.units_per_purchase_unit_snapshot ?? 1);
+  const uom = (line.unit_of_measure_snapshot ?? line.purchase_uom_snapshot ?? '').trim().toLowerCase();
+
+  if (line.is_roll_snapshot) {
+    const info = formatRollPurchaseInfo(
+      line.roll_length_value_snapshot,
+      line.roll_length_uom_snapshot,
+      line.roll_width_value_snapshot,
+      line.roll_width_uom_snapshot,
+      line.roll_length_uom_snapshot ?? line.unit_of_measure_snapshot
+    );
+    return info || null;
+  }
+
+  if (upp > 1 && pUnit === 'each' && uom) {
+    const pretty = upp % 1 === 0 ? String(upp) : upp.toFixed(4).replace(/\.?0+$/, '');
+    return `(${pretty} ${uom})`;
+  }
+
+  const packagedUnits = new Set(['pack', 'set', 'box', 'case', 'bag', 'bundle', 'carton', 'kit', 'pair']);
+  if (packagedUnits.has(pUnit) && upp > 1) {
+    return `(${upp} und)`;
+  }
+
+  if (pUnit && pUnit !== 'each') return `(${pUnit})`;
+
+  return null;
 }
 
 function formatRollDimensions(
@@ -320,7 +345,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
     received_qty: l.received_qty ?? 0,
     unit_cost: Number(l.unit_cost ?? 0),
     unit: l.unit ?? l.CatalogItems?.unit_of_measure ?? 'ea',
-    description: l.description ?? '',
+    description: l.description ?? l.CatalogItems?.description ?? '',
     is_one_off: l.is_one_off ?? false,
     notes: l.notes ?? '',
     allocation_type: l.allocation_type ?? 'stock',
@@ -333,6 +358,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
     stock_basis_snapshot: l.stock_basis_snapshot ?? ((l.CatalogItems as { measure_basis?: string } | null)?.measure_basis === 'linear' ? 'linear_m' : 'ea'),
     purchase_uom_snapshot: l.purchase_uom_snapshot ?? l.unit ?? (l.CatalogItems as { purchase_unit?: string } | null)?.purchase_unit ?? l.CatalogItems?.unit_of_measure ?? null,
     units_per_purchase_unit_snapshot: Number(l.units_per_purchase_unit_snapshot ?? 1),
+    moq_snapshot: Number(l.moq_snapshot ?? (l.CatalogItems as { moq?: number } | null)?.moq ?? 0),
     unit_of_measure_snapshot: l.unit_of_measure_snapshot ?? l.roll_length_uom_snapshot ?? l.CatalogItems?.unit_of_measure ?? null,
     is_roll_snapshot: Boolean(l.is_roll_snapshot),
     roll_width_value_snapshot: l.roll_width_value_snapshot != null ? Number(l.roll_width_value_snapshot) : (l.CatalogItems as { roll_width_value?: number } | null)?.roll_width_value ?? null,
@@ -391,16 +417,18 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
               const itemIds = prefillItems.map(p => p.catalog_item_id);
               const { data: costData } = await supabase
                 .from('CatalogItems')
-                .select('id, cost_exw, purchase_unit, units_per_purchase_unit, is_roll, unit_of_measure, measure_basis, roll_width_value, roll_width_uom, roll_length_value, roll_length_uom')
+                .select('id, cost_exw, purchase_unit, units_per_purchase_unit, moq, is_roll, unit_of_measure, measure_basis, description, roll_width_value, roll_width_uom, roll_length_value, roll_length_uom')
                 .in('id', itemIds);
               type CostRow = {
                 id: string;
                 cost_exw: number | null;
                 purchase_unit: string | null;
                 units_per_purchase_unit: number | null;
+                moq: number | null;
                 is_roll: boolean;
                 unit_of_measure: string | null;
                 measure_basis: string | null;
+                description: string | null;
                 roll_width_value: number | null;
                 roll_width_uom: string | null;
                 roll_length_value: number | null;
@@ -413,6 +441,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                 const costExw = Number(ci?.cost_exw ?? 0);
                 const pUnit = ci?.purchase_unit ?? p.unit ?? 'each';
                 const unitsPerPU = Number(ci?.units_per_purchase_unit ?? p.units_per_purchase_unit ?? 1);
+                const moq = Number(ci?.moq ?? 0);
                 const isRoll = ci?.is_roll ?? false;
                 const uom = ci?.unit_of_measure ?? 'ea';
                 const rollWidthValue = ci?.roll_width_value != null ? Number(ci.roll_width_value) : null;
@@ -420,29 +449,31 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                 const rollLengthValue = ci?.roll_length_value != null ? Number(ci.roll_length_value) : null;
                 const rollLengthUom = ci?.roll_length_uom ?? null;
                 const purchaseUom = isRoll ? (rollLengthUom ?? uom) : uom;
-                let unitCost: number;
                 const lineUnit: string = pUnit || (isRoll ? 'roll' : 'each');
-                if (isRoll) {
-                  unitCost = costExw;
-                } else if (pUnit !== 'each' && unitsPerPU > 1) {
-                  unitCost = costExw * unitsPerPU;
-                } else {
-                  unitCost = costExw;
-                }
-                const measureBasis = ci?.measure_basis as string | null;
-                const purchaseMode: 'unit_packaged' | 'linear_direct' | 'roll' = isRoll ? 'roll' : (measureBasis === 'linear' ? 'linear_direct' : 'unit_packaged');
-                const stockBasis: 'ea' | 'linear_m' = measureBasis === 'linear' ? 'linear_m' : 'ea';
+                const measureBasis = (ci?.measure_basis ?? 'unit') as MeasureBasis;
+                const model = resolveInventoryUnitModel({ isRoll, measureBasis, purchaseUnit: pUnit });
+                const purchaseMode = model.purchaseMode;
+                const stockBasis = model.stockBasis;
                 const purchaseUomSnap = purchaseUom;
+                const unitCost = convertInternalToPurchaseQty({
+                  internalQty: 1,
+                  purchaseMode,
+                  purchaseUnit: pUnit || 'each',
+                  unitsPerPurchaseUnit: unitsPerPU,
+                  rollLengthValue,
+                  rollLengthUom,
+                }).unitCost(costExw);
+                const defaultQty = Math.max(1, Number(p.qty ?? 0), moq > 0 ? moq : 0);
                 return {
                   tempId: crypto.randomUUID(),
                   catalog_item_id: p.catalog_item_id,
                   sku: p.sku,
                   name: p.name,
-                  ordered_qty: p.qty,
+                  ordered_qty: defaultQty,
                   received_qty: 0,
                   unit_cost: unitCost,
                   unit: lineUnit,
-                  description: '',
+                  description: ci?.description ?? '',
                   is_one_off: false,
                   notes: '',
                   allocation_type: p.manufacturing_order_id ? 'manufacturing_order' as const : 'stock' as const,
@@ -453,6 +484,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                   stock_basis_snapshot: stockBasis,
                   purchase_uom_snapshot: purchaseUomSnap,
                   units_per_purchase_unit_snapshot: unitsPerPU,
+                  moq_snapshot: moq,
                   unit_of_measure_snapshot: purchaseUom,
                   is_roll_snapshot: isRoll,
                   roll_width_value_snapshot: rollWidthValue,
@@ -513,7 +545,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
     const firstToken = tokens[0];
     let q = supabase
       .from('CatalogItems')
-      .select('id, sku, name, description, collection_name, variant_name, cost_exw, purchase_unit, units_per_purchase_unit, manufacturer_id, is_roll, unit_of_measure, roll_width_value, roll_width_uom, roll_length_value, roll_length_uom')
+      .select('id, sku, name, description, collection_name, variant_name, cost_exw, purchase_unit, units_per_purchase_unit, moq, manufacturer_id, is_roll, unit_of_measure, roll_width_value, roll_width_uom, roll_length_value, roll_length_uom')
       .eq('organization_id', activeOrganizationId)
       .eq('is_active', true)
       .or(`sku.ilike.%${firstToken}%,name.ilike.%${firstToken}%`);
@@ -568,6 +600,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
     let costExw = item.cost_exw != null ? Number(item.cost_exw) : 0;
     let pUnit = item.purchase_unit ?? 'each';
     let unitsPerPU = Number(item.units_per_purchase_unit ?? 1);
+    let moq = Number((item as { moq?: number | null }).moq ?? 0);
     let isRoll = item.is_roll ?? false;
     let uom = item.unit_of_measure ?? 'ea';
     const rollWidthValue = item.roll_width_value != null ? Number(item.roll_width_value) : 0;
@@ -583,6 +616,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
     if (costExw === 0 || !item.purchase_unit) {
       pUnit = info.purchase_unit;
       unitsPerPU = info.units_per_purchase_unit;
+      moq = info.moq;
       uom = info.unit_of_measure;
     }
     purchaseMode = info.purchase_mode;
@@ -590,33 +624,27 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
     purchaseUomSnap = info.purchase_uom;
     const purchaseUom = isRoll ? (rollLengthUom ?? uom) : uom;
 
-    let unitCost: number;
     const lineUnit: string = pUnit || (isRoll ? 'roll' : 'each');
-
-    if (isRoll && lineUnit === 'roll' && rollLengthValue > 0) {
-      unitCost = costExw * rollLengthValue;
-    } else if (isRoll) {
-      unitCost = costExw;
-    } else if (pUnit !== 'each' && unitsPerPU > 1) {
-      // Pack/box/case: cost per pack = cost_per_ea x units_per_pack
-      unitCost = costExw * unitsPerPU;
-    } else {
-      // Standard item or linear (tube, etc.): use unit_of_measure
-      unitCost = costExw;
-    }
+    const unitCost = convertInternalToPurchaseQty({
+      internalQty: 1,
+      purchaseMode,
+      purchaseUnit: pUnit || 'each',
+      unitsPerPurchaseUnit: unitsPerPU,
+      rollLengthValue,
+      rollLengthUom,
+    }).unitCost(costExw);
+    const defaultQty = Math.max(1, moq > 0 ? moq : 0);
 
     setDraftLines(prev => [...prev, {
       tempId: crypto.randomUUID(),
       catalog_item_id: item.id,
       sku: item.sku,
       name: item.name,
-      ordered_qty: 1,
+      ordered_qty: defaultQty,
       received_qty: 0,
       unit_cost: unitCost,
       unit: lineUnit,
-      description: isRoll && rollWidthValue > 0
-        ? `Width: ${rollWidthValue}${rollWidthUom ? ` ${rollWidthUom}` : ''}`
-        : '',
+      description: item.description ?? '',
       is_one_off: false,
       notes: '',
       allocation_type: 'stock',
@@ -627,6 +655,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
       stock_basis_snapshot: stockBasis,
       purchase_uom_snapshot: purchaseUomSnap,
       units_per_purchase_unit_snapshot: unitsPerPU,
+      moq_snapshot: moq,
       unit_of_measure_snapshot: purchaseUom,
       is_roll_snapshot: isRoll,
       roll_width_value_snapshot: rollWidthValue > 0 ? rollWidthValue : null,
@@ -660,6 +689,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
       stock_basis_snapshot: null,
       purchase_uom_snapshot: null,
       units_per_purchase_unit_snapshot: null,
+      moq_snapshot: null,
       unit_of_measure_snapshot: null,
       is_roll_snapshot: false,
       roll_width_value_snapshot: null,
@@ -712,6 +742,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
           stock_basis_snapshot: l.stock_basis_snapshot ?? null,
           purchase_uom_snapshot: l.purchase_uom_snapshot ?? null,
           units_per_purchase_unit_snapshot: l.units_per_purchase_unit_snapshot,
+          moq_snapshot: l.moq_snapshot,
           unit_of_measure_snapshot: l.unit_of_measure_snapshot,
           is_roll_snapshot: l.is_roll_snapshot,
           roll_width_value_snapshot: l.roll_width_value_snapshot,
@@ -748,6 +779,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
           stock_basis_snapshot: l.stock_basis_snapshot ?? null,
           purchase_uom_snapshot: l.purchase_uom_snapshot ?? null,
           units_per_purchase_unit_snapshot: l.units_per_purchase_unit_snapshot,
+          moq_snapshot: l.moq_snapshot,
           unit_of_measure_snapshot: l.unit_of_measure_snapshot,
           is_roll_snapshot: l.is_roll_snapshot,
           roll_width_value_snapshot: l.roll_width_value_snapshot,
@@ -1466,9 +1498,9 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                   <th className="px-4 py-3 text-left font-medium text-gray-700 text-xs w-8">#</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-700 text-xs w-32">SKU</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-700 text-xs">Description</th>
-                  <th className="px-4 py-3 text-center font-medium text-gray-700 text-xs w-[107px]">Ordered</th>
-                  <th className="px-4 py-3 text-center font-medium text-gray-700 text-xs w-16">Unit</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700 text-xs w-36">Allocated To</th>
+                  <th className="px-5 py-3 text-center font-medium text-gray-700 text-xs w-[118px]"><span className="relative left-[35px] inline-block">Ordered</span></th>
+                  <th className="px-5 py-3 text-center font-medium text-gray-700 text-xs w-[76px]"><span className="relative left-[35px] inline-block">Unit</span></th>
+                  <th className="px-5 py-3 text-center font-medium text-gray-700 text-xs w-[150px]"><span className="relative left-[10px] inline-block">Allocated To</span></th>
                   {!isCreateMode && <th className="px-4 py-3 text-right font-medium text-gray-700 text-xs w-20">Received</th>}
                   <th className="px-4 py-3 text-center font-medium text-gray-700 text-xs w-[107px]">Unit Cost</th>
                   <th className="px-4 py-3 text-right font-medium text-gray-700 text-xs w-28">Line Total</th>
@@ -1574,6 +1606,10 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                   </tr>
                 ) : displayLines.map((line, idx) => {
                   const lineTotal = line.ordered_qty * line.unit_cost;
+                  const moq = Math.max(0, Number(line.moq_snapshot ?? 0));
+                  const belowMoq = moq > 0 && Number(line.ordered_qty) < moq;
+                  const internalM = lineInternalQtyM(line.ordered_qty, line);
+                  const purchaseSuffix = formatPurchaseUnitSuffix(line);
                   return (
                     <tr key={line.tempId} className="border-t hover:bg-gray-50">
                       <td className="px-4 py-3 text-center text-gray-400 tabular-nums">{idx + 1}</td>
@@ -1591,45 +1627,44 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                           />
                         ) : (
                           <span className="text-gray-700">
-                            {line.is_one_off
-                              ? line.description
-                              : `${line.name}${
-                                line.is_roll_snapshot
-                                  ? ` ${formatRollPurchaseInfo(
-                                    line.roll_length_value_snapshot,
-                                    line.roll_length_uom_snapshot,
-                                    line.roll_width_value_snapshot,
-                                    line.roll_width_uom_snapshot,
-                                    line.roll_length_uom_snapshot ?? line.unit_of_measure_snapshot
-                                  )}`
-                                  : `${formatPurchaseSuffix(line.purchase_unit_snapshot, line.units_per_purchase_unit_snapshot)
-                                    ? ` ${formatPurchaseSuffix(line.purchase_unit_snapshot, line.units_per_purchase_unit_snapshot)}`
-                                    : ''}`
-                              }`}
+                            {line.is_one_off ? line.description : (line.description?.trim() || line.name)}
+                            {!line.is_one_off && purchaseSuffix && (
+                              <span className="text-gray-400 ml-1 text-xs">{purchaseSuffix}</span>
+                            )}
                           </span>
                         )}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        {canEdit ? (
-                          <input
-                            type="number"
-                            min={line.received_qty}
-                            step="0.01"
-                            value={line.ordered_qty}
-                            onChange={e => updateLine(line.tempId, 'ordered_qty', Math.max(line.received_qty, parseFloat(e.target.value) || 0))}
-                            className="w-full min-w-[77px] px-2 py-1 border border-gray-200 rounded text-sm text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none focus:outline-none focus:ring-2 focus:ring-primary/20"
-                          />
-                        ) : (
-                          <span className="tabular-nums inline-block text-center w-full">
-                            {Number(line.ordered_qty).toFixed(2)}
-                            {(() => {
-                              const internalM = lineInternalQtyM(line.ordered_qty, line);
-                              return internalM != null ? <span className="text-xs text-gray-500 block">→ {internalM.toFixed(2)} m</span> : null;
-                            })()}
-                          </span>
+                        {!line.is_one_off && moq > 0 && (
+                          <p className="mt-0.5 text-[11px] text-gray-500">
+                            MOQ {moq % 1 === 0 ? moq : moq.toFixed(2)} {line.purchase_unit_snapshot}
+                          </p>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-center">
+                      <td className="px-5 py-3 text-center relative w-[118px]">
+                        <div className="relative left-[35px]">
+                          {belowMoq && (
+                            <span className="absolute -left-[74px] top-1/2 -translate-y-1/2 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-amber-50 text-amber-600 border border-amber-200 leading-tight whitespace-nowrap">
+                              Below MOQ
+                            </span>
+                          )}
+                          {canEdit ? (
+                            <input
+                              type="number"
+                              min={line.received_qty}
+                              step="0.01"
+                              value={line.ordered_qty}
+                              onChange={e => updateLine(line.tempId, 'ordered_qty', Math.max(line.received_qty, parseFloat(e.target.value) || 0))}
+                              className="w-full min-w-[77px] px-2 py-1 border border-gray-200 rounded text-sm text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none focus:outline-none focus:ring-2 focus:ring-primary/20"
+                            />
+                          ) : (
+                            <span className="tabular-nums inline-block text-center w-full">
+                              {Number(line.ordered_qty).toFixed(2)}
+                              {internalM != null ? <span className="text-xs text-gray-500 block">→ {internalM.toFixed(2)} m</span> : null}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-5 py-3 text-center w-[76px]">
+                        <div className="relative left-[35px]">
                         {canEdit && line.is_roll_snapshot && line.unit_of_measure_snapshot ? (
                           <SelectShadcn
                             value={line.unit}
@@ -1694,10 +1729,11 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                             {line.unit || 'ea'}
                           </span>
                         )}
+                        </div>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-5 py-3 w-[150px] text-center">
                         {canEdit ? (
-                          <div className="relative">
+                          <div className="relative inline-block text-left left-[10px]">
                             {line.allocation_type === 'manufacturing_order' && line.allocation_mo_id ? (
                               <div className="flex items-center gap-1">
                                 <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-purple-50 text-purple-700 truncate max-w-[110px]">

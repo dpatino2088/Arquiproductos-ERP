@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { router } from '../../lib/router';
 import { formatDate } from '../../lib/utils';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
@@ -10,7 +10,7 @@ import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { usePermissions, useGranularAccess, useManufacturingAccess } from '../../hooks/usePermissions';
-import { Search, Eye, Archive, RotateCcw, SortAsc, SortDesc } from 'lucide-react';
+import { Search, Eye, Archive, RotateCcw } from 'lucide-react';
 import StatusBadge from '../../components/shared/StatusBadge';
 import StatusTabs from '../../components/shared/StatusTabs';
 
@@ -22,8 +22,10 @@ interface ManufacturingOrderItem {
   id: string;
   manufacturingOrderNo: string;
   status: ManufacturingOrderStatus | string | undefined;
+  salesOrderId: string | null;
   saleOrderNo: string;
   dealerName: string;
+  customerName: string;
   archived?: boolean;
   scheduledStartDate?: string | null;
   scheduledEndDate?: string | null;
@@ -61,6 +63,7 @@ export default function ManufacturingOrders() {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [statusTab, setStatusTab] = useState('all');
   const [materialReadinessMap, setMaterialReadinessMap] = useState<Record<string, { status: string; has_shortage: boolean }>>({});
+  const [moLineCountMap, setMoLineCountMap] = useState<Record<string, number>>({});
 
   const nonArchivedOrders = useMemo(
     () => manufacturingOrders.filter((mo) => !mo.archived),
@@ -89,7 +92,6 @@ export default function ManufacturingOrders() {
     { label: 'Reviewed', value: 'confirmed', count: moStatusCounts.confirmed || 0 },
     { label: 'Procurement', value: 'procurement', count: moStatusCounts.procurement || 0 },
     { label: 'Material Ready', value: 'materials_ready', count: moStatusCounts.materials_ready || 0 },
-    { label: 'Planned', value: 'planned', count: moStatusCounts.planned || 0 },
     { label: 'In Production', value: 'in_production', count: moStatusCounts.in_production || 0 },
     { label: 'Quality Check', value: 'quality_check', count: moStatusCounts.quality_check || 0 },
     { label: 'Ready for Delivery', value: 'ready_for_pickup', count: moStatusCounts.ready_for_pickup || 0 },
@@ -120,7 +122,7 @@ export default function ManufacturingOrders() {
     };
   }, [registerSubmodules, clearSubmoduleNav, filteredSubmodules]);
 
-  // Transform manufacturing orders to display format - INCLUDE all statuses including 'planned'
+  // Transform manufacturing orders to display format
   const displayOrders: ManufacturingOrderItem[] = useMemo(() => {
     if (import.meta.env.DEV) {
       console.log('🔍 ManufacturingOrders: Total MOs fetched:', manufacturingOrders.length);
@@ -132,8 +134,10 @@ export default function ManufacturingOrders() {
         id: mo.id,
         manufacturingOrderNo: mo.manufacturing_order_no,
         status: mo.status,
+        salesOrderId: mo.sales_order_id ?? null,
         saleOrderNo: mo.SalesOrders?.sales_order_no ?? 'N/A',
         dealerName: mo.SalesOrders?.Dealers?.dealer_name ?? 'N/A',
+        customerName: mo.SalesOrders?.DirectoryCustomers?.customer_name ?? '',
         archived: !!mo.archived,
         scheduledStartDate: mo.planned_start_at ?? null,
         scheduledEndDate: mo.planned_end_at ?? null,
@@ -210,6 +214,7 @@ export default function ManufacturingOrders() {
 
   const totalPages = Math.ceil(filteredAndSorted.length / itemsPerPage);
 
+
   const paginatedIds = useMemo(() => paginated.map((mo) => mo.id).join(','), [paginated]);
 
   // Fetch material readiness for current page (batch)
@@ -230,6 +235,33 @@ export default function ManufacturingOrders() {
       }
       setMaterialReadinessMap(map);
     });
+  }, [activeOrganizationId, paginatedIds, paginated.length]);
+
+  // Fetch MO line counts for current page
+  useEffect(() => {
+    if (!activeOrganizationId || paginated.length === 0) {
+      setMoLineCountMap({});
+      return;
+    }
+    const moIds = paginated.map((mo) => mo.id);
+    supabase
+      .from('ManufacturingOrderLines')
+      .select('manufacturing_order_id')
+      .in('manufacturing_order_id', moIds)
+      .eq('deleted', false)
+      .then((res: { data: { manufacturing_order_id: string }[] | null; error: unknown | null }) => {
+        const { data, error: err } = res;
+        if (err || !data) {
+          setMoLineCountMap({});
+          return;
+        }
+        const counts: Record<string, number> = {};
+        for (const row of data) {
+          const moId = (row as any).manufacturing_order_id;
+          counts[moId] = (counts[moId] || 0) + 1;
+        }
+        setMoLineCountMap(counts);
+      });
   }, [activeOrganizationId, paginatedIds, paginated.length]);
 
   // Handlers
@@ -419,129 +451,107 @@ export default function ManufacturingOrders() {
         </div>
       ) : (
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-          <div className="table-fit-wrapper">
-            <table className="table-fit">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="py-3 px-6 text-left">
-                    <button
-                      onClick={() => handleSort('manufacturing_order_no')}
-                      className="flex items-center gap-1 text-xs font-medium text-gray-700 hover:text-gray-900"
-                    >
-                      MO No
-                      {sortBy === 'manufacturing_order_no' && (
-                        sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />
-                      )}
-                    </button>
-                  </th>
-                  <th className="py-3 px-6 text-left">
-                    <button
-                      onClick={() => handleSort('status')}
-                      className="flex items-center gap-1 text-xs font-medium text-gray-700 hover:text-gray-900"
-                    >
-                      Status
-                      {sortBy === 'status' && (
-                        sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />
-                      )}
-                    </button>
-                  </th>
-                  <th className="py-3 px-6 text-left text-xs font-medium text-gray-700">Materials</th>
-                  <th className="py-3 px-6 text-left text-xs font-medium text-gray-700">Sale Order</th>
-                  <th className="py-3 px-6 text-left text-xs font-medium text-gray-700">Dealer</th>
-                  <th className="py-3 px-6 text-left">
-                    <button
-                      onClick={() => handleSort('planned_start_at')}
-                      className="flex items-center gap-1 text-xs font-medium text-gray-700 hover:text-gray-900"
-                    >
-                      Scheduled Start
-                      {sortBy === 'planned_start_at' && (
-                        sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />
-                      )}
-                    </button>
-                  </th>
-                  <th className="py-3 px-6 text-left">
-                    <button
-                      onClick={() => handleSort('priority')}
-                      className="flex items-center gap-1 text-xs font-medium text-gray-700 hover:text-gray-900"
-                    >
-                      Priority
-                      {sortBy === 'priority' && (
-                        sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />
-                      )}
-                    </button>
-                  </th>
-                  <th className="py-3 px-6 text-right text-xs font-medium text-gray-700">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {paginated.map((mo) => (
+          <table className="w-full">
+            <thead className="bg-gray-50 border-b border-gray-200">
+              <tr>
+                <th
+                  className="py-3 px-4 text-left text-xs font-medium text-gray-500 cursor-pointer select-none hover:text-gray-700"
+                  onClick={() => handleSort('manufacturing_order_no')}
+                >
+                  MO # {sortBy === 'manufacturing_order_no' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </th>
+                <th
+                  className="py-3 px-3 text-left text-xs font-medium text-gray-500 cursor-pointer select-none hover:text-gray-700"
+                  onClick={() => handleSort('sale_order_no')}
+                >
+                  Sale Order {sortBy === 'sale_order_no' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </th>
+                <th
+                  className="py-3 px-3 text-left text-xs font-medium text-gray-500 cursor-pointer select-none hover:text-gray-700"
+                  onClick={() => handleSort('status')}
+                >
+                  Status {sortBy === 'status' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </th>
+                <th className="py-3 px-3 text-left text-xs font-medium text-gray-500">Material</th>
+                <th className="py-3 px-3 text-left text-xs font-medium text-gray-500">Dealer</th>
+                <th className="py-3 px-3 text-center text-xs font-medium text-gray-500">Lines</th>
+                <th
+                  className="py-3 px-3 text-left text-xs font-medium text-gray-500 cursor-pointer select-none hover:text-gray-700"
+                  onClick={() => handleSort('priority')}
+                >
+                  Priority {sortBy === 'priority' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </th>
+                <th
+                  className="py-3 px-3 text-left text-xs font-medium text-gray-500 cursor-pointer select-none hover:text-gray-700"
+                  onClick={() => handleSort('planned_start_at')}
+                >
+                  Created {sortBy === 'planned_start_at' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </th>
+                <th className="py-3 px-3 text-center text-xs font-medium text-gray-500">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {paginated.map((mo) => {
+                const moStatus = (mo.status || 'draft').toString();
+                const showMaterials = ['draft', 'confirmed', 'procurement', 'materials_ready', 'in_production', 'completed', 'quality_check', 'ready_for_pickup'].includes(moStatus);
+                const readiness = materialReadinessMap[mo.id];
+                const lineCount = moLineCountMap[mo.id] ?? 0;
+
+                return (
                   <tr
                     key={mo.id}
-                    className="hover:bg-gray-50 cursor-pointer transition-colors"
+                    className="border-b border-gray-100 hover:bg-gray-50/60 cursor-pointer transition-colors"
                     onClick={() => handleView(mo.id)}
                   >
-                    <td className="py-4 px-6 text-sm font-medium text-gray-900">
-                      {mo.manufacturingOrderNo}
+                    <td className="py-3 px-4 text-sm font-semibold text-gray-900">{mo.manufacturingOrderNo}</td>
+                    <td className="py-3 px-3 text-sm text-gray-600">{mo.saleOrderNo}</td>
+                    <td className="py-3 px-3">
+                      <StatusBadge status={moStatus} type="manufacturing" size="sm" />
                     </td>
-                    <td className="py-4 px-6">
-                      <StatusBadge status={(mo.status || 'draft').toString()} type="manufacturing" size="sm" />
-                    </td>
-                    <td className="py-4 px-6">
-                      {materialReadinessMap[mo.id] ? (
-                        materialReadinessMap[mo.id].has_shortage ? (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-800" title="Material demand not fully covered">Incomplete</span>
-                        ) : (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700">OK</span>
-                        )
-                      ) : (
-                        <span className="text-gray-400 text-xs">—</span>
+                    <td className="py-3 px-3">
+                      {showMaterials && readiness && (
+                        readiness.has_shortage
+                          ? <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-amber-50 text-amber-700">Shortage</span>
+                          : <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-green-50 text-green-700">OK</span>
                       )}
                     </td>
-                    <td className="py-4 px-6 text-sm text-gray-700">{mo.saleOrderNo}</td>
-                    <td className="py-4 px-6 text-sm text-gray-700">{mo.dealerName}</td>
-                    <td className="py-4 px-6 text-sm text-gray-700">
-                      {mo.scheduledStartDate
-                        ? formatDate(mo.scheduledStartDate)
-                        : 'Not scheduled'}
-                    </td>
-                    <td className="py-4 px-6">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getPriorityBadgeColor(mo.priority)}`}>
-                        {(mo.priority ?? 'Normal').toString()}
+                    <td className="py-3 px-3 text-sm text-gray-600">{mo.dealerName}</td>
+                    <td className="py-3 px-3 text-center">
+                      <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-[11px] font-medium bg-gray-100 text-gray-600">
+                        {lineCount}
                       </span>
                     </td>
-                    <td className="py-4 px-6 text-right">
-                      <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          onClick={() => handleView(mo.id)}
-                          className="p-1.5 hover:bg-gray-100 rounded transition-colors"
-                          title="View"
-                        >
-                          <Eye className="w-4 h-4 text-gray-600" />
+                    <td className="py-3 px-3">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium ${getPriorityBadgeColor(mo.priority)}`}>
+                        {(mo.priority || 'normal').charAt(0).toUpperCase() + (mo.priority || 'normal').slice(1)}
+                      </span>
+                    </td>
+                    <td className="py-3 px-3 text-sm text-gray-500 tabular-nums">{formatDate(mo.createdAt)}</td>
+                    <td className="py-3 px-3 text-center">
+                      <div className="flex items-center justify-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                        <button onClick={() => handleView(mo.id)} className="p-1 hover:bg-gray-200/60 rounded transition-colors" title="View">
+                          <Eye className="w-3.5 h-3.5 text-gray-400" />
                         </button>
                         {canWrite && canArchiveMO && (
                           <button
-                            onClick={() => mo.archived
-                              ? handleRestore(mo.id, mo.manufacturingOrderNo)
-                              : handleArchive(mo.id, mo.manufacturingOrderNo)}
-                            className="p-1.5 hover:bg-gray-100 rounded transition-colors"
+                            onClick={() => mo.archived ? handleRestore(mo.id, mo.manufacturingOrderNo) : handleArchive(mo.id, mo.manufacturingOrderNo)}
+                            className="p-1 hover:bg-gray-200/60 rounded transition-colors"
                             title={mo.archived ? 'Restore' : 'Archive'}
                           >
-                            {mo.archived
-                              ? <RotateCcw className="w-4 h-4 text-gray-600" />
-                              : <Archive className="w-4 h-4 text-gray-600" />}
+                            {mo.archived ? <RotateCcw className="w-3.5 h-3.5 text-gray-400" /> : <Archive className="w-3.5 h-3.5 text-gray-400" />}
                           </button>
                         )}
                       </div>
                     </td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                );
+              })}
+            </tbody>
+          </table>
 
           {/* Pagination */}
           {totalPages > 1 && (
-            <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
+            <div className="px-5 py-3 border-t border-gray-200 flex items-center justify-between bg-gray-50/50">
               <div className="flex items-center gap-2">
                 <span className="text-sm text-gray-700">Show:</span>
                 <select

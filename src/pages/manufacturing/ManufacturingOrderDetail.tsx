@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { router } from '../../lib/router';
 import { supabase } from '../../lib/supabase/client';
 import { useManufacturingOrder, useManufacturingMaterials, useTransitionMOStatus, useMoMaterialReadiness } from '../../hooks/useManufacturing';
@@ -15,7 +15,6 @@ import DetailPageLayout from '../../components/shared/DetailPageLayout';
 import StatusBadge from '../../components/shared/StatusBadge';
 import MaterialsTab from '../../components/manufacturing/tabs/MaterialsTab';
 import { CheckCircle, Circle, Clock } from 'lucide-react';
-import ScheduleTab from '../../components/manufacturing/tabs/ScheduleTab';
 import NotesTab from '../../components/manufacturing/tabs/NotesTab';
 import AttachmentsTab from '../../components/manufacturing/tabs/AttachmentsTab';
 import WorkOrdersTab from './WorkOrdersTab';
@@ -83,14 +82,21 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const canCreatePO = can('inventory.purchase_orders.write');
   const { user } = useAuth();
 
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('tab') || 'overview';
+  });
   const [actionsOpen, setActionsOpen] = useState(false);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [moLines, setMoLines] = useState<MOLine[]>([]);
   const [lineReadinessBySoLineId, setLineReadinessBySoLineId] = useState<Map<string, MOLineReadiness>>(new Map());
+  const autoPromotingLinesRef = useRef(false);
   const [cancelReason, setCancelReason] = useState('');
   const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [advancingLineId, setAdvancingLineId] = useState<string | null>(null);
   const [taskProgress, setTaskProgress] = useState<{ total: number; completed: number; inProgress: number }>({ total: 0, completed: 0, inProgress: 0 });
+  const [woLineIds, setWoLineIds] = useState<Set<string>>(new Set());
+  const [siblingMOs, setSiblingMOs] = useState<{ id: string; manufacturing_order_no: string }[]>([]);
   const [financialSummary, setFinancialSummary] = useState<{
     total_invoiced: number;
     total_paid: number;
@@ -129,20 +135,27 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const canReadLines = can('manufacturing.mo.lines.read');
   const canReadMaterials = can('manufacturing.mo.materials.read');
   const canReadWorkOrders = can('manufacturing.mo.work_orders.read');
-  const canReadSchedule = can('manufacturing.mo.schedule.read');
   const canReadNotes = can('manufacturing.mo.notes.read');
   const canReadTimeline = can('manufacturing.mo.timeline.read');
   const canReadAttachments = can('manufacturing.mo.attachments.read');
   const canWriteOverview = can('manufacturing.mo.overview.write');
-  const canWriteSchedule = can('manufacturing.mo.schedule.write');
   const canWriteNotes = can('manufacturing.mo.notes.write');
   const canWriteAttachments = can('manufacturing.mo.attachments.write');
+  const MATERIAL_READY_OR_BEYOND = ['materials_ready', 'in_production', 'completed'];
+  const linesReady = moLines.filter(l => MATERIAL_READY_OR_BEYOND.includes(l.status)).length;
+  const materialTag = moLines.length === 0
+    ? ''
+    : linesReady === moLines.length
+      ? 'Ready'
+      : linesReady > 0
+        ? 'Partial'
+        : 'Material Pending';
+
   const tabs = [
     canReadOverview ? { id: 'overview', label: 'Overview' } : null,
-    canReadLines ? { id: 'lines', label: 'Lines', count: moLines.length } : null,
     canReadMaterials ? { id: 'materials', label: 'Materials', count: materials.length } : null,
+    canReadLines ? { id: 'lines', label: 'Lines', count: moLines.length } : null,
     canReadWorkOrders ? { id: 'work-orders', label: 'Work Orders' } : null,
-    canReadSchedule ? { id: 'schedule', label: 'Schedule' } : null,
     canReadNotes ? { id: 'notes', label: 'Notes' } : null,
     canReadTimeline ? { id: 'timeline', label: 'Timeline', count: timeline.length } : null,
     canReadAttachments ? { id: 'attachments', label: 'Attachments' } : null,
@@ -229,10 +242,11 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       }
     }
 
-    setMoLines(molData.map((m: any) => ({
+    const mappedLines = molData.map((m: any) => ({
       ...m,
       SaleOrderLine: solMap.get(m.sales_order_line_id) ?? null,
-    })));
+    }));
+    setMoLines(mappedLines);
 
     const { data: readinessRows, error: readinessErr } = await supabase.rpc('get_mo_line_material_readiness', {
       p_mo_id: moId,
@@ -248,16 +262,22 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       nextMap.set(row.sales_order_line_id, row);
     });
     setLineReadinessBySoLineId(nextMap);
+
   }, [moId]);
 
   const fetchTaskProgress = useCallback(async () => {
     if (!moId) return;
     const { data } = await supabase
       .from('WorkOrderTasks')
-      .select('status')
+      .select('status, sales_order_line_id')
       .eq('manufacturing_order_id', moId)
       .eq('deleted', false);
     if (data) {
+      const ids = new Set<string>();
+      for (const t of data as Array<{ sales_order_line_id: string | null }>) {
+        if (t.sales_order_line_id) ids.add(t.sales_order_line_id);
+      }
+      setWoLineIds(ids);
       setTaskProgress({
         total: data.length,
         completed: data.filter((t: any) => t.status === 'completed').length,
@@ -265,6 +285,52 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       });
     }
   }, [moId]);
+
+  const realtimeRefreshTimerRef = useRef<number | null>(null);
+  const scheduleRealtimeRefresh = useCallback(() => {
+    if (realtimeRefreshTimerRef.current != null) {
+      window.clearTimeout(realtimeRefreshTimerRef.current);
+    }
+    realtimeRefreshTimerRef.current = window.setTimeout(() => {
+      refetch();
+      fetchMOLines();
+      fetchTimeline();
+      fetchTaskProgress();
+    }, 250);
+  }, [refetch, fetchMOLines, fetchTimeline, fetchTaskProgress]);
+
+  useEffect(() => {
+    if (autoPromotingLinesRef.current) return;
+    const promotable = moLines.filter((l) => {
+      if (!l.sales_order_line_id) return false;
+      if (l.status !== 'reviewed' && l.status !== 'confirmed') return false;
+      const r = lineReadinessBySoLineId.get(l.sales_order_line_id);
+      return r?.readiness_status === 'ok';
+    });
+    if (promotable.length === 0) return;
+
+    autoPromotingLinesRef.current = true;
+    const ids = promotable.map((l) => l.id);
+
+    (async () => {
+      let anyOk = false;
+      for (const id of ids) {
+        const { data, error: rpcErr } = await supabase.rpc('advance_mo_line_status', {
+          p_line_id: id,
+          p_new_status: 'materials_ready',
+        });
+        const result = data as { ok: boolean } | null;
+        if (!rpcErr && result?.ok) anyOk = true;
+      }
+      autoPromotingLinesRef.current = false;
+      if (anyOk) {
+        setMoLines((prev) =>
+          prev.map((l) => (ids.includes(l.id) ? { ...l, status: 'materials_ready' } : l))
+        );
+        refetch();
+      }
+    })();
+  }, [moLines, lineReadinessBySoLineId, refetch]);
 
   const fetchFinancialSummary = useCallback(async () => {
     if (!mo?.sales_order_id) { setFinancialSummary(null); return; }
@@ -308,6 +374,65 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
 
   useEffect(() => { fetchTimeline(); fetchMOLines(); fetchTaskProgress(); }, [fetchTimeline, fetchMOLines, fetchTaskProgress]);
   useEffect(() => { fetchFinancialSummary(); }, [fetchFinancialSummary]);
+  useEffect(() => {
+    if (!moId) return;
+
+    const channel = supabase
+      .channel(`mo-detail-${moId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'ManufacturingOrders',
+          filter: `id=eq.${moId}`,
+        },
+        () => scheduleRealtimeRefresh()
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'ManufacturingOrderLines',
+          filter: `manufacturing_order_id=eq.${moId}`,
+        },
+        () => scheduleRealtimeRefresh()
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'InventoryAllocations',
+          filter: `manufacturing_order_id=eq.${moId}`,
+        },
+        () => scheduleRealtimeRefresh()
+      )
+      .subscribe();
+
+    return () => {
+      if (realtimeRefreshTimerRef.current != null) {
+        window.clearTimeout(realtimeRefreshTimerRef.current);
+        realtimeRefreshTimerRef.current = null;
+      }
+      supabase.removeChannel(channel);
+    };
+  }, [moId, scheduleRealtimeRefresh]);
+
+  useEffect(() => {
+    if (!mo?.sales_order_id || !moId) { setSiblingMOs([]); return; }
+    supabase
+      .from('ManufacturingOrders')
+      .select('id, manufacturing_order_no')
+      .eq('sales_order_id', mo.sales_order_id)
+      .eq('deleted', false)
+      .neq('id', moId)
+      .order('manufacturing_order_no', { ascending: true })
+      .then((res: { data: { id: string; manufacturing_order_no: string }[] | null }) => {
+        setSiblingMOs(res.data ?? []);
+      });
+  }, [mo?.sales_order_id, moId]);
 
   const handleTransition = useCallback(async (newStatus: string) => {
     if (!moId || !user?.id) return;
@@ -377,26 +502,6 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       };
 
       const rawMessage = extractErrorMessage(e);
-      const normalized = rawMessage.toLowerCase();
-
-      // Compatibility fallback for environments where "confirmed" is not yet available in DB enum/policy.
-      if (newStatus === 'confirmed') {
-        try {
-          await transitionStatus(moId, 'planned', user.id, user.name);
-          addNotification({
-            type: 'success',
-            title: 'Status Updated',
-            message: 'MO moved to planned (reviewed).',
-          });
-          refetch();
-          fetchTimeline();
-          return;
-        } catch (fallbackError: unknown) {
-          const fallbackMessage = extractErrorMessage(fallbackError);
-          addNotification({ type: 'error', title: 'Error', message: fallbackMessage });
-          return;
-        }
-      }
 
       addNotification({ type: 'error', title: 'Error', message: rawMessage });
     }
@@ -414,6 +519,51 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       addNotification({ type: 'error', title: 'Error', message: e instanceof Error ? e.message : 'Failed to cancel MO' });
     }
   }, [moId, user, transitionStatus, refetch, fetchTimeline, addNotification]);
+
+  const LINE_STATUS_FLOW: Record<string, { next: string; label: string }> = {
+    draft:         { next: 'reviewed',  label: 'Review' },
+    in_production: { next: 'completed', label: 'Complete' },
+  };
+
+  const handleAdvanceLine = useCallback(async (lineId: string, lineStatus: string) => {
+    const flow = LINE_STATUS_FLOW[lineStatus];
+    if (!flow) return;
+    setAdvancingLineId(lineId);
+    const { data, error: rpcErr } = await supabase.rpc('advance_mo_line_status', {
+      p_line_id: lineId,
+      p_new_status: flow.next,
+    });
+    setAdvancingLineId(null);
+    const result = data as { ok: boolean; error?: string; status?: string } | null;
+    if (rpcErr || !result?.ok) {
+      addNotification({ type: 'error', title: 'Cannot advance', message: result?.error ?? rpcErr?.message ?? 'Unknown error' });
+      return;
+    }
+    addNotification({ type: 'success', title: 'Line updated', message: `Line moved to ${result.status}` });
+    setMoLines(prev => prev.map(l => l.id === lineId ? { ...l, status: result.status! } : l));
+    refetch();
+  }, [addNotification, refetch]);
+
+  const handleCreateWO = useCallback(async (line: MOLine) => {
+    if (!moId || !line.sales_order_line_id) return;
+    setAdvancingLineId(line.id);
+
+    const { data, error: rpcErr } = await supabase.rpc('advance_mo_line_status', {
+      p_line_id: line.id,
+      p_new_status: 'in_production',
+    });
+    setAdvancingLineId(null);
+    const result = data as { ok: boolean; error?: string; status?: string; wo_generated?: boolean } | null;
+    if (rpcErr || !result?.ok) {
+      addNotification({ type: 'error', title: 'Cannot create WO', message: result?.error ?? rpcErr?.message ?? 'Unknown error' });
+      return;
+    }
+    addNotification({ type: 'success', title: 'Work Order created', message: 'Line moved to In Production' });
+    setMoLines(prev => prev.map(l => l.id === line.id ? { ...l, status: 'in_production' } : l));
+    refetch();
+    fetchTaskProgress();
+  }, [moId, addNotification, refetch, fetchTaskProgress]);
+
 
   if (!moId) {
     return (
@@ -447,9 +597,28 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     );
   }
 
-  const status = mo.status;
+  const derivedStatusFromLines = (() => {
+    if (moLines.length === 0) return null;
+    const all = moLines.length;
+    const completed = moLines.filter(l => l.status === 'completed').length;
+    const inProd = moLines.filter(l => l.status === 'in_production').length;
+    const matReady = moLines.filter(l => l.status === 'materials_ready').length;
+    const confirmed = moLines.filter(l => l.status === 'confirmed').length;
+    const reviewed = moLines.filter(l => l.status === 'reviewed').length;
+    const cancelled = moLines.filter(l => l.status === 'cancelled').length;
+
+    if (cancelled === all) return 'cancelled';
+    if (completed + cancelled === all) return 'completed';
+    if (inProd > 0) return 'in_production';
+    if (matReady + inProd + completed + cancelled === all) return 'materials_ready';
+    if (confirmed + matReady + inProd + completed + cancelled === all) return 'confirmed';
+    if (reviewed + confirmed + matReady + inProd + completed + cancelled === all) return 'procurement';
+    return 'draft';
+  })();
+  const status = derivedStatusFromLines ?? mo.status;
   const so = mo.SalesOrders;
   const customer = so?.DirectoryCustomers?.customer_name ?? '—';
+  const dealer = so?.Dealers?.dealer_name ?? '—';
 
   const materialsIncomplete = materialReadiness?.hasShortage === true;
   const materialsAllocatedComplete = (() => {
@@ -472,7 +641,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     return true;
   })();
   const canSetMaterialsReady = !materialsIncomplete && materialsAllocatedComplete;
-  const materialDemandEnabledStatuses = ['confirmed', 'procurement', 'materials_ready', 'planned', 'in_production'] as const;
+  const materialDemandEnabledStatuses = ['confirmed', 'procurement', 'materials_ready', 'in_production'] as const;
   const canViewMaterialDemand = materialDemandEnabledStatuses.includes(status as (typeof materialDemandEnabledStatuses)[number]);
   const paymentComplete = financialSummary ? financialSummary.balance_due <= 0 : false;
   const hasDeliveryOverride = financialSummary?.has_delivery_override === true;
@@ -483,50 +652,10 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     financialSummary.balance_due > 0 ? 'partial' : 'paid';
 
   const actionItems: { label: string; onClick: () => void; danger?: boolean; disabled?: boolean; title?: string }[] = [];
-  if (isInternal && canWriteOverview && status !== 'cancelled' && status !== 'delivered' && status !== 'completed') {
-    if (status === 'draft') {
-      actionItems.push({
-        label: 'Mark as Reviewed',
-        onClick: () => handleTransition('confirmed'),
-      });
+  if (isInternal && canWriteOverview && status !== 'cancelled' && status !== 'delivered') {
+    if (status === 'in_production' || status === 'completed') {
+      actionItems.push({ label: 'Send to QC', onClick: () => handleTransition('quality_check') });
     }
-    if (status === 'confirmed') {
-      actionItems.push({
-        label: 'Materials Ready',
-        onClick: () => handleTransition('materials_ready'),
-        disabled: !canSetMaterialsReady,
-        title: !canSetMaterialsReady ? 'Requires materials in stock and fully allocated before marking Materials Ready.' : undefined,
-      });
-    }
-    if (status === 'procurement') {
-      actionItems.push({
-        label: 'Materials Ready',
-        onClick: () => handleTransition('materials_ready'),
-        disabled: !canSetMaterialsReady,
-        title: !canSetMaterialsReady ? 'Requires materials in stock and fully allocated before marking Materials Ready.' : undefined,
-      });
-    }
-    if (status === 'materials_ready') {
-      actionItems.push({
-        label: 'Set Planned',
-        onClick: () => handleTransition('planned'),
-      });
-      actionItems.push({
-        label: 'Start Production',
-        onClick: () => handleTransition('in_production'),
-        disabled: materialsIncomplete,
-        title: materialsIncomplete ? 'Materials incomplete. Cannot start production.' : undefined,
-      });
-    }
-    if (status === 'planned') {
-      actionItems.push({
-        label: 'Start Production',
-        onClick: () => handleTransition('in_production'),
-        disabled: materialsIncomplete,
-        title: materialsIncomplete ? 'Materials incomplete. Cannot start production.' : undefined,
-      });
-    }
-    if (status === 'in_production') actionItems.push({ label: 'Send to QC', onClick: () => handleTransition('quality_check') });
     if (status === 'quality_check') {
       actionItems.push({
         label: 'Ready for Pickup',
@@ -541,10 +670,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
         title: deliveryBlocked ? `Delivery blocked: balance due is $${financialSummary?.balance_due?.toFixed(2) ?? '?'} (must be 0.00) unless Financials issues an override.` : undefined,
       });
     }
-    if (canViewMaterialDemand && materials.length > 0 && canEditInventory && canCreatePO) {
-      actionItems.push({ label: 'Buy Materials', onClick: () => router.navigate(`/inventory/material-demand?mo_id=${moId}`) });
-    }
-    if (['draft', 'confirmed', 'procurement', 'materials_ready', 'planned', 'in_production'].includes(status)) {
+    if (['draft', 'confirmed', 'procurement', 'materials_ready'].includes(status)) {
       actionItems.push({ label: 'Cancel MO', onClick: () => setShowCancelDialog(true), danger: true });
     }
   }
@@ -565,10 +691,25 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   return (
     <DetailPageLayout
       title={mo.manufacturing_order_no}
-      subtitle="Manufacturing Order"
+      subtitle={
+        siblingMOs.length > 0
+          ? `Manufacturing Order · ${siblingMOs.length + 1} MOs for this SO`
+          : 'Manufacturing Order'
+      }
       status={
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <StatusBadge status={status} type="manufacturing" />
+          {materialTag && !['materials_ready', 'in_production', 'completed', 'quality_check', 'ready_for_pickup', 'delivered', 'cancelled'].includes(status) && (
+            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+              materialTag === 'Ready' ? 'bg-emerald-100 text-emerald-800' :
+              materialTag === 'Partial' ? 'bg-amber-100 text-amber-800' :
+              'bg-red-100 text-red-800'
+            }`}>
+              {materialTag === 'Ready' ? 'Material Ready' :
+               materialTag === 'Partial' ? `Material Partial (${linesReady}/${moLines.length})` :
+               'Material Pending'}
+            </span>
+          )}
           {mo.sales_order_id && paymentStatus !== 'not_invoiced' && (
             <>
               <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
@@ -807,6 +948,22 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
                   <dd className="font-mono font-medium text-gray-900">{formatCurrency(so.total_amount, 'USD')}</dd>
                 </div>
               )}
+              {siblingMOs.length > 0 && (
+                <div className="border-t pt-2 mt-1">
+                  <dt className="text-gray-500 text-xs mb-1.5">Related MOs ({siblingMOs.length + 1} for this SO)</dt>
+                  <dd className="flex flex-wrap gap-1.5">
+                    {siblingMOs.map(s => (
+                      <button
+                        key={s.id}
+                        onClick={() => router.navigate(`/manufacturing/manufacturing-orders/${s.id}`)}
+                        className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                      >
+                        {s.manufacturing_order_no}
+                      </button>
+                    ))}
+                  </dd>
+                </div>
+              )}
             </dl>
           </div>
 
@@ -881,35 +1038,26 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
                 <th className="px-4 py-3 text-left font-medium text-gray-700">Product</th>
                 <th className="px-4 py-3 text-left font-medium text-gray-700">Location</th>
                 <th className="px-4 py-3 text-right font-medium text-gray-700">Qty</th>
+                <th className="px-4 py-3 text-center font-medium text-gray-700">Material</th>
                 <th className="px-4 py-3 text-center font-medium text-gray-700">Status</th>
+                <th className="px-4 py-3 text-center font-medium text-gray-700">Action</th>
               </tr>
             </thead>
             <tbody>
               {moLines.length === 0 ? (
-                <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500">No manufacturing order lines</td></tr>
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500">No manufacturing order lines</td></tr>
               ) : (
                 moLines.map((line, idx) => {
                   const sol = line.SaleOrderLine;
                   const readiness = line.sales_order_line_id
                     ? lineReadinessBySoLineId.get(line.sales_order_line_id)
                     : undefined;
-                  let effectiveLineStatus = line.status ?? 'planned';
-                  if (!['in_production', 'completed', 'cancelled'].includes(effectiveLineStatus)) {
-                    effectiveLineStatus = readiness?.readiness_status === 'ok' ? 'ok' : 'incomplete';
-                  }
                   const ptLabels: Record<string, string> = {
-                    roller: 'Roller Shade',
-                    roller_shade: 'Roller Shade',
-                    drapery: 'Drapery',
-                    dual: 'Dual Shade',
-                    dual_shade: 'Dual Shade',
-                    triple: 'Triple Shade',
-                    triple_shade: 'Triple Shade',
-                    zebra: 'Zebra Shade',
-                    zebra_shade: 'Zebra Shade',
-                    catalog: 'Catalog',
-                    blind: 'Blind',
-                    curtain: 'Curtain',
+                    roller: 'Roller Shade', roller_shade: 'Roller Shade',
+                    drapery: 'Drapery', dual: 'Dual Shade', dual_shade: 'Dual Shade',
+                    triple: 'Triple Shade', triple_shade: 'Triple Shade',
+                    zebra: 'Zebra Shade', zebra_shade: 'Zebra Shade',
+                    catalog: 'Catalog', blind: 'Blind', curtain: 'Curtain',
                   };
                   const ptRaw = (sol?.product_type || '').toLowerCase();
                   const ptLabel = ptLabels[ptRaw] || (ptRaw ? ptRaw.charAt(0).toUpperCase() + ptRaw.slice(1) : '');
@@ -919,9 +1067,16 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
                   const hwColor = sol?.hardware_color;
                   const area = sol?.area;
                   const position = sol?.position;
+                  const lineStatus = line.status || 'draft';
+                  const hasWO = !!line.sales_order_line_id && woLineIds.has(line.sales_order_line_id);
+                  const materialOk = readiness?.readiness_status === 'ok';
 
                   return (
-                    <tr key={line.id} className="border-t hover:bg-gray-50">
+                    <tr
+                      key={line.id}
+                      className="border-t hover:bg-gray-50 cursor-pointer transition-colors"
+                      onClick={() => router.navigate(`/manufacturing/manufacturing-orders/${moId}/lines/${line.id}`)}
+                    >
                       <td className="px-4 py-3 text-gray-400 tabular-nums">{idx + 1}</td>
                       <td className="px-4 py-3">
                         <div className="font-medium text-gray-900">
@@ -931,9 +1086,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
                         <div className="flex items-center gap-2 mt-0.5">
                           {sku && <span className="text-xs text-gray-500 font-mono">{sku}</span>}
                           {hwColor && (
-                            <span className="text-xs text-gray-400">
-                              · {hwColor}
-                            </span>
+                            <span className="text-xs text-gray-400">· {hwColor}</span>
                           )}
                         </div>
                       </td>
@@ -945,9 +1098,53 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
                           </div>
                         ) : '—'}
                       </td>
-                      <td className="px-4 py-3 text-right tabular-nums">{line.quantity ?? sol?.quantity ?? '—'}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">{sol?.quantity ?? line.quantity ?? '—'}</td>
                       <td className="px-4 py-3 text-center">
-                        <StatusBadge status={effectiveLineStatus} type="moLineStatus" size="sm" />
+                        {readiness ? (
+                          <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium ${
+                            materialOk ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
+                          }`}>
+                            {materialOk ? 'OK' : 'Shortage'}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-gray-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <StatusBadge status={lineStatus} type="moLineStatus" size="sm" />
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {lineStatus === 'materials_ready' && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleCreateWO(line); }}
+                            disabled={advancingLineId === line.id || hasWO}
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                              advancingLineId === line.id
+                                ? 'bg-emerald-100 text-emerald-700 cursor-wait'
+                                : hasWO
+                                  ? 'bg-emerald-100 text-emerald-700 cursor-default'
+                                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200 active:bg-emerald-100 active:text-emerald-700'
+                            }`}
+                          >
+                            {advancingLineId === line.id ? 'Creating...' : hasWO ? 'WO Ready' : 'Create WO'}
+                          </button>
+                        )}
+                        {LINE_STATUS_FLOW[lineStatus] && lineStatus !== 'cancelled' && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleAdvanceLine(line.id, lineStatus); }}
+                            disabled={advancingLineId === line.id}
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                              advancingLineId === line.id
+                                ? 'bg-gray-100 text-gray-400 cursor-wait'
+                                : 'bg-primary/10 text-primary hover:bg-primary/20'
+                            }`}
+                          >
+                            {advancingLineId === line.id ? '...' : LINE_STATUS_FLOW[lineStatus].label}
+                          </button>
+                        )}
+                        {lineStatus === 'reviewed' && !materialOk && (
+                          <span className="text-[10px] text-gray-400">Waiting material</span>
+                        )}
                       </td>
                     </tr>
                   );
@@ -969,15 +1166,12 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
         />
       )}
 
-      {activeTab === 'schedule' && (
-        <ScheduleTab moId={moId} canEdit={canWriteSchedule} />
-      )}
-
       {activeTab === 'work-orders' && moId && (
         <WorkOrdersTab
           moId={moId}
           moNumber={mo.manufacturing_order_no}
           customerName={customer}
+          dealerName={dealer}
           productName={mo.product_name ?? ''}
           salesOrderNo={so?.sales_order_no}
           moStatus={status}

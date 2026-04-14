@@ -5,6 +5,19 @@ import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useUIStore } from '../../stores/ui-store';
 import { useResolvedStorageUrl } from '../../hooks/useResolvedStorageUrl';
 
+/**
+ * Delete an image from Supabase Storage by its public URL.
+ * Call this AFTER the parent record has been successfully saved with image_url=null.
+ */
+export async function deleteStorageImage(publicUrl: string): Promise<void> {
+  const storageMatch = publicUrl.match(/\/storage\/v1\/object\/public\/([^/]+)\/(.+)$/);
+  if (!storageMatch) return;
+  const bucket = storageMatch[1];
+  const path = decodeURIComponent(storageMatch[2]);
+  const { error } = await supabase.storage.from(bucket).remove([path]);
+  if (error) console.error('Error deleting image from storage:', error);
+}
+
 interface ImageUploadProps {
   currentImageUrl?: string | null;
   onImageUploaded: (url: string | null) => void;
@@ -160,22 +173,8 @@ export default function ImageUpload({
     setIsDragging(false);
   };
 
-  const handleRemove = async () => {
+  const handleRemove = () => {
     if (!currentImageUrl) return;
-
-    try {
-      // Extract bucket and path from any Supabase storage public URL: .../storage/v1/object/public/{bucket}/{path}
-      const storageMatch = currentImageUrl.match(/\/storage\/v1\/object\/public\/([^/]+)\/(.+)$/);
-      if (storageMatch) {
-        const urlBucket = storageMatch[1];
-        const path = decodeURIComponent(storageMatch[2]);
-        const { error } = await supabase.storage.from(urlBucket).remove([path]);
-        if (error) console.error('Error deleting image:', error);
-      }
-    } catch (error) {
-      console.error('Error deleting image:', error);
-    }
-
     setPreview(null);
     onImageUploaded(null);
   };

@@ -1,0 +1,1 @@
+ALTER TABLE public."FabricRules" ADD COLUMN IF NOT EXISTS bottom_hem_options numeric[] DEFAULT '{0,5,10,15}'; UPDATE public."FabricRules" SET bottom_hem_options = ARRAY[0, 5, 10, 15]::numeric[] WHERE formula_code = 'DRAPERY_PANELS' AND (bottom_hem_options IS NULL OR bottom_hem_options = '{}');;

@@ -8,6 +8,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { router } from '../../lib/router';
+import { getReturnToFromCurrentQuery, navigateBackContextual } from '../../lib/navigation/returnTo';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
 import { useOrganizationContext } from '../../context/OrganizationContext';
@@ -15,7 +16,7 @@ import { useAccessContext } from '../../hooks/useAccessContext';
 import { useDirectoryCustomers } from '../../hooks/useDirectoryCustomers';
 import { useCreateQuote, useUpdateQuote, useQuoteLines, approveQuote, normalizeStatus } from '../../hooks/useQuotes';
 import { QuoteStatus } from '../../types/catalog';
-import { Plus, Edit, Trash2, X, Download, GripVertical, Eye, Copy, FileText, Printer, ChevronDown, Settings2 } from 'lucide-react';
+import { Plus, Edit, Trash2, X, Download, GripVertical, Eye, Copy, FileText, Printer, ChevronDown, Settings2, ArrowLeft, Ruler } from 'lucide-react';
 import { useProposalsByQuote, createProposalFromQuote } from '../../hooks/useProposals';
 import { useActiveDealer } from '../../hooks/useActiveDealer';
 import ProductConfigurator from './ProductConfigurator';
@@ -26,6 +27,7 @@ import Label from '../../components/ui/Label';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { generateQuotePDF, type PDFVariant } from '../../lib/pdf/generateQuotePDF';
+import { generateMeasurementFormPDF, type MeasurementFormLine } from '../../lib/pdf/generateMeasurementFormPDF';
 import { useCostSettings } from '../../hooks/useCosts';
 import { useDealerTiers } from '../../hooks/useDealerTiers';
 import { calculateQuoteLinePrice, getDealerTierDiscountPct } from '../../lib/pricing';
@@ -34,6 +36,7 @@ import { finalizeQuoteLineFromConfiguredProduct } from '../../lib/quotes/finaliz
 import { commitConfiguredProduct } from '../../lib/quotes/commitConfiguredProductToQuoteLine';
 import { getConfigFromQuoteLine } from '../../lib/quotes/getConfigFromQuoteLine';
 import { createConfiguredProductPreview, recalculateConfiguredProductTotals } from '../../lib/bom/createConfiguredProductPreview';
+import { computeSelectedSnapshotTotals } from '../../lib/bom/snapshotSelectedTotals';
 import DimensionsStackView from '../../components/DimensionsStackView';
 import QuoteTermsDisplay from '../../components/sales/QuoteTermsDisplay';
 import { resolveDefaultTermsTemplateId, fetchTermsTemplateById } from '../../lib/terms';
@@ -717,6 +720,8 @@ export default function QuoteNew() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [approveConfirmOpen, setApproveConfirmOpen] = useState(false);
+  const [deleteLineConfirmId, setDeleteLineConfirmId] = useState<string | null>(null);
+  const [isDeletingLine, setIsDeletingLine] = useState(false);
   const [pendingApproveSubmission, setPendingApproveSubmission] = useState<{
     data: QuoteFormValues;
     shouldNavigate: boolean;
@@ -1924,9 +1929,10 @@ export default function QuoteNew() {
           // ✅ Precio en QuoteLine: 1) sync desde ConfiguredProduct 2) fallback con valor del Review
           const snapshot = (productConfig as any).bom_preview_snapshot;
           const totalsFromConfig = (productConfig as any).configured_product_totals;
+          const selectedSnapshotTotals = computeSelectedSnapshotTotals(snapshot);
           const totalMsrpFromReview =
-            (snapshot?.totals?.total_msrp != null && Number(snapshot.totals.total_msrp) > 0)
-              ? Number(snapshot.totals.total_msrp)
+            (selectedSnapshotTotals?.totalMsrp != null && Number(selectedSnapshotTotals.totalMsrp) > 0)
+              ? Number(selectedSnapshotTotals.totalMsrp)
               : (totalsFromConfig?.total_msrp != null && Number(totalsFromConfig.total_msrp) > 0)
                 ? Number(totalsFromConfig.total_msrp)
                 : null;
@@ -2947,10 +2953,16 @@ export default function QuoteNew() {
     }
   };
 
-  // Handle delete line
-  const handleDeleteLine = async (lineId: string) => {
-    if (!confirm('Are you sure you want to delete this line?')) return;
+  const handleDeleteLine = (lineId: string) => {
+    setDeleteLineConfirmId(lineId);
+  };
 
+  const confirmDeleteLine = async () => {
+    const lineId = deleteLineConfirmId;
+    if (!lineId) return;
+
+    const scrollY = window.scrollY;
+    setIsDeletingLine(true);
     try {
       const { error } = await supabase
         .from('QuoteLines')
@@ -2960,7 +2972,9 @@ export default function QuoteNew() {
 
       if (error) throw error;
 
+      setDeleteLineConfirmId(null);
       await refetchLines();
+      requestAnimationFrame(() => window.scrollTo(0, scrollY));
       useUIStore.getState().addNotification({
         type: 'success',
         title: 'Success',
@@ -2973,6 +2987,8 @@ export default function QuoteNew() {
         title: 'Error',
         message: err.message || 'Failed to delete quote line',
       });
+    } finally {
+      setIsDeletingLine(false);
     }
   };
 
@@ -3649,6 +3665,111 @@ export default function QuoteNew() {
     }
   };
 
+  const handleMeasurementForm = async () => {
+    if (!quoteId || !quoteData) {
+      useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: 'Save the quote first.' });
+      return;
+    }
+    try {
+      const tryLogo = async (path: string): Promise<string | undefined> => {
+        try {
+          const res = await fetch(path, { cache: 'no-store' });
+          if (!res.ok) return undefined;
+          const blob = await res.blob();
+          return new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        } catch { return undefined; }
+      };
+      let logoPngBase64: string | undefined;
+      for (const p of ['/images/Arquiproductos.png', '/images/arquiproductos.png', '/images/Arquiproductos.jpg']) {
+        logoPngBase64 = await tryLogo(p);
+        if (logoPngBase64) break;
+      }
+      let logoWidthPx = 100;
+      let logoHeightPx = 100;
+      if (logoPngBase64) {
+        try {
+          const dims = await new Promise<{ w: number; h: number }>((resolve) => {
+            const img = new Image();
+            img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+            img.onerror = () => resolve({ w: 100, h: 100 });
+            img.src = logoPngBase64!;
+          });
+          logoWidthPx = dims.w;
+          logoHeightPx = dims.h;
+        } catch { /* keep defaults */ }
+      }
+
+      let dealerName: string | undefined;
+      const dealerId = quoteData.dealer_id ?? null;
+      if (dealerId) {
+        const { data: dealer } = await supabase.from('Dealers').select('dealer_name').eq('id', dealerId).maybeSingle();
+        dealerName = dealer?.dealer_name ?? undefined;
+      }
+
+      const address = selectedCustomer
+        ? [
+            (selectedCustomer as any).street_address_line_1,
+            (selectedCustomer as any).street_address_line_2,
+            [(selectedCustomer as any).city, (selectedCustomer as any).state, (selectedCustomer as any).zip_code].filter(Boolean).join(', '),
+            (selectedCustomer as any).country,
+          ].filter(Boolean).join(', ') || null
+        : null;
+
+      const formLines: MeasurementFormLine[] = quoteLines.map((line: any) => {
+        const snap = line.config_snapshot;
+        return {
+          area: line.area,
+          position: line.position,
+          product_type: line.product_type ?? line.ProductType?.name,
+          collection_name: line.collection_name,
+          variant_name: line.variant_name,
+          qty: Number(line.quantity) || 1,
+          width_m: line.width_m,
+          height_m: line.height_m,
+          dimensions_source: {
+            width_m: line.width_m,
+            height_m: line.height_m,
+            width_mm: snap?.width_mm,
+            height_mm: snap?.height_mm,
+            measurements: snap?.measurements,
+            panels: snap?.panels,
+          },
+          drive_type: line.drive_type ?? snap?.drive_type ?? null,
+          drive_side: snap?.drive_side ?? snap?.driveSide ?? null,
+          opening_direction: snap?.opening_direction ?? snap?.openingDirection ?? null,
+          installation_type: line.installation_type ?? snap?.installationType ?? snap?.installation_type ?? null,
+          installation_location: line.installation_location ?? snap?.installationLocation ?? snap?.installation_location ?? null,
+        };
+      });
+
+      const doc = generateMeasurementFormPDF(formLines, {
+        quote_no: quoteData.quote_no || watch('quote_no'),
+        customer_name: selectedCustomer?.customer_name ?? null,
+        contact_name: selectedContact?.contact_name ?? null,
+        address,
+        project_description: quoteData.description ?? watch('description') ?? null,
+        created_at: quoteData.created_at || new Date().toISOString(),
+        logoPngBase64,
+        logoWidthPx,
+        logoHeightPx,
+        dealerName,
+      });
+
+      const blob = doc.output('blob');
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (err: any) {
+      console.error('Error generating measurement form:', err);
+      useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: err.message || 'Failed to generate measurement form' });
+    }
+  };
+
   // Handle form submit
   const onSubmit = async (
     data: QuoteFormValues,
@@ -3864,16 +3985,29 @@ export default function QuoteNew() {
   const isStatusLocked = Boolean(quoteId && persistedStatus === 'approved');
 
   return (
-    <div className="py-6 min-w-0 max-w-full">
+    <div className="py-6 px-6 min-w-0 max-w-full">
       {/* Header */}
       <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200">
-        <div>
-          <h1 className="text-xl font-semibold text-foreground mb-1">
-            {quoteId ? 'Edit Quote' : 'New Quote'}
-          </h1>
-          <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-            {quoteId ? 'Edit quote information' : 'Create a new quote'}
-          </p>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => navigateBackContextual(router, {
+              queryReturnTo: getReturnToFromCurrentQuery(),
+              fallback: '/sales/quotes',
+            })}
+            className="p-1.5 rounded-md hover:bg-gray-100 transition-colors text-gray-500 hover:text-gray-700"
+            title="Back"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <div>
+            <h1 className="text-xl font-semibold text-foreground mb-1">
+              {quoteId ? 'Edit Quote' : 'New Quote'}
+            </h1>
+            <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
+              {quoteId ? 'Edit quote information' : 'Create a new quote'}
+            </p>
+          </div>
         </div>
 
         <div className="flex items-center gap-3">
@@ -3907,18 +4041,22 @@ export default function QuoteNew() {
                     <Eye className="w-4 h-4 shrink-0 text-gray-500" />
                     PDF Dealer
                   </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                    onClick={() => {
+                      handleMeasurementForm();
+                      setPrintDropdownOpen(false);
+                    }}
+                  >
+                    <Ruler className="w-4 h-4 shrink-0 text-gray-500" />
+                    Measurement Form
+                  </button>
                 </div>
               )}
             </div>
           )}
-          <button
-            type="button"
-            onClick={() => router.navigate('/sales/quotes')}
-            className="px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50"
-            title="Close"
-          >
-            Close
-          </button>
           <button
             type="button"
             onClick={handleSubmit((data) => onSubmit(data, false))}
@@ -4199,14 +4337,14 @@ export default function QuoteNew() {
                 <thead className="bg-gray-50 border-b-2 border-gray-300">
                   <tr>
                     <th className="text-left py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '32px' }} title="Drag to reorder"> </th>
-                    <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '40px' }}>#</th>
-                    <th className="text-left py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '7%' }}>Area</th>
+                    <th className="text-center py-3 px-1 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '28px' }}>#</th>
+                    <th className="text-left py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '8%' }}>Area</th>
                     <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '5%' }}>Position</th>
                     <th className="text-center py-3 pl-4 pr-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '9%' }}>Product type</th>
                     <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs" style={{ width: '16%' }}>Description</th>
                     <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '11%' }}>System Drive</th>
                     <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '10%' }}>Measurements</th>
-                    <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '36px' }}>Qty</th>
+                    <th className="text-right py-3 pl-2 pr-3 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '36px' }}>Qty</th>
                     <th className="text-right py-3 pl-2 pr-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '92px' }}>{useDealerPrice ? 'Dealer price' : 'MSRP'}</th>
                     <th className="text-right py-3 pl-2 pr-4 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '96px' }}>Total</th>
                     <th className="text-right py-3 pl-3 pr-3 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '140px' }}>Actions</th>
@@ -4257,7 +4395,7 @@ export default function QuoteNew() {
                         <td className="py-4 px-2 text-gray-400 w-10" title="Drag to reorder" onClick={(e) => e.stopPropagation()}>
                           <GripVertical className="w-4 h-4" />
                         </td>
-                        <td className="py-4 px-2 text-center text-gray-500 text-sm tabular-nums w-[57px] min-w-[57px] h-[57px] min-h-[57px] align-middle">
+                        <td className="py-4 px-1 text-center text-gray-500 text-sm tabular-nums w-[28px] min-w-[28px] h-[57px] min-h-[57px] align-middle">
                           {index + 1}
                         </td>
                         <td className="py-4 px-2 text-gray-700 text-sm text-left break-words leading-tight">
@@ -4269,11 +4407,18 @@ export default function QuoteNew() {
                         <td className="py-4 pl-4 pr-2 text-gray-900 text-sm font-medium whitespace-nowrap text-center overflow-hidden text-ellipsis">
                           {productTypeName}
                         </td>
-                        <td className="py-4 px-2 text-gray-700 text-sm text-center overflow-hidden" title={collectionDisplay}>
-                          <span className="block truncate text-center">{collectionDisplay}</span>
+                        <td className="py-4 px-2 text-gray-700 text-sm text-center break-words leading-tight" title={collectionDisplay}>
+                          {collectionDisplay}
                         </td>
-                        <td className="py-4 px-2 text-gray-700 text-sm text-center overflow-hidden" title={driveDisplay}>
-                          <span className="block truncate text-center">{driveDisplay}</span>
+                        <td className="py-4 px-2 text-gray-700 text-sm text-center leading-tight" title={driveDisplay}>
+                          {(() => {
+                            if (isCatalogLine) return '—';
+                            const parts = driveDisplay.split('|').map((s: string) => s.trim());
+                            if (parts.length >= 2) {
+                              return <>{parts[0]}<br />{parts.slice(1).join(' ')}</>;
+                            }
+                            return driveDisplay;
+                          })()}
                         </td>
                         <td className="py-4 px-2 text-gray-700 text-sm text-center align-middle">
                           {isCatalogLine ? (
@@ -4293,7 +4438,7 @@ export default function QuoteNew() {
                           </div>
                           )}
                         </td>
-                        <td className="py-4 px-2 text-center text-gray-900 text-sm tabular-nums whitespace-nowrap">
+                        <td className="py-4 pl-2 pr-3 text-right text-gray-900 text-sm tabular-nums whitespace-nowrap">
                           {line.quantity ? line.quantity.toFixed(0) : 'N/A'}
                         </td>
                         <td className="py-4 pl-2 pr-2 text-right text-gray-900 text-sm font-medium tabular-nums whitespace-nowrap" style={{ width: '92px' }}>
@@ -4700,6 +4845,17 @@ export default function QuoteNew() {
         cancelText="Cancelar"
         variant="danger"
         isLoading={isDeleting}
+      />
+      <ConfirmDialog
+        isOpen={!!deleteLineConfirmId}
+        onClose={() => setDeleteLineConfirmId(null)}
+        onConfirm={confirmDeleteLine}
+        title="Delete Quote Line"
+        message="Are you sure you want to delete this line? This action cannot be undone."
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
+        isLoading={isDeletingLine}
       />
     </div>
   );

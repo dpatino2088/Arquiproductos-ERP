@@ -50,11 +50,11 @@ import {
   Archive,
   ArrowLeft,
   User,
-  Image as ImageIcon,
   Package,
   Wrench,
 } from 'lucide-react';
 import ImageModal from '../../components/ui/ImageModal';
+import CatalogItemImage from '../../components/ui/CatalogItemImage';
 
 interface Item {
   id: string;
@@ -2074,35 +2074,12 @@ export default function Items() {
                         />
                       </td>
                       <td className="py-3 px-4">
-                        {item.image ? (
-                          <div 
-                            className="w-10 h-10 rounded border border-gray-200 overflow-hidden cursor-pointer hover:opacity-80 transition-opacity"
-                            onClick={() => setSelectedImage(item.image || null)}
-                          >
-                            <img 
-                              src={item.image} 
-                              alt={item.itemName || 'Item image'} 
-                              className="w-full h-full object-cover"
-                              loading="lazy"
-                              decoding="async"
-                              onError={(e) => {
-                                if (import.meta.env.DEV) {
-                                  console.error('Image load error for item:', item.sku, 'URL:', item.image);
-                                }
-                                (e.target as HTMLImageElement).style.display = 'none';
-                              }}
-                              onLoad={() => {
-                                if (import.meta.env.DEV) {
-                                  console.log('✅ Image loaded successfully for item:', item.sku);
-                                }
-                              }}
-                            />
-                          </div>
-                        ) : (
-                          <div className="w-10 h-10 rounded border border-gray-200 bg-gray-50 flex items-center justify-center">
-                            <ImageIcon className="w-4 h-4 text-gray-400" />
-                          </div>
-                        )}
+                        <CatalogItemImage
+                          src={item.image}
+                          alt={item.itemName || 'Item'}
+                          size="sm"
+                          onClick={item.image ? () => setSelectedImage(item.image || null) : undefined}
+                        />
                       </td>
                       {/* ✅ OPTIMIZACIÓN: Todos los campos tienen valores por defecto para evitar mostrar vacíos */}
                       <td className="py-3 px-4 text-gray-900 text-xs font-medium">

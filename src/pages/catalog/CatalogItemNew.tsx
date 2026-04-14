@@ -21,7 +21,7 @@ import { catalogItemsListKey, catalogItemDetailKey } from '../../lib/queryKeys';
 import type { CatalogItem } from '../../types/catalog';
 import { useCategoryMargins } from '../../hooks/useCostEngineSettings';
 import { supabase } from '../../lib/supabase/client';
-import ImageUpload from '../../components/ui/ImageUpload';
+import ImageUpload, { deleteStorageImage } from '../../components/ui/ImageUpload';
 import { syncCatalogItemProductTypes } from '../../lib/catalog-item-helpers';
 import { useProductTypes } from '../../hooks/useProductTypes';
 import { useOnVisibilityChange } from '../../lib/app-persistence';
@@ -36,7 +36,12 @@ import {
 } from '../../services/catalogItemSupply';
 import { CatalogItemRollSpecsSection } from '../../components/catalog/CatalogItemRollSpecsSection';
 import { normalizeRateToSystem, toMeters, toSquareMetersFromArea } from '../../lib/uom-conversions';
-import { resolveInventoryUnitModel } from '../../lib/inventoryUnitModel';
+import {
+  resolveInventoryUnitModel,
+  defaultUnitsPerPurchaseUnit,
+  getAllowedPurchaseUnits,
+  isDirectLinearPurchaseUnit,
+} from '../../lib/inventoryUnitModel';
 // UOM conversions handled by backend trigger (trg_catalogitems_write_conversions)
 // Frontend only displays conversions from CatalogItemConversions table
 
@@ -104,8 +109,9 @@ const catalogItemSchema = z.object({
   purchase_mode: z.enum(['unit_packaged', 'linear_direct', 'roll']),
   stock_basis: z.enum(['ea', 'linear_m']),
   purchase_uom: z.string().min(1),
-  purchase_unit: z.enum(['each', 'pack', 'set', 'box', 'case', 'bag', 'bundle', 'carton', 'roll', 'm', 'ft', 'yd']),
-  units_per_purchase_unit: z.number().min(1),
+  purchase_unit: z.enum(['each', 'pack', 'set', 'box', 'case', 'bag', 'bundle', 'carton', 'roll', 'm', 'ft', 'yd', 'kit', 'pair']),
+  units_per_purchase_unit: z.number().gt(0),
+  moq: z.number().min(0),
   
   // Status
   is_active: z.boolean(),
@@ -173,15 +179,21 @@ const catalogItemResolver: Resolver<CatalogItemFormValues> = async (values, cont
     normalized.roll_length_value = null;
   }
   
-  // Normalize units_per_purchase_unit: NaN/null/undefined/< 1 → 1
+  // Normalize units_per_purchase_unit: NaN/null/undefined/<= 0 → 1
   const upu = normalized.units_per_purchase_unit;
-  if (upu == null || (typeof upu === 'number' && (Number.isNaN(upu) || upu < 1))) {
+  if (upu == null || (typeof upu === 'number' && (Number.isNaN(upu) || upu <= 0))) {
     normalized.units_per_purchase_unit = 1;
   }
   
   // Ensure purchase_unit has a valid value
-  if (!normalized.purchase_unit || !['each', 'pack', 'set', 'box', 'case', 'bag', 'bundle', 'carton', 'roll', 'm', 'ft', 'yd'].includes(normalized.purchase_unit)) {
+  if (!normalized.purchase_unit || !['each', 'pack', 'set', 'box', 'case', 'bag', 'bundle', 'carton', 'roll', 'm', 'ft', 'yd', 'kit', 'pair'].includes(normalized.purchase_unit)) {
     normalized.purchase_unit = 'each';
+  }
+  if (typeof normalized.moq === 'number' && Number.isNaN(normalized.moq)) {
+    normalized.moq = 0;
+  }
+  if (normalized.moq == null || normalized.moq < 0) {
+    normalized.moq = 0;
   }
   if (!normalized.purchase_uom || typeof normalized.purchase_uom !== 'string') {
     normalized.purchase_uom = normalized.purchase_unit || 'each';
@@ -249,8 +261,10 @@ export default function CatalogItemNew() {
   }, [queryReturnTo, returnToFromStorage]);
 
   useEffect(() => {
-    if (!returnTo.startsWith('/catalog/items')) return;
-    setCatalogItemsReturnTo(returnTo);
+    if (!returnTo.startsWith('/catalog')) return;
+    if (returnTo.startsWith('/catalog/items')) {
+      setCatalogItemsReturnTo(returnTo);
+    }
     if (!itemId) return;
     try {
       window.sessionStorage.setItem(`catalogItemReturnTo:${itemId}`, returnTo);
@@ -431,6 +445,7 @@ export default function CatalogItemNew() {
       purchase_uom: 'each',
       purchase_unit: 'each',
       units_per_purchase_unit: 1,
+      moq: 0,
       is_active: true,
       delta_x_mm: null,
       delta_y_mm: null,
@@ -441,6 +456,7 @@ export default function CatalogItemNew() {
   const sessionTimerRef = useRef<number | null>(null);
   const draftHydratedRef = useRef(false);
   const dbUpdatedAtRef = useRef<string | null>(null);
+  const pendingImageDeleteRef = useRef<string | null>(null);
 
   // New Item must ALWAYS start blank (no draft hydration)
   useEffect(() => {
@@ -475,6 +491,7 @@ export default function CatalogItemNew() {
       purchase_uom: 'each',
       purchase_unit: 'each',
       units_per_purchase_unit: 1,
+      moq: 0,
       is_active: true,
       delta_x_mm: null,
       delta_y_mm: null,
@@ -494,34 +511,33 @@ export default function CatalogItemNew() {
   const purchaseUom = watch('purchase_uom');
   const purchaseUnit = watch('purchase_unit');
   const unitsPerPurchase = watch('units_per_purchase_unit');
+  const moq = watch('moq');
   const categoryId = watch('category_id');
   const costExw = watch('cost_exw');
   const pricingMode = watch('roll_pricing_mode');
 
   // Purchase Unit options must follow measure_basis to avoid invalid combinations.
   const purchaseUnitOptions = useMemo<Array<{ value: string; label: string }>>(() => {
-    if (isRoll) return [{ value: 'roll', label: 'Roll' }];
-
-    const common = [
-      { value: 'each', label: 'Each' },
-      { value: 'pack', label: 'Pack' },
-      { value: 'set', label: 'Set' },
-      { value: 'box', label: 'Box' },
-      { value: 'case', label: 'Case' },
-      { value: 'bundle', label: 'Bundle' },
-      { value: 'carton', label: 'Carton' },
-    ];
-
-    if (measureBasis === 'linear') {
-      return [
-        ...common,
-        { value: 'm', label: 'm (meters)' },
-        { value: 'ft', label: 'ft (feet)' },
-        { value: 'yd', label: 'yd (yards)' },
-      ];
-    }
-
-    return common;
+    const labels: Record<string, string> = {
+      each: 'Each',
+      pack: 'Pack',
+      set: 'Set',
+      box: 'Box',
+      case: 'Case',
+      bag: 'Bag',
+      bundle: 'Bundle',
+      carton: 'Carton',
+      kit: 'Kit',
+      pair: 'Pair',
+      roll: 'Roll',
+      m: 'm (meters)',
+      ft: 'ft (feet)',
+      yd: 'yd (yards)',
+    };
+    return getAllowedPurchaseUnits(measureBasis ?? 'unit', isRoll).map((value) => ({
+      value,
+      label: labels[value] ?? value,
+    }));
   }, [isRoll, measureBasis]);
 
   const parentCategories = useMemo(
@@ -782,10 +798,11 @@ export default function CatalogItemNew() {
             ? data.stock_basis
             : ((data.is_roll || data.measure_basis === 'linear') ? 'linear_m' : 'ea'),
           purchase_uom: data.purchase_uom || data.purchase_unit || data.unit_of_measure || 'each',
-          purchase_unit: (data.purchase_unit && ['each', 'pack', 'set', 'box', 'case', 'bag', 'bundle', 'carton', 'roll', 'm', 'ft', 'yd'].includes(data.purchase_unit))
+          purchase_unit: (data.purchase_unit && ['each', 'pack', 'set', 'box', 'case', 'bag', 'bundle', 'carton', 'roll', 'm', 'ft', 'yd', 'kit', 'pair'].includes(data.purchase_unit))
             ? data.purchase_unit
             : 'each',
-          units_per_purchase_unit: (data.units_per_purchase_unit && Number(data.units_per_purchase_unit) >= 1) ? Number(data.units_per_purchase_unit) : 1,
+          units_per_purchase_unit: (data.units_per_purchase_unit && Number(data.units_per_purchase_unit) > 0) ? Number(data.units_per_purchase_unit) : 1,
+          moq: Math.max(0, Number(data.moq ?? 0)),
           is_active: data.is_active !== undefined ? data.is_active : true,
           delta_x_mm: data.delta_x_mm != null ? Number(data.delta_x_mm) : null,
           delta_y_mm: data.delta_y_mm != null ? Number(data.delta_y_mm) : null,
@@ -803,6 +820,11 @@ export default function CatalogItemNew() {
               // Always restore category_id from DB if session has null/undefined
               if (!formValues.category_id && dbValues.category_id) {
                 formValues.category_id = dbValues.category_id;
+              }
+
+              // Never let stale session overwrite a DB image with null
+              if (!formValues.image_url && dbValues.image_url) {
+                formValues.image_url = dbValues.image_url;
               }
 
               const isRollItem = !!(formValues.is_roll || dbValues.is_roll);
@@ -964,10 +986,15 @@ export default function CatalogItemNew() {
       }
       return;
     }
-    if (purchaseUnit === 'each' && Number(unitsPerPurchase ?? 1) !== 1) {
+    const autoLinearUPPU = defaultUnitsPerPurchaseUnit(purchaseUnit);
+    if (autoLinearUPPU != null && Number(unitsPerPurchase ?? 1) !== autoLinearUPPU) {
+      setValue('units_per_purchase_unit', autoLinearUPPU);
+      return;
+    }
+    if (measureBasis !== 'linear' && purchaseUnit === 'each' && Number(unitsPerPurchase ?? 1) !== 1) {
       setValue('units_per_purchase_unit', 1);
     }
-  }, [isRoll, purchaseUnit, unitsPerPurchase, setValue]);
+  }, [isRoll, measureBasis, purchaseUnit, unitsPerPurchase, setValue]);
 
   // Keep purchase_unit valid when measure_basis changes (e.g. remove ft/yd/m outside linear).
   useEffect(() => {
@@ -1006,7 +1033,7 @@ export default function CatalogItemNew() {
       try {
         const parsed = JSON.parse(sessionData);
         if (parsed?.isDirty && parsed?.values) {
-          reset(parsed.values);
+          reset(parsed.values, { keepDirtyValues: true });
           if (Array.isArray(parsed?.productTypeIds) && parsed.productTypeIds.length > 0) {
             setSelectedProductTypeIds(parsed.productTypeIds);
           }
@@ -1157,6 +1184,7 @@ export default function CatalogItemNew() {
         cost_exw: values.cost_exw != null ? Number(values.cost_exw) : null,
         purchase_unit: values.purchase_unit,
         units_per_purchase_unit: values.units_per_purchase_unit ? Number(values.units_per_purchase_unit) : 1,
+        moq: Math.max(0, Number(values.moq ?? 0)),
         is_active: values.is_active,
         delta_x_mm: values.delta_x_mm != null ? Number(values.delta_x_mm) : null,
         delta_y_mm: values.delta_y_mm != null ? Number(values.delta_y_mm) : null,
@@ -1189,6 +1217,7 @@ export default function CatalogItemNew() {
             if (mapped) mapped.forEach(mk => expandedKeys.add(mk));
             else expandedKeys.add(k);
           }
+          expandedKeys.add('updated_at');
           for (const k of expandedKeys) {
             if (k in fullPayload) payload[k] = fullPayload[k];
           }
@@ -1268,6 +1297,12 @@ export default function CatalogItemNew() {
       // ✅ FIX: Clear sessionStorage after successful save
       if (sessionKey) {
         window.sessionStorage.removeItem(sessionKey);
+      }
+
+      // Clean up orphaned storage file if user removed the image
+      if (pendingImageDeleteRef.current) {
+        deleteStorageImage(pendingImageDeleteRef.current).catch(() => {});
+        pendingImageDeleteRef.current = null;
       }
 
       // Reset form to saved values so isDirty becomes false and
@@ -1713,7 +1748,12 @@ export default function CatalogItemNew() {
             </>
           )}
           
-          {/* Category + Subcategory selectors (single-table taxonomy) */}
+          {/* === CLASSIFICATION === */}
+          <div className="col-span-12 mt-4 pt-4 border-t border-gray-200">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Classification</p>
+          </div>
+
+          {/* Category + Subcategory selectors */}
           <div className="col-span-3">
             <Label htmlFor="parent_category_id" className="text-xs">Category</Label>
             <SelectShadcn
@@ -1794,11 +1834,68 @@ export default function CatalogItemNew() {
             </SelectShadcn>
           </div>
 
-          <div className="col-span-3" />
+          {/* Product Types */}
+          <div className="col-span-12">
+            <Label className="text-xs">Product Types</Label>
+            {productTypesLoading ? (
+              <p className="text-xs text-gray-500 mt-2">Loading...</p>
+            ) : productTypes.length === 0 ? (
+              <p className="text-xs text-gray-500 mt-2">No product types available</p>
+            ) : (
+              <div className="mt-2 border border-gray-200 rounded p-3">
+                <div className="grid grid-cols-3 gap-2">
+                  {productTypes.map((pt) => (
+                    <label key={pt.id} className="flex items-center gap-2 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={selectedProductTypeIds.includes(pt.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedProductTypeIds([...selectedProductTypeIds, pt.id]);
+                          } else {
+                            setSelectedProductTypeIds(selectedProductTypeIds.filter(id => id !== pt.id));
+                          }
+                        }}
+                        disabled={isReadOnly}
+                        className="h-4 w-4"
+                      />
+                      <span>{pt.name} {pt.code && `(${pt.code})`}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
 
-          <div className="col-span-3" />
+          {/* Image */}
+          <div className="col-span-12">
+            <Label className="text-xs">Image</Label>
+            <ImageUpload
+              label="Item Image"
+              currentImageUrl={watch('image_url') || null}
+              onImageUploaded={(url) => {
+                const prev = watch('image_url');
+                if (!url && prev) pendingImageDeleteRef.current = prev;
+                setValue('image_url', url ?? null, { shouldDirty: true });
+              }}
+              disabled={isReadOnly}
+              bucket="catalog-images"
+              uploadPath={(file) => {
+                const ext = file.name.split('.').pop() || 'png';
+                const prefix = activeOrganizationId
+                  ? `catalog-items/${activeOrganizationId}/${itemId || 'new'}`
+                  : `catalog-items/new`;
+                return `${prefix}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+              }}
+            />
+          </div>
 
-          {/* Measure Basis + Unit of Measure (non-roll) - Measure Basis in the middle of the row */}
+          {/* === ENGINEERING === */}
+          <div className="col-span-12 mt-4 pt-4 border-t border-gray-200">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Engineering</p>
+          </div>
+
+          {/* Measure Basis + Unit of Measure + Deltas (non-roll) */}
           {!isRoll && (
             <>
               <div className="col-span-3">
@@ -2038,7 +2135,12 @@ export default function CatalogItemNew() {
             </>
           )}
           
-          {/* Supply Type | Origin | Purchase Unit | Units per Purchase — one row, equal widths */}
+          {/* === PURCHASING === */}
+          <div className="col-span-12 mt-4 pt-4 border-t border-gray-200">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Purchasing</p>
+          </div>
+
+          {/* Supply Type | Origin | Purchase Unit | Units per Purchase */}
           {(itemId && activeOrganizationId) || (measureBasis === 'unit' || measureBasis === 'linear' || isRoll) ? (
             <>
               {/* 1. Supply Type */}
@@ -2128,11 +2230,11 @@ export default function CatalogItemNew() {
                     <Input
                       id="units_per_purchase_unit"
                       type="number"
-                      step="1"
-                      min="1"
+                      step="0.0001"
+                      min="0.0001"
                       {...register('units_per_purchase_unit', { valueAsNumber: true })}
                       className="py-1 text-xs w-full"
-                      disabled={isReadOnly || isRoll || purchaseUnit === 'each'}
+                      disabled={isReadOnly || isRoll || (purchaseUnit === 'each' && measureBasis !== 'linear') || isDirectLinearPurchaseUnit(purchaseUnit)}
                     />
                     <p className="text-xs text-gray-500 mt-1">
                       {isRoll && 'Always 1'}
@@ -2140,67 +2242,35 @@ export default function CatalogItemNew() {
                       {purchaseUnit === 'set' && 'Per set'}
                       {purchaseUnit === 'box' && 'Per box'}
                       {purchaseUnit === 'case' && 'Per case'}
-                      {purchaseUnit === 'each' && (measureBasis === 'linear' ? 'UOM' : '1')}
+                      {isDirectLinearPurchaseUnit(purchaseUnit) && 'Auto-converted to internal meters'}
+                      {purchaseUnit === 'each' && (measureBasis === 'linear' ? 'For tramos: length in meters per tramo' : '1')}
                     </p>
                   </>
                 ) : (
                   <Label className="text-xs text-gray-400">Units per Purchase</Label>
                 )}
               </div>
+              <div className="col-span-3 col-start-1">
+                {(measureBasis === 'unit' || measureBasis === 'linear' || isRoll) ? (
+                  <>
+                    <Label htmlFor="moq" className="text-xs">MOQ</Label>
+                    <Input
+                      id="moq"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      {...register('moq', { valueAsNumber: true })}
+                      className="h-auto py-1 text-xs"
+                      disabled={isReadOnly}
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Min order ({purchaseUnit || 'each'})
+                    </p>
+                  </>
+                ) : null}
+              </div>
             </>
           ) : null}
-
-          {/* Product Types */}
-          <div className="col-span-12">
-            <Label className="text-xs">Product Types</Label>
-            {productTypesLoading ? (
-              <p className="text-xs text-gray-500 mt-2">Loading...</p>
-            ) : productTypes.length === 0 ? (
-              <p className="text-xs text-gray-500 mt-2">No product types available</p>
-            ) : (
-              <div className="mt-2 border border-gray-200 rounded p-3">
-                <div className="grid grid-cols-3 gap-2">
-                  {productTypes.map((pt) => (
-                    <label key={pt.id} className="flex items-center gap-2 text-xs">
-                      <input
-                        type="checkbox"
-                        checked={selectedProductTypeIds.includes(pt.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedProductTypeIds([...selectedProductTypeIds, pt.id]);
-                          } else {
-                            setSelectedProductTypeIds(selectedProductTypeIds.filter(id => id !== pt.id));
-                          }
-                        }}
-                        disabled={isReadOnly}
-                        className="h-4 w-4"
-                      />
-                      <span>{pt.name} {pt.code && `(${pt.code})`}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-          
-          {/* Image (Drop) */}
-          <div className="col-span-12">
-            <Label className="text-xs">Image</Label>
-            <ImageUpload
-              label="Item Image"
-              currentImageUrl={watch('image_url') || null}
-              onImageUploaded={(url) => setValue('image_url', url ?? null, { shouldDirty: true })}
-              disabled={isReadOnly}
-              bucket="catalog-images"
-              uploadPath={(file) => {
-                const ext = file.name.split('.').pop() || 'png';
-                const prefix = activeOrganizationId
-                  ? `catalog-items/${activeOrganizationId}/${itemId || 'new'}`
-                  : `catalog-items/new`;
-                return `${prefix}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-              }}
-            />
-          </div>
         </div>
       )}
       

@@ -478,12 +478,13 @@ export default function Proposals() {
                       (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                   </button>
                 </th>
-                <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">
+                <th className="text-right py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap">Dealer Price</th>
+                <th className="text-right py-3 px-4 font-medium text-gray-700 text-xs whitespace-nowrap">
                   <button
                     onClick={() => handleSort('total')}
-                    className="flex items-center gap-1 hover:text-gray-900 justify-center w-full"
+                    className="flex items-center gap-1 hover:text-gray-900 justify-end w-full"
                   >
-                    Total
+                    Total (USD)
                     {sortBy === 'total' &&
                       (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                   </button>
@@ -494,7 +495,7 @@ export default function Proposals() {
             <tbody className="divide-y divide-gray-100">
               {paginatedList.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-12 px-4 text-center">
+                  <td colSpan={10} className="py-12 px-4 text-center">
                     <div className="flex flex-col items-center">
                       <Search className="w-12 h-12 text-gray-300 mb-4" />
                       <p className="text-gray-600 mb-2">No se encontraron propuestas</p>
@@ -534,7 +535,10 @@ export default function Proposals() {
                     <td className="py-4 px-4 text-gray-600 text-sm text-center"><span className="block truncate">{p.proposal_created_by ?? '—'}</span></td>
                     <td className="py-4 px-4 text-gray-600 text-sm text-center"><span className="block truncate">{p.quote_created_by ?? '—'}</span></td>
                     <td className="py-4 px-4 text-gray-600 text-sm text-center">{formatDate(p.updated_at)}</td>
-                    <td className="py-4 px-4 text-gray-900 text-sm font-medium text-center">
+                    <td className="py-4 px-4 text-gray-700 text-sm text-right whitespace-nowrap">
+                      {formatCurrency(p.quote_total_amount)}
+                    </td>
+                    <td className="py-4 px-4 text-gray-900 text-sm font-semibold text-right whitespace-nowrap">
                       {formatCurrency(p.total_amount)}
                     </td>
                     <td className="py-4 px-4 text-right" onClick={(e) => e.stopPropagation()}>

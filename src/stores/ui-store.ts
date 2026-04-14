@@ -60,6 +60,16 @@ interface UIState {
   toggleModal: (modalId: string) => void;
 }
 
+const NOTIFICATION_TTL_MS: Record<Notification['type'], number> = {
+  success: 2200,
+  info: 2600,
+  warning: 3200,
+  error: 3800,
+};
+
+const NOTIFICATION_DEDUPE_WINDOW_MS = 1800;
+const MAX_NOTIFICATIONS_IN_STORE = 12;
+
 export const useUIStore = create<UIState>()(
   persist(
     (set, get) => ({
@@ -115,15 +125,25 @@ export const useUIStore = create<UIState>()(
 
       // Notification actions
       addNotification: (notification) => {
+        const now = Date.now();
+        const current = get().notifications;
+        const duplicateRecent = current.find((n) =>
+          n.type === notification.type &&
+          n.title === notification.title &&
+          n.message === notification.message &&
+          (now - n.timestamp) <= NOTIFICATION_DEDUPE_WINDOW_MS,
+        );
+        if (duplicateRecent) return;
+
         const id = `notification_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         const newNotification: Notification = {
           ...notification,
           id,
-          timestamp: Date.now(),
+          timestamp: now,
           read: false,
         };
 
-        const notifications = [newNotification, ...get().notifications];
+        const notifications = [newNotification, ...current].slice(0, MAX_NOTIFICATIONS_IN_STORE);
         const unreadCount = notifications.filter(n => !n.read).length;
 
         logger.info('Notification added', { 
@@ -137,12 +157,10 @@ export const useUIStore = create<UIState>()(
           unreadNotificationCount: unreadCount,
         });
 
-        // Auto-remove success notifications after 5 seconds
-        if (notification.type === 'success') {
-          setTimeout(() => {
-            get().removeNotification(id);
-          }, 5000);
-        }
+        // Auto-remove all notifications with short TTLs to avoid toast pile-up
+        setTimeout(() => {
+          get().removeNotification(id);
+        }, NOTIFICATION_TTL_MS[notification.type] ?? 2600);
       },
 
       markNotificationRead: (id: string) => {

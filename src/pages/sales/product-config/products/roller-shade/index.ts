@@ -47,16 +47,16 @@ function validateStep(stepId: string, config: ProductConfig): boolean {
       return hasCollection && hasVariant;
     }
 
-    case 'hardware':
-      // Requiere color + bottom bar + headbox explícito + side channel explícito (no avanzar si falta alguna elección)
+    case 'hardware': {
       const hasColor = !!((rollerConfig as any).hardwareColor || (rollerConfig as any).hardware_color);
       const hasBottomBar = !!((rollerConfig as any).bottom_bar_item_id || (rollerConfig as any).bottom_bar_sku);
-      // Headbox: debe estar elegido (UUID o 'NONE'), no puede quedar UNSET
-      const hasHeadboxExplicit = (rollerConfig as any).headbox_item_id != null;
-      // Side channel: debe estar elegido (UUID o 'NONE') para que el template se resuelva correctamente
-      const hasSideChannelExplicit = (rollerConfig as any).side_channel_item_id != null;
+      const hbPolicy: string = (rollerConfig as any)._headboxPolicy ?? 'optional';
+      const scPolicy: string = (rollerConfig as any)._sideChannelPolicy ?? 'optional';
+      const hasHeadboxExplicit = hbPolicy === 'none' || (rollerConfig as any).headbox_item_id != null;
+      const hasSideChannelExplicit = scPolicy === 'none' || (rollerConfig as any).side_channel_item_id != null;
 
       return hasColor && hasBottomBar && hasHeadboxExplicit && hasSideChannelExplicit;
+    }
 
     case 'operating-system':
       // ✅ NUEVO FLUJO: Operating system + drive/motor específico + tube obligatorios

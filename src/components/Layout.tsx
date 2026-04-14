@@ -98,8 +98,8 @@ const MODULE_TABS: Record<string, { label: string; href: string }[]> = {
     { label: 'Manufacturing Orders', href: '/manufacturing/manufacturing-orders' },
     { label: 'Work Orders', href: '/manufacturing/work-orders' },
     { label: 'Calendar', href: '/manufacturing/calendar' },
-    { label: 'Finished Goods', href: '/manufacturing/finished-goods' },
     { label: 'Cut Optimization', href: '/manufacturing/cut-optimization' },
+    { label: 'Finished Goods', href: '/manufacturing/finished-goods' },
   ],
   '/financials': [
     { label: 'Accounts Receivable', href: '/financials/accounts' },
@@ -166,10 +166,10 @@ function getManufacturingTabs(can: (permissionCode: string) => boolean): { label
   if (can('manufacturing.mo.read')) tabs.push({ label: 'Manufacturing Orders', href: '/manufacturing/manufacturing-orders' });
   if (can('manufacturing.wo.read')) tabs.push({ label: 'Work Orders', href: '/manufacturing/work-orders' });
   if (can('manufacturing.calendar.read')) tabs.push({ label: 'Calendar', href: '/manufacturing/calendar' });
-  if (can('manufacturing.finished_goods.read')) tabs.push({ label: 'Finished Goods', href: '/manufacturing/finished-goods' });
   if (can('manufacturing.cutopt.read') || can('manufacturing.wo.read')) {
     tabs.push({ label: 'Cut Optimization', href: '/manufacturing/cut-optimization' });
   }
+  if (can('manufacturing.finished_goods.read')) tabs.push({ label: 'Finished Goods', href: '/manufacturing/finished-goods' });
   return tabs;
 }
 
@@ -1435,7 +1435,8 @@ function Layout({ children }: LayoutProps) {
               top: '3.5rem',
               height: '2.625rem',
               left: mainMarginLeft,
-              backgroundColor: 'var(--gray-100)'
+              backgroundColor: 'var(--gray-100)',
+              borderBottom: '1px solid var(--gray-250)'
             }}
             role="navigation"
             aria-label="Secondary navigation"

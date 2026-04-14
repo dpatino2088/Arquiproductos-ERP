@@ -200,7 +200,19 @@ export default function FabricRulesSettings() {
     const derived = deriveFromSource(src);
     const mechanical = isMechanical(src);
     const drapery = isDrapery(src);
-    const wasteDisplay = ((draft.waste_pct ?? 0.15) * 100).toFixed(0);
+    const parseNumberOrUndefined = (raw: string): number | undefined => {
+      if (raw.trim() === '') return undefined;
+      const n = Number(raw);
+      return Number.isFinite(n) ? n : undefined;
+    };
+    const wasteDisplay = draft.waste_pct == null ? '' : String(Math.round(draft.waste_pct * 100));
+    const confectionDisplay = draft.confection_pct == null ? '' : String(Math.round(draft.confection_pct * 100));
+    const bottomBarWrapDisplay = draft.bottom_bar_wrap_pct == null ? '' : String(Math.round(draft.bottom_bar_wrap_pct * 100));
+    const cmToMmDisplay = (v: number | null | undefined): string => (v == null ? '' : String(Math.round(v * 10)));
+    const mmInputToCm = (raw: string): number | undefined => {
+      const n = parseNumberOrUndefined(raw);
+      return n == null ? undefined : n / 10;
+    };
     const ptIsDrapery = isProductTypeDrapery(ptName);
     const ptIsMechanical = isProductTypeMechanical(ptName);
 
@@ -274,26 +286,37 @@ export default function FabricRulesSettings() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div>
                 <Label className="text-xs">Panel Multiplier</Label>
-                <Input type="number" step={1} min={1} value={draft.panel_multiplier ?? 1} onChange={e => setDraft({ ...draft, panel_multiplier: parseFloat(e.target.value) || 1 })} className="text-xs" />
+                <Input type="number" step={1} min={1} value={draft.panel_multiplier ?? ''} onChange={e => {
+                  const n = parseNumberOrUndefined(e.target.value);
+                  setDraft({ ...draft, panel_multiplier: n == null ? undefined : Math.max(1, n) });
+                }} className="text-xs" />
                 <span className="text-[10px] text-gray-400">1=Roller, 2=Dual, 3=Triple</span>
               </div>
               <div>
                 <Label className="text-xs">Tube Wrap (mm)</Label>
-                <Input type="number" step={1} value={draft.tube_wrap_mm ?? 0} onChange={e => setDraft({ ...draft, tube_wrap_mm: parseFloat(e.target.value) || 0 })} className="text-xs" />
+                <Input type="number" step={1} value={draft.tube_wrap_mm ?? ''} onChange={e => {
+                  setDraft({ ...draft, tube_wrap_mm: parseNumberOrUndefined(e.target.value) });
+                }} className="text-xs" />
               </div>
               <div>
                 <Label className="text-xs">Bottom Wrap (mm)</Label>
-                <Input type="number" step={1} value={draft.bottom_wrap_mm ?? 0} onChange={e => setDraft({ ...draft, bottom_wrap_mm: parseFloat(e.target.value) || 0 })} className="text-xs" />
+                <Input type="number" step={1} value={draft.bottom_wrap_mm ?? ''} onChange={e => {
+                  setDraft({ ...draft, bottom_wrap_mm: parseNumberOrUndefined(e.target.value) });
+                }} className="text-xs" />
               </div>
               <div>
                 <Label className="text-xs">Safety Margin (mm)</Label>
-                <Input type="number" step={1} value={draft.safety_margin_mm ?? 0} onChange={e => setDraft({ ...draft, safety_margin_mm: parseFloat(e.target.value) || 0 })} className="text-xs" />
+                <Input type="number" step={1} value={draft.safety_margin_mm ?? ''} onChange={e => {
+                  setDraft({ ...draft, safety_margin_mm: parseNumberOrUndefined(e.target.value) });
+                }} className="text-xs" />
               </div>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3 pt-3 border-t border-blue-100">
               <div>
                 <Label className="text-xs">Heat Seal Price ($/m)</Label>
-                <Input type="number" step={0.5} min={0} value={draft.heatseal_price_per_m ?? 0} onChange={e => setDraft({ ...draft, heatseal_price_per_m: parseFloat(e.target.value) || 0 })} className="text-xs" />
+                <Input type="number" step={0.5} min={0} value={draft.heatseal_price_per_m ?? ''} onChange={e => {
+                  setDraft({ ...draft, heatseal_price_per_m: parseNumberOrUndefined(e.target.value) });
+                }} className="text-xs" />
                 <span className="text-[10px] text-gray-400">Per linear meter of splice</span>
               </div>
               <div>
@@ -310,8 +333,11 @@ export default function FabricRulesSettings() {
                 <div className="relative">
                   <Input
                     type="number" step={1} min={0} max={100}
-                    value={((draft.bottom_bar_wrap_pct ?? 0) * 100).toFixed(0)}
-                    onChange={e => setDraft({ ...draft, bottom_bar_wrap_pct: (parseFloat(e.target.value) || 0) / 100 })}
+                    value={bottomBarWrapDisplay}
+                    onChange={e => {
+                      const n = parseNumberOrUndefined(e.target.value);
+                      setDraft({ ...draft, bottom_bar_wrap_pct: n == null ? undefined : n / 100 });
+                    }}
                     className="text-xs pr-6"
                   />
                   <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">%</span>
@@ -336,39 +362,46 @@ export default function FabricRulesSettings() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div>
                 <Label className="text-xs">Fullness Factor</Label>
-                <Input type="number" step={0.1} min={1} value={draft.fullness_factor ?? 1} onChange={e => setDraft({ ...draft, fullness_factor: parseFloat(e.target.value) || 1 })} className="text-xs" />
+                <Input type="number" step={0.1} min={1} value={draft.fullness_factor ?? ''} onChange={e => {
+                  const n = parseNumberOrUndefined(e.target.value);
+                  setDraft({ ...draft, fullness_factor: n == null ? undefined : Math.max(1, n) });
+                }} className="text-xs" />
                 <span className="text-[10px] text-gray-400">1.8x, 2.0x, 2.2x, 2.5x</span>
               </div>
               <div>
-                <Label className="text-xs">Top Hem (cm)</Label>
-                <Input type="number" step={0.5} value={draft.top_hem_cm ?? 0} onChange={e => setDraft({ ...draft, top_hem_cm: parseFloat(e.target.value) || 0 })} className="text-xs" />
+                <Label className="text-xs">Top Hem (mm)</Label>
+                <Input type="number" step={1} value={cmToMmDisplay(draft.top_hem_cm)} onChange={e => setDraft({ ...draft, top_hem_cm: mmInputToCm(e.target.value) })} className="text-xs" />
               </div>
               <div>
-                <Label className="text-xs">Bottom Hem Default (cm)</Label>
-                <Input type="number" step={0.5} value={draft.bottom_hem_cm ?? 0} onChange={e => setDraft({ ...draft, bottom_hem_cm: parseFloat(e.target.value) || 0 })} className="text-xs" />
+                <Label className="text-xs">Bottom Hem Default (mm)</Label>
+                <Input type="number" step={1} value={cmToMmDisplay(draft.bottom_hem_cm)} onChange={e => setDraft({ ...draft, bottom_hem_cm: mmInputToCm(e.target.value) })} className="text-xs" />
               </div>
               <div className="md:col-span-2">
-                <Label className="text-xs">Bottom Hem Options (cm)</Label>
+                <Label className="text-xs">Bottom Hem Options (mm)</Label>
                 <Input
-                  value={(draft.bottom_hem_options ?? []).join(', ')}
+                  value={(draft.bottom_hem_options ?? []).map(v => Math.round(v * 10)).join(', ')}
                   onChange={e => {
-                    const vals = e.target.value.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v));
+                    const vals = e.target.value
+                      .split(',')
+                      .map(v => parseFloat(v.trim()))
+                      .filter(v => !isNaN(v))
+                      .map(v => v / 10);
                     setDraft({ ...draft, bottom_hem_options: vals.length > 0 ? vals : null });
                   }}
-                  placeholder="0, 5, 10, 15"
+                  placeholder="0, 50, 100, 150"
                   className="text-xs"
                 />
-                <span className="text-[10px] text-gray-400">Comma-separated cm values shown as cards in configurator</span>
+                <span className="text-[10px] text-gray-400">Comma-separated mm values shown as cards in configurator</span>
               </div>
               <div>
-                <Label className="text-xs">Side Hem (cm)</Label>
-                <Input type="number" step={0.5} value={draft.side_hem_cm ?? 0} onChange={e => setDraft({ ...draft, side_hem_cm: parseFloat(e.target.value) || 0 })} className="text-xs" />
+                <Label className="text-xs">Side Hem (mm)</Label>
+                <Input type="number" step={1} value={cmToMmDisplay(draft.side_hem_cm)} onChange={e => setDraft({ ...draft, side_hem_cm: mmInputToCm(e.target.value) })} className="text-xs" />
               </div>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3 pt-3 border-t border-purple-100">
               <div>
                 <Label className="text-xs">Heat Seal Price ($/m)</Label>
-                <Input type="number" step={0.5} min={0} value={draft.heatseal_price_per_m ?? 0} onChange={e => setDraft({ ...draft, heatseal_price_per_m: parseFloat(e.target.value) || 0 })} className="text-xs" />
+                <Input type="number" step={0.5} min={0} value={draft.heatseal_price_per_m ?? ''} onChange={e => setDraft({ ...draft, heatseal_price_per_m: parseNumberOrUndefined(e.target.value) })} className="text-xs" />
               </div>
               <div>
                 <Label className="text-xs">Heatseal Direction</Label>
@@ -396,7 +429,10 @@ export default function FabricRulesSettings() {
               <Input
                 type="number" step={1} min={0} max={100}
                 value={wasteDisplay}
-                onChange={e => setDraft({ ...draft, waste_pct: (parseFloat(e.target.value) || 0) / 100 })}
+                onChange={e => {
+                  const n = parseNumberOrUndefined(e.target.value);
+                  setDraft({ ...draft, waste_pct: n == null ? undefined : n / 100 });
+                }}
                 className="text-xs pr-6"
               />
               <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">%</span>
@@ -407,8 +443,11 @@ export default function FabricRulesSettings() {
             <div className="relative">
               <Input
                 type="number" step={1} min={0} max={100}
-                value={((draft.confection_pct ?? 0) * 100).toFixed(0)}
-                onChange={e => setDraft({ ...draft, confection_pct: (parseFloat(e.target.value) || 0) / 100 })}
+                value={confectionDisplay}
+                onChange={e => {
+                  const n = parseNumberOrUndefined(e.target.value);
+                  setDraft({ ...draft, confection_pct: n == null ? undefined : n / 100 });
+                }}
                 className="text-xs pr-6"
               />
               <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">%</span>
@@ -417,12 +456,12 @@ export default function FabricRulesSettings() {
           </div>
           <div>
             <Label className="text-xs">Min Order Qty</Label>
-            <Input type="number" step={0.01} value={draft.min_qty ?? 0} onChange={e => setDraft({ ...draft, min_qty: parseFloat(e.target.value) || 0 })} className="text-xs" />
+            <Input type="number" step={0.01} value={draft.min_qty ?? ''} onChange={e => setDraft({ ...draft, min_qty: parseNumberOrUndefined(e.target.value) })} className="text-xs" />
             <span className="text-[10px] text-gray-400">Minimum to order (e.g., 1m)</span>
           </div>
           <div>
             <Label className="text-xs">Round Increment</Label>
-            <Input type="number" step={0.01} value={draft.round_to_increment ?? 0.01} onChange={e => setDraft({ ...draft, round_to_increment: parseFloat(e.target.value) || 0.01 })} className="text-xs" />
+            <Input type="number" step={0.01} value={draft.round_to_increment ?? ''} onChange={e => setDraft({ ...draft, round_to_increment: parseNumberOrUndefined(e.target.value) })} className="text-xs" />
             <span className="text-[10px] text-gray-400">Round to nearest (e.g., 0.1m)</span>
           </div>
         </div>
@@ -529,9 +568,9 @@ export default function FabricRulesSettings() {
                                 {isDrapery(rule.fabric_width_source) && (
                                   <>
                                     <span>Fullness: {rule.fullness_factor}x</span>
-                                    <span>Hems T/B/S: {rule.top_hem_cm}/{rule.bottom_hem_cm}/{rule.side_hem_cm} cm</span>
+                                    <span>Hems T/B/S: {Math.round((rule.top_hem_cm ?? 0) * 10)}/{Math.round((rule.bottom_hem_cm ?? 0) * 10)}/{Math.round((rule.side_hem_cm ?? 0) * 10)} mm</span>
                                     {rule.bottom_hem_options && rule.bottom_hem_options.length > 0 && (
-                                      <span>Hem options: [{rule.bottom_hem_options.join(', ')}]</span>
+                                      <span>Hem options: [{rule.bottom_hem_options.map(v => Math.round(v * 10)).join(', ')}] mm</span>
                                     )}
                                   </>
                                 )}

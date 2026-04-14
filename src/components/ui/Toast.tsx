@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useUIStore } from '../../stores/ui-store';
 import { CheckCircle, AlertCircle, X } from 'lucide-react';
@@ -8,16 +7,6 @@ export default function Toast() {
 
   // Get the most recent notification (for toast display)
   const latestNotification = notifications.length > 0 ? notifications[0] : null;
-
-  useEffect(() => {
-    if (latestNotification && latestNotification.type === 'success') {
-      // Auto-remove after 5 seconds (already handled in store, but ensure cleanup)
-      const timer = setTimeout(() => {
-        removeNotification(latestNotification.id);
-      }, 5000);
-      return () => clearTimeout(timer);
-    }
-  }, [latestNotification, removeNotification]);
 
   if (!latestNotification) return null;
   if (typeof document === 'undefined') return null;

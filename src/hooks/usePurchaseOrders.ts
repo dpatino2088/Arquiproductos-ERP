@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase/client';
 import { useOrganizationContext } from '../context/OrganizationContext';
 import { purchaseOrdersListKey, purchaseOrderDetailKey } from '../lib/queryKeys';
 import { generateNextPurchaseOrderNumber } from '../lib/sequential-numbers';
+import { resolveInventoryUnitModel, type MeasureBasis } from '../lib/inventoryUnitModel';
 
 export type PurchaseOrderStatus = 'DRAFT' | 'OPEN' | 'PARTIAL' | 'CLOSED' | 'CANCELLED' | 'ARCHIVED';
 
@@ -49,6 +50,7 @@ export interface PurchaseOrderLine {
   purchase_mode_snapshot?: 'unit_packaged' | 'linear_direct' | 'roll' | null;
   stock_basis_snapshot?: 'ea' | 'linear_m' | null;
   units_per_purchase_unit_snapshot?: number | null;
+  moq_snapshot?: number | null;
   unit_of_measure_snapshot?: string | null;
   is_roll_snapshot?: boolean | null;
   roll_width_value_snapshot?: number | null;
@@ -60,12 +62,14 @@ export interface PurchaseOrderLine {
   CatalogItems?: {
     sku: string;
     name: string;
+    description?: string | null;
     cost_exw?: number | null;
     unit_of_measure?: string | null;
     measure_basis?: 'unit' | 'linear' | 'area' | null;
     is_roll?: boolean | null;
     purchase_unit?: string | null;
     units_per_purchase_unit?: number | null;
+    moq?: number | null;
   } | null;
 }
 
@@ -176,7 +180,7 @@ export function usePurchaseOrderDetail(poId: string | null) {
       if (!poId) return [];
       const { data, error } = await supabase
         .from('PurchaseOrderLines')
-        .select('*, CatalogItems(sku, name, cost_exw, unit_of_measure, measure_basis, is_roll, purchase_unit, units_per_purchase_unit, roll_width_value, roll_width_uom, roll_length_value, roll_length_uom)')
+        .select('*, CatalogItems(sku, name, description, cost_exw, unit_of_measure, measure_basis, is_roll, purchase_unit, units_per_purchase_unit, moq, roll_width_value, roll_width_uom, roll_length_value, roll_length_uom)')
         .eq('purchase_order_id', poId)
         .order('created_at', { ascending: true });
       if (error) throw error;
@@ -231,6 +235,7 @@ export interface CreatePOLineInput {
   purchase_mode_snapshot?: 'unit_packaged' | 'linear_direct' | 'roll' | null;
   stock_basis_snapshot?: 'ea' | 'linear_m' | null;
   units_per_purchase_unit_snapshot?: number | null;
+  moq_snapshot?: number | null;
   unit_of_measure_snapshot?: string | null;
   is_roll_snapshot?: boolean | null;
   roll_width_value_snapshot?: number | null;
@@ -293,7 +298,7 @@ export function useCreatePurchaseOrder() {
           const catalogIds = [...new Set(params.lines.map(l => l.catalog_item_id).filter((id): id is string => !!id))];
           const { data: catalogRows } = await supabase
             .from('CatalogItems')
-            .select('id, sku, name, unit_of_measure, measure_basis, is_roll, purchase_unit, units_per_purchase_unit')
+            .select('id, sku, name, unit_of_measure, measure_basis, is_roll, purchase_unit, units_per_purchase_unit, moq')
             .in('id', catalogIds);
           const catalogMap = new Map((catalogRows ?? []).map((r: Record<string, unknown>) => [r.id as string, r]));
           linesToInsert = params.lines.map(l => {
@@ -313,6 +318,7 @@ export function useCreatePurchaseOrder() {
               stock_basis_snapshot: (l.stock_basis_snapshot ?? derivedBasis) as 'ea' | 'linear_m' | null,
               purchase_uom_snapshot: (l.purchase_uom_snapshot ?? ci.purchase_unit ?? ci.unit_of_measure ?? null) as string | null,
               purchase_unit_snapshot: (l.purchase_unit_snapshot ?? ci.purchase_unit ?? null) as string | null,
+              moq_snapshot: (l.moq_snapshot ?? ci.moq ?? 0) as number | null,
               unit_of_measure_snapshot: (l.unit_of_measure_snapshot ?? ci.unit_of_measure ?? null) as string | null,
               is_roll_snapshot: (l.is_roll_snapshot ?? ci.is_roll ?? null) as boolean | null,
             };
@@ -337,6 +343,7 @@ export function useCreatePurchaseOrder() {
           purchase_mode_snapshot: l.purchase_mode_snapshot ?? null,
           stock_basis_snapshot: l.stock_basis_snapshot ?? null,
           units_per_purchase_unit_snapshot: l.units_per_purchase_unit_snapshot ?? null,
+          moq_snapshot: l.moq_snapshot ?? null,
           unit_of_measure_snapshot: l.unit_of_measure_snapshot ?? null,
           is_roll_snapshot: l.is_roll_snapshot ?? null,
           roll_width_value_snapshot: l.roll_width_value_snapshot ?? null,
@@ -406,6 +413,7 @@ export interface UpdatePOLineInput {
   purchase_mode_snapshot?: 'unit_packaged' | 'linear_direct' | 'roll' | null;
   stock_basis_snapshot?: 'ea' | 'linear_m' | null;
   units_per_purchase_unit_snapshot?: number | null;
+  moq_snapshot?: number | null;
   unit_of_measure_snapshot?: string | null;
   is_roll_snapshot?: boolean | null;
   roll_width_value_snapshot?: number | null;
@@ -499,6 +507,7 @@ export function useUpdatePurchaseOrder() {
               purchase_mode_snapshot: l.purchase_mode_snapshot ?? null,
               stock_basis_snapshot: l.stock_basis_snapshot ?? null,
               units_per_purchase_unit_snapshot: l.units_per_purchase_unit_snapshot ?? null,
+              moq_snapshot: l.moq_snapshot ?? null,
               unit_of_measure_snapshot: l.unit_of_measure_snapshot ?? null,
               is_roll_snapshot: l.is_roll_snapshot ?? null,
               roll_width_value_snapshot: l.roll_width_value_snapshot ?? null,
@@ -529,6 +538,7 @@ export function useUpdatePurchaseOrder() {
             purchase_mode_snapshot: l.purchase_mode_snapshot ?? null,
             stock_basis_snapshot: l.stock_basis_snapshot ?? null,
             units_per_purchase_unit_snapshot: l.units_per_purchase_unit_snapshot ?? null,
+            moq_snapshot: l.moq_snapshot ?? null,
             unit_of_measure_snapshot: l.unit_of_measure_snapshot ?? null,
             is_roll_snapshot: l.is_roll_snapshot ?? null,
             roll_width_value_snapshot: l.roll_width_value_snapshot ?? null,
@@ -577,6 +587,7 @@ export function useDeletePurchaseOrder() {
 export function useReceivePurchaseOrder() {
   const [isReceiving, setIsReceiving] = useState(false);
   const queryClient = useQueryClient();
+  const { activeOrganizationId } = useOrganizationContext();
 
   const receivePurchaseOrder = useCallback(async (
     purchaseOrderId: string,
@@ -593,6 +604,10 @@ export function useReceivePurchaseOrder() {
       if (result && !result.ok) throw new Error(result.error || 'Receipt failed: unknown RPC error');
       queryClient.invalidateQueries({ queryKey: ['inventory', 'purchase-orders'] });
       queryClient.invalidateQueries({ queryKey: ['inventory-movements'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-allocations'] });
+      if (activeOrganizationId) {
+        queryClient.invalidateQueries({ queryKey: ['material-demand', activeOrganizationId] });
+      }
 
       // Auto-advance linked MOs to materials_ready if all demand is covered.
       // Wrap in async IIFE because supabase.rpc builder is not a native Promise at call-site.
@@ -608,7 +623,7 @@ export function useReceivePurchaseOrder() {
     } finally {
       setIsReceiving(false);
     }
-  }, [queryClient]);
+  }, [queryClient, activeOrganizationId]);
 
   return { receivePurchaseOrder, isReceiving };
 }
@@ -620,6 +635,7 @@ export interface CatalogItemCostInfo {
   purchase_mode: 'unit_packaged' | 'linear_direct' | 'roll';
   stock_basis: 'ea' | 'linear_m';
   units_per_purchase_unit: number;
+  moq: number;
   unit_of_measure: string;
 }
 
@@ -630,7 +646,7 @@ export interface CatalogItemCostInfo {
 export async function fetchCatalogItemCostInfo(itemId: string): Promise<CatalogItemCostInfo> {
   const { data, error } = await supabase
     .from('CatalogItems')
-    .select('cost_exw, purchase_unit, units_per_purchase_unit, unit_of_measure, measure_basis, is_roll')
+    .select('cost_exw, purchase_unit, units_per_purchase_unit, moq, unit_of_measure, measure_basis, is_roll')
     .eq('id', itemId)
     .single();
   if (error || !data) {
@@ -641,13 +657,15 @@ export async function fetchCatalogItemCostInfo(itemId: string): Promise<CatalogI
       purchase_mode: 'unit_packaged',
       stock_basis: 'ea',
       units_per_purchase_unit: 1,
+      moq: 0,
       unit_of_measure: 'ea',
     };
   }
   const isRoll = Boolean(data.is_roll);
-  const measureBasis = data.measure_basis as string | null;
-  const purchaseMode: 'unit_packaged' | 'linear_direct' | 'roll' = isRoll ? 'roll' : (measureBasis === 'linear' ? 'linear_direct' : 'unit_packaged');
-  const stockBasis: 'ea' | 'linear_m' = measureBasis === 'linear' ? 'linear_m' : 'ea';
+  const measureBasis = (data.measure_basis ?? 'unit') as MeasureBasis;
+  const model = resolveInventoryUnitModel({ isRoll, measureBasis, purchaseUnit: data.purchase_unit });
+  const purchaseMode = model.purchaseMode;
+  const stockBasis = model.stockBasis;
   return {
     cost_exw: Number(data.cost_exw ?? 0),
     purchase_unit: data.purchase_unit ?? 'each',
@@ -655,6 +673,7 @@ export async function fetchCatalogItemCostInfo(itemId: string): Promise<CatalogI
     purchase_mode: purchaseMode,
     stock_basis: stockBasis,
     units_per_purchase_unit: Number(data.units_per_purchase_unit ?? 1),
+    moq: Number(data.moq ?? 0),
     unit_of_measure: data.unit_of_measure ?? 'ea',
   };
 }
@@ -696,8 +715,8 @@ export function useUpdatePurchaseOrderStatus() {
         .eq('id', poId);
       if (error) throw error;
 
-      queryClient.invalidateQueries({ queryKey: purchaseOrdersListKey(activeOrganizationId) });
-      queryClient.invalidateQueries({ queryKey: purchaseOrderDetailKey(activeOrganizationId, poId) });
+      queryClient.invalidateQueries({ queryKey: purchaseOrdersListKey(activeOrganizationId), refetchType: 'all' });
+      queryClient.invalidateQueries({ queryKey: purchaseOrderDetailKey(activeOrganizationId, poId), refetchType: 'all' });
     } finally {
       setIsUpdating(false);
     }

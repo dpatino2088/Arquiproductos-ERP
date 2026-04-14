@@ -100,7 +100,7 @@ export default function CutListTab({ moId, moStatus }: CutListTabProps) {
       {/* Header with Generate Button */}
       <div className="mb-4 flex items-center justify-between">
         <h3 className="text-lg font-semibold text-gray-900">Cut List</h3>
-        {moStatus === 'planned' && (
+        {moStatus === 'materials_ready' && (
           <button
             onClick={handleGenerateCutList}
             disabled={generatingCutList}
@@ -112,18 +112,16 @@ export default function CutListTab({ moId, moStatus }: CutListTabProps) {
         )}
       </div>
 
-      {/* Status Banner */}
-      {moStatus !== 'planned' && (
+      {moStatus !== 'materials_ready' && (
         <div className="mb-4 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
           <p className="text-sm text-yellow-800">
-            Cut list can only be generated when Manufacturing Order status is <strong>Planned</strong>.
+            Cut list can only be generated when Manufacturing Order status is <strong>Material Ready</strong>.
             Current status: <strong>{moStatus.toUpperCase()}</strong>
           </p>
         </div>
       )}
 
-      {/* No Cut List Generated */}
-      {!cutJob && moStatus === 'planned' && (
+      {!cutJob && moStatus === 'materials_ready' && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 text-center">
           <p className="text-sm text-blue-800 mb-4">
             No cut list has been generated yet. Click "Generate Cut List" to create one.

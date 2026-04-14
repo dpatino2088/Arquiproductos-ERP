@@ -30,9 +30,9 @@ const LEVEL_DOT = {
   overload: 'bg-red-500',
 } as const;
 
-function computeLevel(total: number): 'ok' | 'warning' | 'overload' {
-  if (total <= 8) return 'ok';
-  if (total <= 12) return 'warning';
+function computeLevel(total: number, capacity: number): 'ok' | 'warning' | 'overload' {
+  if (total <= capacity) return 'ok';
+  if (total <= capacity * 1.5) return 'warning';
   return 'overload';
 }
 
@@ -152,9 +152,9 @@ export default function WorkloadHeatmap({
 
           {/* Legend */}
           <div className="flex items-center gap-3 text-[10px] text-gray-500">
-            <div className="flex items-center gap-1"><div className={`w-2.5 h-2.5 rounded-sm ${LEVEL_STYLES.ok.split(' ')[0]}`} /> ≤ 8h</div>
-            <div className="flex items-center gap-1"><div className={`w-2.5 h-2.5 rounded-sm ${LEVEL_STYLES.warning.split(' ')[0]}`} /> 8–12h</div>
-            <div className="flex items-center gap-1"><div className={`w-2.5 h-2.5 rounded-sm ${LEVEL_STYLES.overload.split(' ')[0]}`} /> &gt; 12h</div>
+            <div className="flex items-center gap-1"><div className={`w-2.5 h-2.5 rounded-sm ${LEVEL_STYLES.ok.split(' ')[0]}`} /> ≤ capacity</div>
+            <div className="flex items-center gap-1"><div className={`w-2.5 h-2.5 rounded-sm ${LEVEL_STYLES.warning.split(' ')[0]}`} /> over capacity</div>
+            <div className="flex items-center gap-1"><div className={`w-2.5 h-2.5 rounded-sm ${LEVEL_STYLES.overload.split(' ')[0]}`} /> &gt; 1.5× cap</div>
           </div>
         </div>
       </div>
@@ -199,7 +199,7 @@ export default function WorkloadHeatmap({
                   const baseHours = existing?.totalHours ?? 0;
                   const totalHours = baseHours + simHours;
                   const capacity = wc.capacity_hours_per_day;
-                  const level = totalHours > 0 ? computeLevel(totalHours) : null;
+                  const level = totalHours > 0 ? computeLevel(totalHours, capacity) : null;
                   const isHovered = hoveredCell?.wcId === wc.id && hoveredCell?.dateKey === key;
                   const clickable = isTargetRow;
                   const hasRoom = totalHours < capacity * 1.5;

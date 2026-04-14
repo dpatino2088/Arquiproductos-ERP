@@ -22,6 +22,64 @@ interface AssemblyDetailProps {
   lines: AssemblyLine[];
   onToggleLine: (lineId: string, completed: boolean) => void;
   siblingTasks?: SiblingTaskInfo[];
+  readOnly?: boolean;
+}
+
+export interface CutBreakdownDeduction {
+  role: string;
+  sku: string;
+  delta: number;
+  qty: number;
+  total: number;
+  mode?: 'subtract' | 'add' | 'info';
+  affects_cut?: boolean;
+  conditional: boolean;
+  label?: string;
+}
+
+export interface PanelDeduction {
+  role: string;
+  sku: string;
+  delta: number;
+  qty: number;
+  total: number;
+  mode?: 'subtract' | 'add' | 'info';
+  note?: string;
+}
+
+export interface PanelCut {
+  panel: number;
+  base_mm: number;
+  cut_mm: number;
+  deduction: number;
+  calc_ded?: number;
+  position: 'left' | 'center' | 'right';
+  cut_height?: number;
+  deductions?: PanelDeduction[];
+}
+
+export interface CutBreakdownItem {
+  role: string;
+  label: string;
+  sku: string;
+  axis: 'width' | 'height' | 'special';
+  base_label: string;
+  base_mm: number;
+  tolerance_mm: number;
+  deductions: CutBreakdownDeduction[];
+  total_deduction: number;
+  resolved_mm: number;
+  instance_cut_mm: number | null;
+  match: boolean;
+  per_panel: boolean;
+  panel_count?: number;
+  panel_cuts?: PanelCut[];
+  qty_type: string;
+  qty_value: number;
+  resolved_height_mm?: number;
+  instance_cut_height_mm?: number;
+  fabric_width_mm?: number;
+  fabric_width_source?: string;
 }
 
 interface ProductConfig {
@@ -48,6 +106,8 @@ interface ProductConfig {
   fabric_name: string | null;
   fabric_names: (string | null)[];
   fullness_factor: number;
+  cut_breakdown: CutBreakdownItem[] | null;
+  bom_template_code: string | null;
 }
 
 interface ProductUnit {
@@ -154,6 +214,8 @@ function buildConfigFromSol(
     fabric_name: fabricName,
     fabric_names: fabricNames,
     fullness_factor: fullness,
+    cut_breakdown: null,
+    bom_template_code: cpConfig?.bom_template_code ?? null,
   };
 }
 
@@ -188,6 +250,8 @@ function ProductDiagram({ config }: { config: ProductConfig | null }) {
           bottomBarCutsPerPanel={config.bottom_bar_cuts_per_panel}
           hardwareColor={config.hardware_color}
           fabricName={config.fabric_name}
+          cutBreakdown={config.cut_breakdown}
+          bomTemplateCode={config.bom_template_code}
         />
       );
     case 'drapery':
@@ -202,6 +266,8 @@ function ProductDiagram({ config }: { config: ProductConfig | null }) {
           hasTrack={config.has_track}
           fabricName={config.fabric_name}
           fullnessFactor={config.fullness_factor}
+          cutBreakdown={config.cut_breakdown}
+          bomTemplateCode={config.bom_template_code}
         />
       );
     case 'dual':
@@ -226,6 +292,8 @@ function ProductDiagram({ config }: { config: ProductConfig | null }) {
           hardwareColor={config.hardware_color}
           fabricName={config.fabric_name}
           fabricLayers={config.product_type === 'dual' ? 2 : config.product_type === 'triple' ? 3 : 1}
+          cutBreakdown={config.cut_breakdown}
+          bomTemplateCode={config.bom_template_code}
         />
       );
     default:
@@ -246,6 +314,7 @@ function ProductCard({
   onMarkAssembled,
   readinessMap,
   marking,
+  readOnly,
 }: {
   unit: ProductUnit;
   index: number;
@@ -254,6 +323,7 @@ function ProductCard({
   onMarkAssembled: () => void;
   readinessMap: Record<string, ReadinessStatus>;
   marking: boolean;
+  readOnly: boolean;
 }) {
   const isComplete = unit.lines.length > 0 && unit.lines.every(l => l.completed);
   const allMaterialsReady = unit.lines.every(l => {
@@ -321,35 +391,36 @@ function ProductCard({
             </div>
           </div>
 
-          {/* Mark as Assembled button */}
-          <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
-            {!allMaterialsReady && !isComplete && (
-              <span className="text-[10px] text-amber-600 flex items-center gap-1">
-                <Clock className="w-3 h-3" /> Waiting for upstream tasks to complete
-              </span>
-            )}
-            <div className="ml-auto">
-              {isComplete ? (
-                <button
-                  type="button"
-                  onClick={onMarkAssembled}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100"
-                >
-                  Undo Assembly
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={onMarkAssembled}
-                  disabled={marking || !allMaterialsReady}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {marking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <PackageCheck className="w-3.5 h-3.5" />}
-                  Mark as Assembled
-                </button>
+          {!readOnly && (
+            <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
+              {!allMaterialsReady && !isComplete && (
+                <span className="text-[10px] text-amber-600 flex items-center gap-1">
+                  <Clock className="w-3 h-3" /> Waiting for upstream tasks to complete
+                </span>
               )}
+              <div className="ml-auto">
+                {isComplete ? (
+                  <button
+                    type="button"
+                    onClick={onMarkAssembled}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100"
+                  >
+                    Undo Assembly
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={onMarkAssembled}
+                    disabled={marking || !allMaterialsReady}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {marking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <PackageCheck className="w-3.5 h-3.5" />}
+                    Mark as Assembled
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
     </div>
@@ -363,6 +434,7 @@ export default function AssemblyDetail({
   lines,
   onToggleLine,
   siblingTasks: siblingTasksProp,
+  readOnly = false,
 }: AssemblyDetailProps) {
   const [products, setProducts] = useState<ProductUnit[]>([]);
   const [loading, setLoading] = useState(true);
@@ -444,15 +516,19 @@ export default function AssemblyDetail({
       const bilToBi: Record<string, string> = {};
       (bilRows ?? []).forEach((r: any) => { bilToBi[r.id] = r.bom_instance_id; });
 
-      // BOMInstances → SaleOrderLines
+      // BOMInstances → SaleOrderLines (include created_at for sorting)
       const biIds = [...new Set(Object.values(bilToBi))];
       const { data: biRows } = await supabase
         .from('BOMInstances')
-        .select('id, sales_order_line_id')
+        .select('id, sales_order_line_id, created_at')
         .in('id', biIds);
 
       const biToSol: Record<string, string> = {};
-      (biRows ?? []).forEach((r: any) => { if (r.sales_order_line_id) biToSol[r.id] = r.sales_order_line_id; });
+      const biCreatedAt: Record<string, string> = {};
+      (biRows ?? []).forEach((r: any) => {
+        if (r.sales_order_line_id) biToSol[r.id] = r.sales_order_line_id;
+        if (r.created_at) biCreatedAt[r.id] = r.created_at;
+      });
 
       // Build line-to-SOL mapping
       const lineToSol: Record<string, string> = {};
@@ -501,6 +577,74 @@ export default function AssemblyDetail({
       const cpMap: Record<string, any> = {};
       (cpRows ?? []).forEach((r: any) => { cpMap[r.id] = r.config_snapshot; });
 
+      // Fetch BOM template codes for display
+      const templateIds = [...new Set(
+        Object.values(cpMap)
+          .map((cs: any) => cs?.bom_template_id)
+          .filter(Boolean),
+      )];
+      const templateCodeMap: Record<string, string> = {};
+      if (templateIds.length > 0) {
+        const { data: tmplRows } = await supabase
+          .from('BOMTemplates')
+          .select('id, code')
+          .in('id', templateIds);
+        (tmplRows ?? []).forEach((r: any) => {
+          if (r.code) templateCodeMap[r.id] = r.code;
+        });
+        for (const cs of Object.values(cpMap)) {
+          if (cs?.bom_template_id && templateCodeMap[cs.bom_template_id]) {
+            cs.bom_template_code = templateCodeMap[cs.bom_template_id];
+          }
+        }
+      }
+
+      // Fetch cut breakdowns for each BOM instance (parallel)
+      const breakdownByBi: Record<string, CutBreakdownItem[]> = {};
+      const uniqueBiIds = [...new Set(Object.values(bilToBi))];
+      await Promise.all(
+        uniqueBiIds.map(async (biId) => {
+          try {
+            const { data, error } = await supabase.rpc('compute_instance_cut_breakdown', {
+              p_bom_instance_id: biId,
+            });
+            if (error) return;
+            // supabase.rpc for scalar jsonb: data is the value directly
+            const arr = Array.isArray(data) ? data : null;
+            if (arr && arr.length > 0 && typeof arr[0] === 'object' && arr[0] !== null && 'role' in arr[0]) {
+              breakdownByBi[biId] = arr as CutBreakdownItem[];
+            }
+          } catch {
+            // non-critical
+          }
+        }),
+      );
+
+      // Map SOL → BOM instance: prefer the LATEST instance with the most panel data
+      const countPanelCuts = (biId: string) => {
+        const items = breakdownByBi[biId];
+        if (!items) return 0;
+        return items.reduce((sum, item) => sum + (item.panel_cuts?.length ?? 0), 0);
+      };
+      const solToBi: Record<string, string> = {};
+      for (const [biId, solId] of Object.entries(biToSol)) {
+        const prev = solToBi[solId];
+        if (!prev) {
+          solToBi[solId] = biId;
+        } else {
+          const prevPanels = countPanelCuts(prev);
+          const curPanels = countPanelCuts(biId);
+          if (curPanels > prevPanels) {
+            solToBi[solId] = biId;
+          } else if (curPanels === prevPanels) {
+            // same panel count: prefer the latest created instance
+            if ((biCreatedAt[biId] ?? '') > (biCreatedAt[prev] ?? '')) {
+              solToBi[solId] = biId;
+            }
+          }
+        }
+      }
+
       // Build product units
       const units: ProductUnit[] = [];
       for (const [solId, groupLines] of solGroups.entries()) {
@@ -520,6 +664,11 @@ export default function AssemblyDetail({
 
         const cpConfig = sol.configured_product_id ? cpMap[sol.configured_product_id] ?? null : null;
         const config = buildConfigFromSol(sol, cpConfig, groupLines);
+
+        const biId = solToBi[solId];
+        if (biId && breakdownByBi[biId]) {
+          config.cut_breakdown = breakdownByBi[biId];
+        }
 
         units.push({
           solId,
@@ -622,6 +771,7 @@ export default function AssemblyDetail({
             onMarkAssembled={() => handleMarkAssembled(idx)}
             readinessMap={readinessMap}
             marking={markingIdx === idx}
+            readOnly={readOnly}
           />
         ))}
       </div>

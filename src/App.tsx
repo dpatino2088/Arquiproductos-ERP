@@ -62,6 +62,7 @@ const BOMTemplates = lazy(() => import('./pages/catalog/BOMTemplates'));
 
 const ManufacturingOrders = lazy(() => import('./pages/manufacturing/ManufacturingOrders'));
 const ManufacturingOrderDetail = lazy(() => import('./pages/manufacturing/ManufacturingOrderDetail'));
+const MOLineDetail = lazy(() => import('./pages/manufacturing/MOLineDetail'));
 const WorkstationView = lazy(() => import('./pages/manufacturing/WorkstationView'));
 const WorkOrdersList = lazy(() => import('./pages/manufacturing/WorkOrdersList'));
 const WorkOrderDetail = lazy(() => import('./pages/manufacturing/WorkOrderDetail'));
@@ -734,6 +735,21 @@ function App() {
         setCurrentPage('login');
       }
     });
+    router.addRoute('/manufacturing/manufacturing-orders/:moId/lines/:lineId', () => {
+      if (isAuthenticated) {
+        const path = window.location.pathname;
+        const match = path.match(/\/manufacturing\/manufacturing-orders\/([^/]+)\/lines\/([^/]+)/);
+        if (match) {
+          setCurrentPage('mo-line-detail');
+          sessionStorage.setItem('currentManufacturingOrderId', match[1]);
+          sessionStorage.setItem('currentMOLineId', match[2]);
+        } else {
+          setCurrentPage('manufacturing-orders');
+        }
+      } else {
+        setCurrentPage('login');
+      }
+    });
     router.addRoute('/manufacturing/manufacturing-orders/:id', () => {
       if (isAuthenticated) {
         const path = window.location.pathname;
@@ -741,7 +757,6 @@ function App() {
         const moId = match ? match[1] : null;
         if (moId) {
           setCurrentPage('manufacturing-order-detail');
-          // Store MO ID in sessionStorage for the component to access
           sessionStorage.setItem('currentManufacturingOrderId', moId);
         } else {
           setCurrentPage('manufacturing-orders');
@@ -1340,6 +1355,11 @@ function App() {
       case 'manufacturing-order-detail': {
         const moId = sessionStorage.getItem('currentManufacturingOrderId');
         return <RequireModule module="manufacturing">{moId ? <ManufacturingOrderDetail moId={moId} /> : <ManufacturingOrders />}</RequireModule>;
+      }
+      case 'mo-line-detail': {
+        const moId = sessionStorage.getItem('currentManufacturingOrderId');
+        const lineId = sessionStorage.getItem('currentMOLineId');
+        return <RequireModule module="manufacturing">{moId && lineId ? <MOLineDetail moId={moId} lineId={lineId} /> : <ManufacturingOrders />}</RequireModule>;
       }
       case 'work-orders-list':
         return <RequireModule module="manufacturing"><WorkOrdersList /></RequireModule>;

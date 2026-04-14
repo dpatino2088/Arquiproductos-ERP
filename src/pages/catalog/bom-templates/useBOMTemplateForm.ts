@@ -11,14 +11,12 @@ import { useOnVisibilityChange } from '../../../lib/app-persistence';
 import type {
   BOMComponentDraft,
   ComponentFormData,
-  EngineeringData,
   ChildFormData,
   ComponentGroupedByCategory,
   BOMQtyType,
 } from './types';
 import {
   INITIAL_FORM_DATA,
-  INITIAL_ENGINEERING_DATA,
   INITIAL_CHILD_FORM_DATA,
   getCascadeOrder,
   getDefaultDependsOn,
@@ -62,10 +60,9 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
   const [showComponentDropdown, setShowComponentDropdown] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
 
-  // --- Engineering modal ---
-  const [showEngineeringModal, setShowEngineeringModal] = useState(false);
+  // --- Engineering popup ---
+  const [showEngineeringPopup, setShowEngineeringPopup] = useState(false);
   const [editingEngineeringComponentId, setEditingEngineeringComponentId] = useState<string | null>(null);
-  const [engineeringData, setEngineeringData] = useState<EngineeringData>({ ...INITIAL_ENGINEERING_DATA });
 
   // --- Children modal ---
   const [showChildrenModal, setShowChildrenModal] = useState(false);
@@ -151,8 +148,10 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
         || c.qty_value !== orig.qty_value
         || c.uom !== orig.uom
         || c.depends_on_role !== orig.depends_on_role
+        || c.affects_role !== orig.affects_role
         || c.cut_axis !== orig.cut_axis
-        || c.cut_delta_mm !== orig.cut_delta_mm;
+        || c.cut_delta_mm !== orig.cut_delta_mm
+        || c.delta_mode !== orig.delta_mode;
     });
   }, [components, componentsToDelete]);
 
@@ -272,6 +271,7 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
         affects_role: comp.affects_role || null,
         cut_axis: comp.cut_axis || null,
         cut_delta_mm: comp.cut_delta_mm || 0,
+        delta_mode: comp.delta_mode || 'subtract',
         qty_spacing_mm: comp.qty_spacing_mm ?? null,
         qty_min: comp.qty_min != null ? Number(comp.qty_min) : null,
         uom: syncedUom,
@@ -281,7 +281,9 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
         auto_select: false,
         condition_key: comp.condition_key || null,
         condition_value: comp.condition_value || null,
-        catalog_item: comp.component_item || null,
+        catalog_item: catItem
+          ? { id: catItem.id, sku: catItem.sku, name: catItem.name ?? catItem.item_name, delta_x_mm: catItem.delta_x_mm ?? null, delta_y_mm: catItem.delta_y_mm ?? null, measure_basis: catItem.measure_basis ?? null }
+          : comp.component_item || null,
       };
     });
     const unique = Array.from(new Map(mapped.map(c => [c.id, c])).values());
@@ -526,55 +528,20 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
     setHighlightedIndex(-1);
   }, [catalogItems, showChildrenModal]);
 
-  // ========== ENGINEERING MODAL ==========
+  // ========== ENGINEERING POPUP ==========
 
-  const handleOpenEngineeringModal = useCallback((componentId: string) => {
-    const comp = components.find(c => c.id === componentId);
-    if (!comp) return;
-    const axis = comp.cut_axis || 'none';
+  const handleOpenEngineeringPopup = useCallback((componentId: string) => {
     setEditingEngineeringComponentId(componentId);
-    setEngineeringData({
-      depends_on_role: axis === 'none' ? '' : (comp.depends_on_role || ''),
-      affects_role: comp.affects_role || '',
-      cut_axis: axis as any,
-      cut_delta_mm: comp.cut_delta_mm || null,
-      cut_delta_scope: (comp.cut_delta_scope as any) || 'none',
-      engineering_delta_source: (comp.engineering_delta_source === 'derived' ? 'derived' : 'fixed') as 'fixed' | 'derived',
-      engineering_attr_key: comp.engineering_attr_key || '',
-      engineering_scope: (comp.engineering_scope === 'per_side' ? 'per_side' : 'total') as 'total' | 'per_side',
-      engineering_source_role: comp.engineering_source_role || '',
-    });
-    setShowEngineeringModal(true);
-  }, [components]);
+    setShowEngineeringPopup(true);
+  }, []);
 
-  const handleSaveEngineeringRules = useCallback(() => {
-    if (!editingEngineeringComponentId) return;
-    const finalRole = engineeringData.cut_axis === 'none' ? null : normalizeRole(engineeringData.depends_on_role);
-    const finalAffectsRole = normalizeRole(engineeringData.affects_role) || null;
-    setComponents(prev => prev.map(c => {
-      if (c.id !== editingEngineeringComponentId) return c;
-      return {
-        ...c,
-        depends_on_role: finalRole,
-        affects_role: finalAffectsRole,
-        cut_axis: engineeringData.cut_axis === 'none' ? null : engineeringData.cut_axis,
-        cut_delta_mm: engineeringData.cut_delta_mm || 0,
-        cut_delta_scope: engineeringData.cut_delta_scope === 'none' ? null : engineeringData.cut_delta_scope,
-        engineering_delta_source: engineeringData.engineering_delta_source || 'fixed',
-        engineering_attr_key: engineeringData.engineering_attr_key || null,
-        engineering_scope: engineeringData.engineering_scope || 'total',
-        engineering_source_role: engineeringData.engineering_source_role || null,
-      };
-    }));
-    setShowEngineeringModal(false);
+  const handleCloseEngineeringPopup = useCallback(() => {
+    setShowEngineeringPopup(false);
     setEditingEngineeringComponentId(null);
-    setEngineeringData({ ...INITIAL_ENGINEERING_DATA });
-  }, [editingEngineeringComponentId, engineeringData]);
+  }, []);
 
-  const handleCloseEngineeringModal = useCallback(() => {
-    setShowEngineeringModal(false);
-    setEditingEngineeringComponentId(null);
-    setEngineeringData({ ...INITIAL_ENGINEERING_DATA });
+  const handlePatchComponent = useCallback((componentId: string, fields: Partial<BOMComponentDraft>) => {
+    setComponents(prev => prev.map(c => c.id === componentId ? { ...c, ...fields } : c));
   }, []);
 
   // ========== CHILDREN MODAL ==========
@@ -762,7 +729,7 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
         manufacturer: templateManufacturer || null,
         product_line: templateProductLine || null,
         system_size: templateSystemSize || null,
-        headbox: templateHeadbox,
+        headbox: effectiveComponents.some(c => (normalizeRole(c.component_role || '') === 'headbox' || normalizeRole(c.component_role || '') === 'cassette') && c.is_required !== false),
         is_active: true,
       };
       if (editingTemplateId) templatePayload.id = editingTemplateId;
@@ -785,6 +752,7 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
           affects_role: c.affects_role || null,
           cut_axis: c.cut_axis || null,
           cut_delta_mm: c.cut_delta_mm || 0,
+          delta_mode: c.delta_mode || 'subtract',
           qty_spacing_mm: c.qty_spacing_mm ?? null,
           qty_min: c.qty_min ?? null,
           uom: isFabric ? 'm' : canonicalUom(c.uom, null),
@@ -842,6 +810,7 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
           affects_role: comp.affects_role || null,
           cut_axis: comp.cut_axis || null,
           cut_delta_mm: comp.cut_delta_mm || 0,
+          delta_mode: comp.delta_mode || 'subtract',
           qty_spacing_mm: comp.qty_spacing_mm ?? null,
           qty_min: comp.qty_min != null ? Number(comp.qty_min) : null,
           uom: comp.uom || 'ea',
@@ -886,7 +855,7 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
     templateManufacturer, setTemplateManufacturer,
     templateProductLine, setTemplateProductLine,
     templateSystemSize, setTemplateSystemSize,
-    templateHeadbox, setTemplateHeadbox,
+    templateHeadbox,
     productTypes,
     catalogItems,
     categories,
@@ -911,16 +880,12 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
     handleEditComponent,
     resetForm,
 
-    // Engineering
-    showEngineeringModal,
+    // Engineering popup
+    showEngineeringPopup,
     editingEngineeringComponentId,
-    editingEngineeringComponentUom: editingEngineeringComponentId
-      ? (components.find(c => c.id === editingEngineeringComponentId)?.uom ?? 'ea')
-      : 'ea',
-    engineeringData, setEngineeringData,
-    handleOpenEngineeringModal,
-    handleSaveEngineeringRules,
-    handleCloseEngineeringModal,
+    handleOpenEngineeringPopup,
+    handleCloseEngineeringPopup,
+    handlePatchComponent,
 
     // Children
     showChildrenModal,

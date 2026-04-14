@@ -1281,10 +1281,16 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           </div>
         )}
       </div>
-      {hasRedirectBack && (
+      {(hasRedirectBack || quote) && (
         <button
           type="button"
-          onClick={handleBackContextual}
+          onClick={() => {
+            if (hasRedirectBack) {
+              handleBackContextual();
+            } else if (quote) {
+              router.navigate(`/sales/quotes/${quote.id}/edit`);
+            }
+          }}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50"
           title="Back"
         >
@@ -1808,7 +1814,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                                 {snap?.name ?? qlInfo.name ?? qlInfo.sku ?? '—'}
                               </span>
                               {(snap?.sku ?? qlInfo.sku) && (snap?.sku ?? qlInfo.sku) !== (snap?.name ?? qlInfo.name ?? qlInfo.sku) && (
-                                <span className="text-gray-500 text-xs ml-0.5">({snap?.sku ?? qlInfo.sku})</span>
+                                <span className="block text-gray-500 text-xs">{snap?.sku ?? qlInfo.sku}</span>
                               )}
                             </div>
                             <div className="flex flex-col gap-0.5 mt-0.5">

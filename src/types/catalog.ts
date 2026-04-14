@@ -62,11 +62,15 @@ export interface CatalogItem {
   color?: string | null; // Used ONLY when is_fabric=false
   // ✅ FIX: item_role field for component role identification
   item_role?: string | null; // Component role (e.g., 'bottom_bar', 'bracket', 'drive', 'motor', etc.)
+  // Engineering delta values (mm) — used in BOM cut calculations
+  delta_x_mm?: number | null;
+  delta_y_mm?: number | null;
   // Pricing fields
   cost_exw?: number | null; // Base cost (EXW = Ex Works) - numeric
   purchase_mode?: PurchaseMode | null; // v2: how the item is purchased from vendor
   stock_basis?: StockBasis | null; // v2: internal stock basis used by inventory
   purchase_uom?: string | null; // v2: vendor-facing unit used for purchase qty input
+  moq?: number | null; // Minimum order quantity in purchase_unit
   default_margin_pct?: number | null; // Default margin percentage for MSRP calculation
   msrp?: number | null; // Manufacturer's Suggested Retail Price
   // Legacy pricing fields (for backward compatibility)

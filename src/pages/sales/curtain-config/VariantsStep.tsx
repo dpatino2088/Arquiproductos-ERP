@@ -15,7 +15,8 @@ import { useFabricCollections, useFabricVariants } from '../../../hooks/useFabri
 import { useOrganizationContext } from '../../../context/OrganizationContext';
 import { supabase } from '../../../lib/supabase/client';
 import type { CatalogItemRollSpecsRow } from '../../../services/catalogItemRollSpecs';
-import { Image as ImageIcon, Search, X } from 'lucide-react';
+import { Search, X } from 'lucide-react';
+import CatalogItemImage from '../../../components/ui/CatalogItemImage';
 import type { DealerConfiguratorPolicy } from '../../../hooks/useDealerConfiguratorPolicy';
 import { useConfiguratorPolicy } from '../../../context/ConfiguratorPolicyContext';
 
@@ -658,18 +659,12 @@ export default function VariantsStep({ config, onUpdate, policy: policyProp }: V
                         )}
                         {/* Image */}
                         <div className="aspect-square bg-white flex items-center justify-center overflow-hidden">
-                          {(variant as any).image_url ? (
-                            <img
-                              src={(variant as any).image_url}
-                              alt={variant.variant_name || variant.sku || 'Variant'}
-                              className="w-full h-full object-cover"
-                              onError={(e) => {
-                                (e.target as HTMLImageElement).style.display = 'none';
-                              }}
-                            />
-                          ) : (
-                            <ImageIcon className="w-16 h-16 text-gray-300" />
-                          )}
+                          <CatalogItemImage
+                            src={(variant as any).image_url}
+                            alt={variant.variant_name || variant.sku || 'Variant'}
+                            size="lg"
+                            className="w-full h-full !rounded-none !border-0"
+                          />
                         </div>
                         
                         {/* Card Content */}

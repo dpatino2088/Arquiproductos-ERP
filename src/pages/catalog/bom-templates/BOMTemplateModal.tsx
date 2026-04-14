@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Plus, Edit, Trash2, Search, Wrench, Ruler, Package, X, ChevronRight, ChevronDown, ExternalLink } from 'lucide-react';
+import { Plus, Edit, Trash2, Search, Wrench, Package, X, ChevronRight, ChevronDown, ExternalLink, Scissors } from 'lucide-react';
 import Label from '../../../components/ui/Label';
 import Input from '../../../components/ui/Input';
 import {
@@ -15,7 +15,10 @@ import { useManufacturers } from '../../../hooks/useCatalog';
 import { BOM_QTY_TYPES, CONDITION_KEY_OPTIONS, CONDITION_VALUE_OPTIONS, getCascadeLabel, getCascadeOrder } from './types';
 import { useBOMTemplateForm } from './useBOMTemplateForm';
 import BOMChildrenModal from './BOMChildrenModal';
+import BOMEngineeringPopup from './BOMEngineeringPopup';
 import type { BOMComponentDraft } from './types';
+import { supabase } from '../../../lib/supabase/client';
+import { useOrganizationContext } from '../../../context/OrganizationContext';
 
 const HARDWARE_COLORS = ['White', 'Black', 'Silver', 'Bronze', 'Grey'] as const;
 const PRODUCT_LINE_OPTIONS = [
@@ -50,7 +53,6 @@ export interface BOMTemplateModalProps {
   editingTemplateId: string | null;
   onClose: () => void;
   onSave: () => void;
-  onGoToEngineering?: (templateId: string) => void;
 }
 
 export default function BOMTemplateModal({
@@ -58,12 +60,12 @@ export default function BOMTemplateModal({
   editingTemplateId,
   onClose,
   onSave,
-  onGoToEngineering,
 }: BOMTemplateModalProps) {
   const form = useBOMTemplateForm(editingTemplateId);
   const { manufacturers } = useManufacturers();
   const autocompleteRef = useRef<HTMLDivElement>(null);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [showCutBreakdown, setShowCutBreakdown] = useState(false);
   const [codeManuallyEdited, setCodeManuallyEdited] = useState(() => !!editingTemplateId);
 
   const selectedPt = form.productTypes.find((pt: any) => pt.id === form.productTypeId);
@@ -99,9 +101,10 @@ export default function BOMTemplateModal({
     if (form.templateSystemSize) {
       parts.push(form.templateSystemSize.toUpperCase().replace(/\s+/g, '_'));
     }
-    if (form.templateHeadbox) parts.push('HB');
+    const hasRequiredHeadbox = form.components.some(c => (c.component_role === 'headbox' || c.component_role === 'cassette') && c.is_required !== false);
+    if (hasRequiredHeadbox) parts.push('HB');
     return parts.join('_') || '';
-  }, [selectedPt, isDrapery, form.templateProductLine, form.templateOpeningDirection, form.templateDriveType, form.templateHardwareColor, form.templateDriveSide, form.templateInstallationLocation, form.templateManufacturer, form.templateSystemSize, form.templateHeadbox]);
+  }, [selectedPt, isDrapery, form.templateProductLine, form.templateOpeningDirection, form.templateDriveType, form.templateHardwareColor, form.templateDriveSide, form.templateInstallationLocation, form.templateManufacturer, form.templateSystemSize, form.components]);
 
   useEffect(() => {
     if (!codeManuallyEdited && autoCode) {
@@ -109,6 +112,36 @@ export default function BOMTemplateModal({
       form.setTemplateName(autoCode);
     }
   }, [autoCode, codeManuallyEdited]);
+
+  // ========== CUT BREAKDOWN (DB-driven) ==========
+  const { activeOrganizationId } = useOrganizationContext();
+  const [cutBreakdown, setCutBreakdown] = useState<any[]>([]);
+  const [cutBreakdownLoading, setCutBreakdownLoading] = useState(false);
+
+  const loadCutBreakdown = useCallback(async (templateId: string | null) => {
+    if (!templateId || !activeOrganizationId) {
+      setCutBreakdown([]);
+      return;
+    }
+    setCutBreakdownLoading(true);
+    try {
+      const { data, error } = await supabase.rpc('compute_template_cut_breakdown', {
+        p_bom_template_id: templateId,
+        p_org_id: activeOrganizationId,
+      });
+      if (error) throw error;
+      setCutBreakdown(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('Error loading cut breakdown:', err);
+      setCutBreakdown([]);
+    } finally {
+      setCutBreakdownLoading(false);
+    }
+  }, [activeOrganizationId]);
+
+  useEffect(() => {
+    loadCutBreakdown(editingTemplateId);
+  }, [editingTemplateId, loadCutBreakdown]);
 
   const toggleExpand = useCallback((id: string) => {
     setExpandedRows(prev => {
@@ -124,8 +157,9 @@ export default function BOMTemplateModal({
   }, [form.isDirty, onClose]);
 
   const handleSaveClick = useCallback(async () => {
-    await form.handleSave();
-  }, [form.handleSave]);
+    const ok = await form.handleSave();
+    if (ok) loadCutBreakdown(editingTemplateId);
+  }, [form.handleSave, editingTemplateId, loadCutBreakdown]);
 
   const handleSaveAndClose = useCallback(async () => {
     const ok = await form.handleSave();
@@ -190,6 +224,40 @@ export default function BOMTemplateModal({
     const mult = comp.qty_value != null && comp.qty_value !== 1 ? ` x${comp.qty_value}` : '';
     return `${label}${mult}${pp}`;
   };
+
+  // Stable delta lookup: merge catalogItems (full list) + embedded catalog_item from BOM join
+  const deltaMap = React.useMemo(() => {
+    const map = new Map<string, { delta_x_mm: number | null; delta_y_mm: number | null }>();
+    // First pass: catalogItems (full list)
+    for (const item of form.catalogItems) {
+      if (item.id && (item.delta_x_mm != null || item.delta_y_mm != null)) {
+        map.set(item.id, {
+          delta_x_mm: item.delta_x_mm ?? null,
+          delta_y_mm: item.delta_y_mm ?? null,
+        });
+      }
+    }
+    // Second pass: embedded catalog_item from BOM components (from the DB join)
+    // Only fills gaps not already covered by catalogItems
+    for (const c of form.components) {
+      if (c.component_item_id && c.catalog_item && !map.has(c.component_item_id)) {
+        const ci = c.catalog_item as any;
+        if (ci.delta_x_mm != null || ci.delta_y_mm != null) {
+          map.set(c.component_item_id, {
+            delta_x_mm: ci.delta_x_mm ?? null,
+            delta_y_mm: ci.delta_y_mm ?? null,
+          });
+        }
+      }
+    }
+    return map;
+  }, [form.components, form.catalogItems]);
+
+  const getDelta = useCallback((componentItemId: string | null) => {
+    if (!componentItemId) return { dx: null, dy: null };
+    const entry = deltaMap.get(componentItemId);
+    return { dx: entry?.delta_x_mm ?? null, dy: entry?.delta_y_mm ?? null };
+  }, [deltaMap]);
 
   // Group flatFilteredItems by category for dropdown
   const groupedAutocompleteItems = form.flatFilteredItems.reduce<
@@ -403,23 +471,7 @@ export default function BOMTemplateModal({
               {isDrapery && <div />}
             </div>
 
-            {/* ── ROW 6: Headbox toggle — only for roller / dual-shade / triple ── */}
-            {['roller', 'dual-shade', 'triple'].includes(selectedPt?.code ?? '') && (
-              <div className="flex items-center gap-3 py-1">
-                <label className="flex items-center gap-2.5 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={form.templateHeadbox}
-                    onChange={(e) => form.setTemplateHeadbox(e.target.checked)}
-                    className="w-4 h-4 text-primary border-gray-300 rounded focus:ring-primary"
-                  />
-                  <span className="text-sm font-medium text-gray-900">Includes Headbox / Cassette</span>
-                </label>
-                <p className="text-xs text-gray-400">
-                  {form.templateHeadbox ? 'This template requires a headbox. Code will include _HB.' : 'No headbox — template matches products without cassette.'}
-                </p>
-              </div>
-            )}
+            {/* Headbox is now derived from component is_required flags — no manual checkbox */}
 
             {/* ── ROW 7: Auto-generated Code + Name + Description ── */}
             <div className="border-t border-gray-200 pt-4 space-y-3">
@@ -924,9 +976,19 @@ export default function BOMTemplateModal({
                                   )}
                                 </td>
                                 <td className="px-3 py-2">
-                                  <span className="font-mono text-gray-700">
-                                    {sku}
-                                  </span>
+                                  {comp.component_item_id ? (
+                                    <a
+                                      href={`/catalog/items/edit/${comp.component_item_id}?returnTo=/catalog/bom`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="font-mono text-gray-700 hover:text-primary hover:underline"
+                                      title="Edit in Catalog (new tab)"
+                                    >
+                                      {sku}
+                                    </a>
+                                  ) : (
+                                    <span className="font-mono text-gray-700">{sku}</span>
+                                  )}
                                   <span className="text-gray-500 ml-1">
                                     {name}
                                   </span>
@@ -935,28 +997,35 @@ export default function BOMTemplateModal({
                                   {getQtyDisplay(comp)}
                                 </td>
                                 <td className="px-3 py-2">{comp.uom || 'ea'}</td>
-                                <td className="px-2 py-2 text-center">
-                                  {comp.uom === 'ea' ? (
-                                    comp.catalog_item?.delta_x_mm != null ? (
-                                      <span className="text-xs text-gray-700">{comp.catalog_item.delta_x_mm}</span>
-                                    ) : (
-                                      <a href={`/catalog/items/edit/${comp.component_item_id}`} target="_blank" rel="noopener noreferrer" className="text-xs text-amber-500 hover:text-amber-700" title="Set in catalog">
-                                        <ExternalLink className="h-3 w-3 inline" />
-                                      </a>
-                                    )
-                                  ) : <span className="text-xs text-gray-300">—</span>}
-                                </td>
-                                <td className="px-2 py-2 text-center">
-                                  {comp.uom === 'ea' ? (
-                                    comp.catalog_item?.delta_y_mm != null ? (
-                                      <span className="text-xs text-gray-700">{comp.catalog_item.delta_y_mm}</span>
-                                    ) : (
-                                      <a href={`/catalog/items/edit/${comp.component_item_id}`} target="_blank" rel="noopener noreferrer" className="text-xs text-amber-500 hover:text-amber-700" title="Set in catalog">
-                                        <ExternalLink className="h-3 w-3 inline" />
-                                      </a>
-                                    )
-                                  ) : <span className="text-xs text-gray-300">—</span>}
-                                </td>
+                                {(() => {
+                                  const { dx, dy } = getDelta(comp.component_item_id);
+                                  return (
+                                    <>
+                                      <td className="px-2 py-2 text-center">
+                                        {comp.uom === 'ea' ? (
+                                          dx != null ? (
+                                            <span className="text-xs font-mono text-gray-700">{dx}</span>
+                                          ) : (
+                                            <a href={`/catalog/items/edit/${comp.component_item_id}?returnTo=/catalog/bom`} target="_blank" rel="noopener noreferrer" className="text-xs text-amber-500 hover:text-amber-700" title="Set in catalog">
+                                              <ExternalLink className="h-3 w-3 inline" />
+                                            </a>
+                                          )
+                                        ) : <span className="text-xs text-gray-300">—</span>}
+                                      </td>
+                                      <td className="px-2 py-2 text-center">
+                                        {comp.uom === 'ea' ? (
+                                          dy != null ? (
+                                            <span className="text-xs font-mono text-gray-700">{dy}</span>
+                                          ) : (
+                                            <a href={`/catalog/items/edit/${comp.component_item_id}?returnTo=/catalog/bom`} target="_blank" rel="noopener noreferrer" className="text-xs text-amber-500 hover:text-amber-700" title="Set in catalog">
+                                              <ExternalLink className="h-3 w-3 inline" />
+                                            </a>
+                                          )
+                                        ) : <span className="text-xs text-gray-300">—</span>}
+                                      </td>
+                                    </>
+                                  );
+                                })()}
                                 <td className="px-3 py-2">
                                   <span className="text-gray-700">{getRoleLabel(comp.component_role)}</span>
                                   {getCascadeLabel(comp.component_role) && (
@@ -976,20 +1045,24 @@ export default function BOMTemplateModal({
                                 </td>
                                 <td className="px-3 py-2">{childCount}</td>
                                 <td className="px-3 py-2">
-                                  {hasEngineering ? (
-                                    <Wrench className="h-3.5 w-3.5 text-primary" />
-                                  ) : (
-                                    '—'
-                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => form.handleOpenEngineeringPopup(comp.id)}
+                                    className={`p-0.5 rounded hover:bg-gray-200 ${hasEngineering || comp.affects_role ? 'text-primary' : 'text-gray-300 hover:text-gray-500'}`}
+                                    title="Engineering settings"
+                                  >
+                                    <Wrench className="h-3.5 w-3.5" />
+                                  </button>
                                 </td>
                                 <td className="px-3 py-2">
-                                  {comp.is_required !== false ? (
-                                    <span className="text-primary font-medium">
-                                      Yes
-                                    </span>
-                                  ) : (
-                                    'No'
-                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => form.handlePatchComponent(comp.id, { is_required: comp.is_required === false })}
+                                    className={`text-xs font-medium px-1.5 py-0.5 rounded cursor-pointer ${comp.is_required !== false ? 'text-primary bg-primary/10' : 'text-gray-400 bg-gray-100'}`}
+                                    title={comp.is_required !== false ? 'Required — click to make optional' : 'Optional — click to make required'}
+                                  >
+                                    {comp.is_required !== false ? 'Req' : 'Opt'}
+                                  </button>
                                 </td>
                                 <td className="px-3 py-2 text-xs text-gray-500">
                                   {comp.condition_key ? (
@@ -1009,17 +1082,6 @@ export default function BOMTemplateModal({
                                         <Edit className="h-3.5 w-3.5" />
                                       </button>
                                     </Tooltip>
-                                    {editingTemplateId && onGoToEngineering && (
-                                      <Tooltip content="Go to Engineering">
-                                        <button
-                                          type="button"
-                                          onClick={() => onGoToEngineering(editingTemplateId)}
-                                          className="p-1 rounded hover:bg-gray-200 text-gray-600"
-                                        >
-                                          <Ruler className="h-3.5 w-3.5" />
-                                        </button>
-                                      </Tooltip>
-                                    )}
                                     <Tooltip content="Children">
                                       <button
                                         type="button"
@@ -1065,9 +1127,19 @@ export default function BOMTemplateModal({
                                       <td className="px-1 py-1.5" />
                                       <td className="px-3 py-1.5 pl-8">
                                         <span className="text-gray-400 mr-1.5">↳</span>
-                                        <span className="font-mono text-gray-600">
-                                          {childSku}
-                                        </span>
+                                        {child.component_item_id ? (
+                                          <a
+                                            href={`/catalog/items/edit/${child.component_item_id}?returnTo=/catalog/bom`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="font-mono text-gray-600 hover:text-primary hover:underline"
+                                            title="Edit in Catalog (new tab)"
+                                          >
+                                            {childSku}
+                                          </a>
+                                        ) : (
+                                          <span className="font-mono text-gray-600">{childSku}</span>
+                                        )}
                                         <span className="text-gray-400 ml-1">
                                           {childName}
                                         </span>
@@ -1078,18 +1150,35 @@ export default function BOMTemplateModal({
                                       <td className="px-3 py-1.5 text-gray-500">
                                         {child.uom || 'ea'}
                                       </td>
-                                      <td className="px-2 py-1.5 text-center text-gray-300">—</td>
-                                      <td className="px-2 py-1.5 text-center text-gray-300">—</td>
+                                      {(() => {
+                                        const { dx, dy } = getDelta(child.component_item_id);
+                                        return (
+                                          <>
+                                            <td className="px-2 py-1.5 text-center">
+                                              {dx != null ? (
+                                                <span className="text-xs font-mono text-gray-600">{dx}</span>
+                                              ) : (
+                                                <span className="text-xs text-gray-300">—</span>
+                                              )}
+                                            </td>
+                                            <td className="px-2 py-1.5 text-center">
+                                              {dy != null ? (
+                                                <span className="text-xs font-mono text-gray-600">{dy}</span>
+                                              ) : (
+                                                <span className="text-xs text-gray-300">—</span>
+                                              )}
+                                            </td>
+                                          </>
+                                        );
+                                      })()}
                                       <td className="px-3 py-1.5 text-gray-500">
                                         {getRoleLabel(child.component_role)}
                                       </td>
                                       <td className="px-3 py-1.5 text-gray-300">—</td>
                                       <td className="px-3 py-1.5" />
                                       <td className="px-3 py-1.5" />
-                                      <td className="px-3 py-1.5 text-gray-500">
-                                        {child.is_required !== false
-                                          ? 'Yes'
-                                          : 'No'}
+                                      <td className="px-3 py-1.5 text-xs text-gray-300">
+                                        —
                                       </td>
                                       <td className="px-3 py-1.5 text-xs text-gray-400">
                                         {child.condition_key ? (child.condition_key === 'motor_item_id' ? `Motor = ${child.condition_value || '—'}` : `${child.condition_key} = ${child.condition_value || '—'}`) : '—'}
@@ -1108,6 +1197,153 @@ export default function BOMTemplateModal({
               </div>
             </div>
           </div>
+
+          {/* Cut Breakdown (DB-driven) */}
+          {(cutBreakdown.length > 0 || cutBreakdownLoading) && (
+            <div className="mx-6 mb-3">
+              <button
+                type="button"
+                onClick={() => setShowCutBreakdown(prev => !prev)}
+                className="flex items-center gap-2 text-xs font-medium text-gray-500 hover:text-gray-700 transition-colors py-1"
+              >
+                <Scissors className="h-3.5 w-3.5" />
+                <span>Cut Breakdown</span>
+                {showCutBreakdown
+                  ? <ChevronDown className="h-3 w-3" />
+                  : <ChevronRight className="h-3 w-3" />}
+                <span className="text-gray-300 font-normal">
+                  {cutBreakdownLoading ? '…' : `(${cutBreakdown.length} cuttable${cutBreakdown.length !== 1 ? 's' : ''})`}
+                </span>
+              </button>
+
+              {showCutBreakdown && (
+                <div className="mt-2 space-y-1.5">
+                  {cutBreakdownLoading ? (
+                    <p className="text-xs text-gray-400 italic py-2">Loading breakdown…</p>
+                  ) : cutBreakdown.map((item, idx) => {
+                    const deductions: any[] = item.deductions || [];
+                    const hasDeductions = deductions.length > 0;
+                    const pcs = item.qty_value > 1 ? item.qty_value : 1;
+
+                    const fixedDeds = deductions.filter((d: any) => !d.conditional);
+                    const conditionalDeds = deductions.filter((d: any) => d.conditional);
+
+                    const condGroups = new Map<string, any[]>();
+                    for (const d of conditionalDeds) {
+                      const key = `${d.condition_key}=${d.condition_value}`;
+                      if (!condGroups.has(key)) condGroups.set(key, []);
+                      condGroups.get(key)!.push(d);
+                    }
+
+                    const fixedTotal = fixedDeds.reduce((s: number, d: any) => s + d.total, 0);
+                    const fixedNetDeltaTotal = item.tolerance - fixedTotal;
+                    const fixedNetDelta = pcs > 1 ? Math.round((fixedNetDeltaTotal / pcs) * 100) / 100 : fixedNetDeltaTotal;
+
+                    const renderDed = (d: any) => {
+                      const perPcDed = pcs > 1 ? Math.round((d.total / pcs) * 100) / 100 : d.total;
+                      return (
+                        <span key={d.sku} className="inline-flex items-center gap-0.5">
+                          <span className="text-red-500">−{perPcDed}</span>
+                          <span className="text-gray-400 text-[10px]">({d.sku})</span>
+                        </span>
+                      );
+                    };
+
+                    const axisBadge = (
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${item.axis === 'height' ? 'bg-purple-50 text-purple-500' : 'bg-blue-50 text-blue-500'}`}>
+                        {item.axis === 'height' ? '↕ Y' : '↔ X'}
+                      </span>
+                    );
+                    const pcsBadge = pcs > 1 ? (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 font-medium">×{pcs} pcs</span>
+                    ) : null;
+
+                    return (
+                      <div key={`${item.role}-${idx}`} className="rounded-md bg-gray-50 border border-gray-100 px-3 py-2 space-y-1">
+                        {/* Header: label + base + fixed deductions */}
+                        <div className="flex items-center gap-2 font-mono text-xs leading-relaxed flex-wrap">
+                          <span className="font-semibold text-gray-800">{item.label}</span>
+                          {item.sku && <span className="text-[10px] text-gray-400">{item.sku}</span>}
+                          <span className="text-gray-400">=</span>
+                          <span className="text-blue-600 font-medium">{item.base}</span>
+                          {item.tolerance !== 0 && (
+                            <span className={item.tolerance > 0 ? 'text-green-600' : 'text-orange-500'}>
+                              {item.tolerance > 0 ? '+' : ''}{item.tolerance}
+                            </span>
+                          )}
+                          {fixedDeds.map(renderDed)}
+                          {condGroups.size === 0 && (
+                            <>
+                              <span className="text-gray-400">=</span>
+                              <span className="font-semibold text-gray-900">
+                                {item.base} {fixedNetDelta >= 0 ? '+' : ''}{fixedNetDelta} mm
+                              </span>
+                              {axisBadge}
+                              {pcsBadge}
+                            </>
+                          )}
+                          {condGroups.size > 0 && fixedDeds.length > 0 && (
+                            <>
+                              <span className="text-gray-400">=</span>
+                              <span className="text-gray-600">
+                                {item.base} {fixedNetDelta >= 0 ? '+' : ''}{fixedNetDelta} mm
+                              </span>
+                              {axisBadge}
+                              {pcsBadge}
+                            </>
+                          )}
+                          {condGroups.size > 0 && fixedDeds.length === 0 && (
+                            <>
+                              {axisBadge}
+                              {pcsBadge}
+                            </>
+                          )}
+                        </div>
+
+                        {/* Conditional option rows — multi_panel first, then optional, then others */}
+                        {Array.from(condGroups.entries())
+                        .sort(([a], [b]) => {
+                          const rank = (k: string) => k === 'optional=true' ? 1 : k === 'multi_panel=true' ? 3 : 2;
+                          return rank(a) - rank(b);
+                        })
+                        .map(([condLabel, deds]) => {
+                          const condTotalRaw = deds.reduce((s: number, d: any) => s + d.total, 0);
+                          const condPerPc = pcs > 1 ? Math.round((condTotalRaw / pcs) * 100) / 100 : condTotalRaw;
+                          const isOptional = condLabel === 'optional=true';
+                          const isMultiPanel = condLabel === 'multi_panel=true';
+                          const badgeLabel = isOptional ? 'Optional' : isMultiPanel ? 'Multi-panel' : condLabel;
+                          const badgeColor = isOptional
+                            ? 'bg-teal-50 text-teal-600'
+                            : isMultiPanel
+                              ? 'bg-violet-50 text-violet-600'
+                              : 'bg-amber-50 text-amber-600';
+                          const borderColor = isOptional
+                            ? 'border-teal-200'
+                            : isMultiPanel
+                              ? 'border-violet-200'
+                              : 'border-amber-200';
+                          return (
+                            <div key={condLabel} className={`flex items-center gap-2 font-mono text-[11px] leading-relaxed flex-wrap pl-3 border-l-2 ${borderColor}`}>
+                              <span className={`text-[9px] px-1 py-px rounded font-sans font-medium shrink-0 ${badgeColor}`}>{badgeLabel}</span>
+                              {deds.map(renderDed)}
+                              <span className="text-gray-400">=</span>
+                              <span className="font-semibold text-gray-700">
+                                {condPerPc > 0 ? '−' : '+'}{Math.abs(condPerPc)} mm
+                              </span>
+                            </div>
+                          );
+                        })}
+
+                        {!hasDeductions && (
+                          <p className="text-[10px] text-gray-300 italic">No deductions configured</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Footer */}
           <div className="flex justify-end gap-2 px-6 py-4 border-t border-gray-200 shrink-0">
@@ -1167,6 +1403,19 @@ export default function BOMTemplateModal({
         onClose={form.handleCloseChildrenModal}
         onAddChild={form.handleAddChild}
         onDeleteChild={form.handleDeleteChild}
+      />
+
+      <BOMEngineeringPopup
+        showPopup={form.showEngineeringPopup}
+        editingComponentId={form.editingEngineeringComponentId}
+        components={form.components}
+        childrenByParent={form.childrenByParent}
+        catalogItems={form.catalogItems}
+        isSaving={form.isSaving}
+        onPatchComponent={form.handlePatchComponent}
+        onClose={form.handleCloseEngineeringPopup}
+        onSave={handleSaveClick}
+        onSaveAndClose={async () => { await handleSaveClick(); form.handleCloseEngineeringPopup(); }}
       />
     </TooltipProvider>
   );

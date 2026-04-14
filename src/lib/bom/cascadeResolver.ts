@@ -64,11 +64,15 @@ export function resolveCascade(input: CascadeInput): CascadeResult {
   const order: string[] = [];
 
   // Build affects_role index: which unit items affect which cuttable roles
+  // affects_role may be comma-separated (e.g. "tube,side_channel")
   const affectingByRole = new Map<string, CascadeComponent[]>();
   for (const u of units) {
     if (u.affects_role) {
-      if (!affectingByRole.has(u.affects_role)) affectingByRole.set(u.affects_role, []);
-      affectingByRole.get(u.affects_role)!.push(u);
+      const roles = u.affects_role.split(',').map(s => s.trim()).filter(Boolean);
+      for (const r of roles) {
+        if (!affectingByRole.has(r)) affectingByRole.set(r, []);
+        affectingByRole.get(r)!.push(u);
+      }
     }
   }
 

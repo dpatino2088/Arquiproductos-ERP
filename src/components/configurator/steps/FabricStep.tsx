@@ -14,7 +14,7 @@ import { useInventoryAvailability } from '../../../hooks/useInventoryAvailabilit
 import { InventoryAvailabilityBadge } from '../../inventory/InventoryAvailabilityBadge';
 import Label from '../../ui/Label';
 import Input from '../../ui/Input';
-import { Image as ImageIcon } from 'lucide-react';
+import CatalogItemImage from '../../ui/CatalogItemImage';
 
 interface FabricStepProps {
   config: RollerBOMConfigState & {
@@ -155,15 +155,12 @@ export default function FabricStep({ config, onUpdate }: FabricStepProps) {
                   }`}
                 >
                   <div className="p-4 flex flex-col items-center justify-center min-h-[120px]">
-                    {variant.image_url ? (
-                      <img
-                        src={variant.image_url}
-                        alt={variant.variant_name ?? ''}
-                        className="w-16 h-16 object-cover rounded mb-2"
-                      />
-                    ) : (
-                      <ImageIcon className="w-12 h-12 text-gray-400 mb-2" />
-                    )}
+                    <CatalogItemImage
+                      src={variant.image_url}
+                      alt={variant.variant_name ?? ''}
+                      size="md"
+                      className="mb-2"
+                    />
                     <div className="text-center">
                       <div className="text-sm font-medium text-gray-900">{variant.variant_name}</div>
                       {variant.manufacturer && (

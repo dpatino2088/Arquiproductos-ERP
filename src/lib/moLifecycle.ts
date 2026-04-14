@@ -25,16 +25,14 @@ export async function advanceMOOnTaskStart(
     if (!mo) return;
 
     const current = mo.status as string;
-    const preProductionStates = ['draft', 'confirmed', 'procurement', 'materials_ready', 'planned'];
+    const preProductionStates = ['draft', 'confirmed', 'procurement', 'materials_ready'];
     if (!preProductionStates.includes(current)) return;
 
-    // Progressive advance: step through intermediate states to reach in_production
     const stepsToProduction: string[] = [];
     if (current === 'draft') stepsToProduction.push('confirmed', 'materials_ready', 'in_production');
     else if (current === 'confirmed') stepsToProduction.push('materials_ready', 'in_production');
     else if (current === 'procurement') stepsToProduction.push('materials_ready', 'in_production');
     else if (current === 'materials_ready') stepsToProduction.push('in_production');
-    else if (current === 'planned') stepsToProduction.push('in_production');
 
     for (const step of stepsToProduction) {
       const { data, error } = await supabase.rpc('transition_mo_status', {
@@ -93,7 +91,7 @@ export async function advanceMOOnAllTasksComplete(
 
     if (mo.status !== 'in_production') {
       // MO is not in production — try to advance it first
-      if (['draft', 'confirmed', 'procurement', 'materials_ready', 'planned'].includes(mo.status)) {
+      if (['draft', 'confirmed', 'procurement', 'materials_ready'].includes(mo.status)) {
         await advanceMOOnTaskStart(moId, onError);
       }
     }

@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { Layers, Image as ImageIcon, Ruler } from 'lucide-react';
+import CatalogItemImage from '../../../../../components/ui/CatalogItemImage';
 import { supabase } from '../../../../../lib/supabase/client';
 import { useOrganizationContext } from '../../../../../context/OrganizationContext';
 import Label from '../../../../../components/ui/Label';
@@ -375,16 +376,13 @@ export default function ProductLineStep({ config, onUpdate }: ProductLineStepPro
                   }`}
                 >
                   <div className="aspect-square bg-white flex items-center justify-center overflow-hidden">
-                    {imagePath && !hasImageError ? (
-                      <img
-                        src={imagePath}
-                        alt={card.name}
-                        className="w-full h-full object-contain"
-                        onError={() => setImageErrors((prev) => ({ ...prev, [`style_${card.style_code}`]: true }))}
-                      />
-                    ) : (
-                      <ImageIcon className="w-16 h-16 text-gray-300" />
-                    )}
+                    <CatalogItemImage
+                      src={imagePath || null}
+                      alt={card.name}
+                      size="lg"
+                      objectFit="contain"
+                      className="w-full h-full !rounded-none !border-0"
+                    />
                   </div>
                   <div className="p-4 bg-gray-100 flex-1">
                     <h3 className="font-semibold text-sm truncate text-center text-gray-900" title={card.name}>

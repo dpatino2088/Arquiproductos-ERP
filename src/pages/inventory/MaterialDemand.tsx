@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useUIStore } from '../../stores/ui-store';
@@ -38,7 +38,7 @@ interface DemandRow {
   vendor_id: string | null;
   vendor_name: string | null;
   cost_exw: number;
-  item_min_qty: number;
+  item_moq: number;
   need_to_buy: number;
   purchase_unit: string | null;
   units_per_purchase_unit: number;
@@ -101,7 +101,7 @@ export default function MaterialDemand() {
   }, []);
 
   // Demand view
-  const { data: demandRows, isLoading: demandLoading } = useQuery({
+  const { data: demandRows, isLoading: demandLoading, refetch: refetchDemand } = useQuery({
     queryKey: ['material-demand', activeOrganizationId],
     queryFn: async (): Promise<DemandRow[]> => {
       if (!activeOrganizationId) return [];
@@ -114,8 +114,10 @@ export default function MaterialDemand() {
       if (!demand?.length) return [];
 
       const catalogIds = [...new Set(demand.map((d: any) => d.catalog_item_id).filter(Boolean))];
+      const demandMoIds = new Set(demand.map((d: any) => d.manufacturing_order_id as string));
       const onHandMap = new Map<string, number>();
       const onOrderMap = new Map<string, number>();
+      const nonDemandAllocMap = new Map<string, number>();
 
       const vendorMap = new Map<string, {
         manufacturer_id: string | null;
@@ -123,7 +125,7 @@ export default function MaterialDemand() {
         vendor_id: string | null;
         vendor_name: string | null;
         cost_exw: number;
-        item_min_qty: number;
+        item_moq: number;
         purchase_unit: string | null;
         units_per_purchase_unit: number;
         is_roll: boolean;
@@ -133,26 +135,6 @@ export default function MaterialDemand() {
         unit_of_measure: string | null;
         measure_basis: string;
       }>();
-
-      const resolveItemMinQty = (item: Record<string, unknown>): number => {
-        const candidates = [
-          item.minimum_stock,
-          item.minimum_stock_qty,
-          item.min_stock,
-          item.min_stock_qty,
-          item.minimum_qty,
-          item.min_qty,
-          item.reorder_point,
-          item.safety_stock,
-          item.stock_minimum,
-          item.stock_min,
-        ];
-        for (const c of candidates) {
-          const n = Number(c ?? 0);
-          if (Number.isFinite(n) && n > 0) return n;
-        }
-        return 0;
-      };
 
       if (catalogIds.length > 0) {
         const { data: ohRows } = await supabase
@@ -211,6 +193,22 @@ export default function MaterialDemand() {
 
           const qtyNormalized = remaining * multiplier;
           onOrderMap.set(itemId, (onOrderMap.get(itemId) || 0) + qtyNormalized);
+        }
+
+        // Subtract allocations from non-demand MOs (in_production, completed, etc.)
+        // so "on hand" reflects stock truly available for procurement MOs.
+        const { data: allocRows } = await supabase
+          .from('InventoryAllocations')
+          .select('catalog_item_id, allocated_qty, manufacturing_order_id')
+          .eq('organization_id', activeOrganizationId)
+          .is('released_at', null)
+          .in('catalog_item_id', catalogIds);
+        for (const a of allocRows ?? []) {
+          const moId = (a as any).manufacturing_order_id as string;
+          if (demandMoIds.has(moId)) continue;
+          const itemId = (a as any).catalog_item_id as string;
+          const qty = Number((a as any).allocated_qty ?? 0);
+          nonDemandAllocMap.set(itemId, (nonDemandAllocMap.get(itemId) ?? 0) + qty);
         }
 
         const { data: ciRows } = await supabase
@@ -278,7 +276,7 @@ export default function MaterialDemand() {
             vendor_id: vendor?.id ?? null,
             vendor_name: vendor?.name ?? null,
             cost_exw: Number(c.cost_exw ?? 0),
-            item_min_qty: resolveItemMinQty(c as Record<string, unknown>),
+            item_moq: Math.max(0, Number(c.moq ?? 0)),
             purchase_unit: c.purchase_unit ?? null,
             units_per_purchase_unit: Number(c.units_per_purchase_unit ?? 1) || 1,
             is_roll: Boolean(c.is_roll),
@@ -299,28 +297,31 @@ export default function MaterialDemand() {
       }
 
       // Compute item-level need_to_buy (aggregate deficit, not per-MO)
+      // available = on_hand - allocations_from_non_demand_MOs
       const itemNeedToBuyMap = new Map<string, number>();
       for (const [itemId, totalReq] of totalRequiredPerItem) {
-        const v = vendorMap.get(itemId);
         const onHand = onHandMap.get(itemId) ?? 0;
         const onOrder = onOrderMap.get(itemId) ?? 0;
-        const minQty = Number(v?.item_min_qty ?? 0);
-        itemNeedToBuyMap.set(itemId, Math.round(Math.max(0, totalReq + minQty - onHand - onOrder) * 100) / 100);
+        const reserved = nonDemandAllocMap.get(itemId) ?? 0;
+        const available = Math.max(0, onHand - reserved);
+        itemNeedToBuyMap.set(itemId, Math.round(Math.max(0, totalReq - available - onOrder) * 100) / 100);
       }
 
       return demand.map((d: any) => {
         const v = vendorMap.get(d.catalog_item_id);
+        const rawOnHand = onHandMap.get(d.catalog_item_id) ?? 0;
+        const reserved = nonDemandAllocMap.get(d.catalog_item_id) ?? 0;
         return {
           ...d,
           required_qty: Number(d.required_qty ?? 0),
-          on_hand: onHandMap.get(d.catalog_item_id) ?? 0,
+          on_hand: Math.max(0, rawOnHand - reserved),
           on_order: onOrderMap.get(d.catalog_item_id) ?? 0,
           manufacturer_id: v?.manufacturer_id ?? null,
           manufacturer_name: v?.manufacturer_name ?? null,
           vendor_id: v?.vendor_id ?? null,
           vendor_name: v?.vendor_name ?? null,
           cost_exw: v?.cost_exw ?? 0,
-          item_min_qty: Number(v?.item_min_qty ?? 0),
+          item_moq: Number(v?.item_moq ?? 0),
           purchase_unit: v?.purchase_unit ?? null,
           units_per_purchase_unit: v?.units_per_purchase_unit ?? 1,
           is_roll: v?.is_roll ?? false,
@@ -335,6 +336,81 @@ export default function MaterialDemand() {
     },
     enabled: !!activeOrganizationId,
   });
+
+  const realtimeDemandTimerRef = useRef<number | null>(null);
+  const scheduleDemandRefresh = useCallback(() => {
+    if (realtimeDemandTimerRef.current != null) {
+      window.clearTimeout(realtimeDemandTimerRef.current);
+    }
+    realtimeDemandTimerRef.current = window.setTimeout(() => {
+      void refetchDemand();
+    }, 300);
+  }, [refetchDemand]);
+
+  useEffect(() => {
+    if (!activeOrganizationId) return;
+
+    const channel = supabase
+      .channel(`material-demand-${activeOrganizationId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'ManufacturingOrders',
+          filter: `organization_id=eq.${activeOrganizationId}`,
+        },
+        () => scheduleDemandRefresh()
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'ManufacturingOrderLines',
+        },
+        () => scheduleDemandRefresh()
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'InventoryAllocations',
+          filter: `organization_id=eq.${activeOrganizationId}`,
+        },
+        () => scheduleDemandRefresh()
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'InventoryMovements',
+          filter: `organization_id=eq.${activeOrganizationId}`,
+        },
+        () => scheduleDemandRefresh()
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'PurchaseOrders',
+          filter: `organization_id=eq.${activeOrganizationId}`,
+        },
+        () => scheduleDemandRefresh()
+      )
+      .subscribe();
+
+    return () => {
+      if (realtimeDemandTimerRef.current != null) {
+        window.clearTimeout(realtimeDemandTimerRef.current);
+        realtimeDemandTimerRef.current = null;
+      }
+      supabase.removeChannel(channel);
+    };
+  }, [activeOrganizationId, scheduleDemandRefresh]);
 
   const moOptions = useMemo(() => {
     const map = new Map<string, string>();
@@ -526,6 +602,7 @@ export default function MaterialDemand() {
           unitsPerPurchaseUnit: r.units_per_purchase_unit,
           rollLengthValue: r.roll_length_value,
           rollLengthUom: r.roll_length_uom,
+          moq: r.item_moq,
         });
 
         const orderQty = conversion.orderQty;
@@ -549,6 +626,7 @@ export default function MaterialDemand() {
           item_name_snapshot: r.item_name ?? null,
           purchase_unit_snapshot: r.purchase_unit ?? null,
           units_per_purchase_unit_snapshot: r.units_per_purchase_unit ?? 1,
+          moq_snapshot: r.item_moq ?? 0,
           is_roll_snapshot: r.is_roll,
           roll_length_value_snapshot: r.roll_length_value ?? null,
           roll_length_uom_snapshot: r.roll_length_uom ?? null,
@@ -798,7 +876,7 @@ export default function MaterialDemand() {
                 <th className="px-4 py-3 text-right font-medium text-gray-700 cursor-pointer w-28" onClick={() => handleSort('required_qty')}>
                   Required <SortIcon col="required_qty" />
                 </th>
-                <th className="px-4 py-3 text-right font-medium text-gray-700 w-28">On Hand</th>
+                <th className="px-4 py-3 text-right font-medium text-gray-700 w-28">Available</th>
                 <th className="px-4 py-3 text-right font-medium text-gray-700 w-28">On Order</th>
                 <th className="px-4 py-3 text-right font-medium text-gray-700 cursor-pointer w-32" onClick={() => handleSort('need_to_buy')}>
                   Status <SortIcon col="need_to_buy" />
@@ -855,7 +933,7 @@ export default function MaterialDemand() {
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                         r.mo_status === 'confirmed' ? 'bg-indigo-50 text-indigo-700' :
                         r.mo_status === 'in_production' ? 'bg-yellow-50 text-yellow-700' :
-                        r.mo_status === 'planned' ? 'bg-blue-50 text-blue-700' :
+                        r.mo_status === 'procurement' ? 'bg-blue-50 text-blue-700' :
                         'bg-gray-50 text-gray-700'
                       }`}>
                         {getMoStatusLabel(r.mo_status)}

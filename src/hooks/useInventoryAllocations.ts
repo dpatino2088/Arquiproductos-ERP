@@ -161,6 +161,7 @@ export function useAllocateToMO() {
       if (error) throw error;
       queryClient.invalidateQueries({ queryKey: [ALLOCATIONS_KEY] });
       queryClient.invalidateQueries({ queryKey: [FULFILLMENT_KEY] });
+      queryClient.invalidateQueries({ queryKey: ['material-demand', orgId] });
       return data as { ok: boolean; results: any[] };
     } finally {
       setIsAllocating(false);
@@ -187,6 +188,7 @@ export function useReleaseMOAllocation() {
       if (error) throw error;
       queryClient.invalidateQueries({ queryKey: [ALLOCATIONS_KEY] });
       queryClient.invalidateQueries({ queryKey: [FULFILLMENT_KEY] });
+      queryClient.invalidateQueries({ queryKey: ['material-demand'] });
       return data as { ok: boolean; released_count: number };
     } finally {
       setIsReleasing(false);

@@ -23,7 +23,6 @@ import {
   isWorkDay, endHourForDay,
   type ScheduledSlot, type DateOverride,
 } from '../../../lib/scheduling';
-import InteractiveGantt from '../InteractiveGantt';
 import WorkloadHeatmap from '../WorkloadHeatmap';
 
 interface ScheduleTabProps {
@@ -234,6 +233,22 @@ export default function ScheduleTab({ moId, canEdit }: ScheduleTabProps) {
       return null;
     }
   }, [startDate, tasks, manualOverrides]);
+
+  const ganttLineLabels = useMemo(() => {
+    const lineIds = new Set<string>();
+    for (const t of tasks) {
+      if (t.sales_order_line_id) lineIds.add(t.sales_order_line_id);
+    }
+    if (lineIds.size <= 1) return undefined;
+    const woNumber = (mo?.manufacturing_order_no ?? '').replace(/^MO-/, 'WO-');
+    const labels = new Map<string, string>();
+    let idx = 0;
+    for (const id of lineIds) {
+      idx++;
+      labels.set(id, `${woNumber}_L${idx}`);
+    }
+    return labels;
+  }, [tasks, mo?.manufacturing_order_no]);
 
   const workloadRange = useMemo(() => {
     if (!startDate) return undefined;
@@ -618,12 +633,17 @@ export default function ScheduleTab({ moId, canEdit }: ScheduleTabProps) {
     const hours = val;
     try {
       await updateTaskScheduling(selectedTaskId, { estimated_duration_hours: hours });
-      resetOverrides();
+      // Preserve in-memory manual placements while editing dependencies/durations.
+      // Resetting here forces tasks back to DB-saved dates (earliest auto schedule),
+      // which can undo intentional delayed starts before the user clicks Save Changes.
+      if (manualOverrides.size === 0) {
+        resetOverrides();
+      }
       addNotification({ type: 'success', title: 'Updated', message: 'Duration updated' });
     } catch (err) {
       addNotification({ type: 'error', title: 'Error', message: err instanceof Error ? err.message : 'Failed' });
     }
-  }, [selectedTaskId, editDurationValue, updateTaskScheduling, addNotification, resetOverrides]);
+  }, [selectedTaskId, editDurationValue, updateTaskScheduling, addNotification, resetOverrides, manualOverrides.size]);
 
   const handleToggleDependency = useCallback(async (depId: string) => {
     if (!selectedTask) return;
@@ -633,11 +653,15 @@ export default function ScheduleTab({ moId, canEdit }: ScheduleTabProps) {
       : [...currentDeps, depId];
     try {
       await updateTaskScheduling(selectedTask.id, { depends_on_task_ids: newDeps });
-      resetOverrides();
+      // Do not wipe unsaved task moves when dependencies are edited.
+      // If there are no in-memory overrides, keep previous behavior.
+      if (manualOverrides.size === 0) {
+        resetOverrides();
+      }
     } catch (err) {
       addNotification({ type: 'error', title: 'Error', message: err instanceof Error ? err.message : 'Failed' });
     }
-  }, [selectedTask, updateTaskScheduling, addNotification, resetOverrides]);
+  }, [selectedTask, updateTaskScheduling, addNotification, resetOverrides, manualOverrides.size]);
 
   const handleTaskDateChange = useCallback((newDateStr: string) => {
     if (!selectedTaskId || !newDateStr) return;
@@ -744,7 +768,7 @@ export default function ScheduleTab({ moId, canEdit }: ScheduleTabProps) {
   }
 
   const hasUnsavedChanges = manualOverrides.size > 0;
-  const schedulableStatuses = ['materials_ready', 'planned', 'in_production'];
+  const schedulableStatuses = ['materials_ready', 'in_production'];
   const preScheduleStatuses = ['draft', 'confirmed', 'procurement'];
   const hasWorkOrders = tasks.length > 0;
   const scheduleEditable = canEdit && (schedulableStatuses.includes(mo.status) || hasWorkOrders);
@@ -860,20 +884,6 @@ export default function ScheduleTab({ moId, canEdit }: ScheduleTabProps) {
           simulatedLoad={simulatedLoad}
           selectedTaskWorkCenterId={selectedTask?.work_center_id ?? null}
           onCellClick={scheduleEditable ? handleHeatmapCellClick : undefined}
-        />
-      )}
-
-      {/* ③ Interactive Gantt */}
-      {computed && tasks.length > 0 && (
-        <InteractiveGantt
-          tasks={tasks}
-          slots={computed.slots}
-          startDate={heatmapStart}
-          totalDays={computed.totalDays}
-          selectedTaskId={selectedTaskId}
-          onSelectTask={(id) => { setSelectedTaskId(id); setEditOverrideTaskId(null); }}
-          onMoveTask={handleMoveTask}
-          canEdit={scheduleEditable && scheduleCheck.canSchedule}
         />
       )}
 

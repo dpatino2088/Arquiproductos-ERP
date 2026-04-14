@@ -96,6 +96,8 @@ export default function MaterialsTab({
   const [expandedSkuId, setExpandedSkuId] = useState<string | null>(null);
   const [materialSubTab, setMaterialSubTab] = useState<'materials' | 'allocation'>('materials');
 
+  const canModifyAllocations = ['draft', 'confirmed', 'procurement', 'materials_ready'].includes(moStatus);
+
   const allocationMap = useMemo(() => {
     const map = new Map<string, number>();
     for (const a of allocations) {
@@ -150,6 +152,10 @@ export default function MaterialsTab({
   }, [allocStats]);
 
   const handleAllocateAll = useCallback(async () => {
+    if (!canModifyAllocations) {
+      addNotification({ type: 'error', title: 'Blocked', message: 'Cannot allocate materials after Material Ready.' });
+      return;
+    }
     if (!activeOrganizationId || !defaultWarehouse) return;
     const MIN_QTY = 0.0001;
     const items = aggregatedBySku
@@ -171,7 +177,7 @@ export default function MaterialsTab({
     } catch (err: unknown) {
       addNotification({ type: 'error', title: 'Error', message: (err as Error).message });
     }
-  }, [activeOrganizationId, defaultWarehouse, moId, aggregatedBySku, allocationMap, allocate, addNotification, refetchAllocations]);
+  }, [canModifyAllocations, activeOrganizationId, defaultWarehouse, moId, aggregatedBySku, allocationMap, allocate, addNotification, refetchAllocations]);
 
   const handleReleaseAll = useCallback(async () => {
     if (allocations.length === 0) return;
@@ -663,7 +669,7 @@ export default function MaterialsTab({
                 Inventory Allocation
               </h4>
               <div className="flex items-center gap-2">
-                {allocations.length > 0 && (
+                {canModifyAllocations && allocations.length > 0 && (
                   <button
                     type="button"
                     onClick={() => setShowReleaseConfirm(true)}
@@ -674,15 +680,17 @@ export default function MaterialsTab({
                     Release All
                   </button>
                 )}
-                <button
-                  type="button"
-                  onClick={handleAllocateAll}
-                  disabled={isAllocating || !defaultWarehouse}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
-                >
-                  {isAllocating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Package className="w-3 h-3" />}
-                  Allocate Available
-                </button>
+                {canModifyAllocations && (
+                  <button
+                    type="button"
+                    onClick={handleAllocateAll}
+                    disabled={isAllocating || !defaultWarehouse}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-white bg-primary rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                  >
+                    {isAllocating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Package className="w-3 h-3" />}
+                    Allocate Available
+                  </button>
+                )}
               </div>
             </div>
 
@@ -782,6 +790,7 @@ export default function MaterialsTab({
                           onToggle={() => setExpandedSkuId(isExpanded ? null : agg.catalog_item_id)}
                           onRelease={() => handleReleaseItem(agg.catalog_item_id)}
                           isReleasing={isReleasing}
+                          canModify={canModifyAllocations}
                           moId={moId}
                           orgId={activeOrganizationId}
                           warehouseId={defaultWarehouse?.id ?? null}
@@ -863,6 +872,7 @@ interface AllocationRowProps {
   onToggle: () => void;
   onRelease: () => void;
   isReleasing: boolean;
+  canModify: boolean;
   moId: string;
   orgId: string | null;
   warehouseId: string | null;
@@ -872,7 +882,7 @@ interface AllocationRowProps {
 
 function AllocationRow({
   agg, allocated, gap, onHand, statusLabel, statusColor, rowBg,
-  isExpanded, onToggle, onRelease, isReleasing,
+  isExpanded, onToggle, onRelease, isReleasing, canModify,
   moId, orgId, warehouseId, availability, onTransferred,
 }: AllocationRowProps) {
   const fmt = (qty: number) => agg.uom === 'm' ? qty.toFixed(2) : qty.toFixed(0);
@@ -903,7 +913,7 @@ function AllocationRow({
           <span className={`inline-block text-[10px] px-2 py-0.5 rounded-full font-medium ${statusColor}`}>{statusLabel}</span>
         </td>
         <td className="px-3 py-2 text-center" onClick={e => e.stopPropagation()}>
-          {allocated > 0 && (
+          {canModify && allocated > 0 && (
             <button
               type="button"
               onClick={onRelease}
@@ -931,6 +941,7 @@ function AllocationRow({
               moId={moId}
               orgId={orgId}
               warehouseId={warehouseId}
+              canModify={canModify}
               onTransferred={onTransferred}
             />
           </td>
@@ -956,12 +967,13 @@ interface AllocationDetailPanelProps {
   moId: string;
   orgId: string | null;
   warehouseId: string | null;
+  canModify: boolean;
   onTransferred: () => void;
 }
 
 function AllocationDetailPanel({
   catalogItemId, sku, itemName, uom, requiredQty, allocatedQty, gap,
-  availability, moId, orgId, warehouseId, onTransferred,
+  availability, moId, orgId, warehouseId, canModify, onTransferred,
 }: AllocationDetailPanelProps) {
   const { moAllocations, loading } = useAllMOAllocationsForItem(catalogItemId, moId, orgId);
   const { transfer, isTransferring } = useTransferAllocation();
@@ -981,6 +993,10 @@ function AllocationDetailPanel({
   const isInProduction = (status: string) => ['in_production', 'quality_check', 'ready_for_pickup'].includes(status);
 
   const handleTransfer = useCallback(async (sourceMoId: string, sourceWarehouseId: string) => {
+    if (!canModify) {
+      setError('Cannot allocate/transfer materials after Material Ready.');
+      return;
+    }
     const qty = transferAmounts[sourceMoId];
     if (!qty || qty <= 0 || !orgId) return;
     setError(null);
@@ -993,7 +1009,7 @@ function AllocationDetailPanel({
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Transfer failed');
     }
-  }, [transferAmounts, transfer, moId, catalogItemId, orgId, onTransferred, uom]);
+  }, [canModify, transferAmounts, transfer, moId, catalogItemId, orgId, onTransferred, uom]);
 
   return (
     <div className="bg-slate-50 border-t border-b border-slate-200 px-6 py-4 space-y-4">
@@ -1111,7 +1127,7 @@ function AllocationDetailPanel({
                   )}
 
                   {/* Transfer controls (only for other MOs when there's a gap) */}
-                  {!alloc.is_current && gap > 0 && warehouseId && (
+                  {!alloc.is_current && gap > 0 && warehouseId && canModify && (
                     <div className="flex items-center justify-end gap-2 mt-2 pt-2 border-t border-gray-100">
                       <span className="text-[10px] text-gray-500 mr-auto">Take from this MO:</span>
                       <input
@@ -1136,6 +1152,12 @@ function AllocationDetailPanel({
                         {isTransferring ? <Loader2 className="w-3 h-3 animate-spin" /> : <ArrowRightLeft className="w-3 h-3" />}
                         Transfer
                       </button>
+                    </div>
+                  )}
+                  {!alloc.is_current && gap > 0 && warehouseId && !canModify && (
+                    <div className="flex items-center gap-1 text-[10px] text-gray-600 bg-gray-100 rounded px-2 py-0.5 mt-1.5">
+                      <ShieldAlert className="w-3 h-3 shrink-0" />
+                      Transfers disabled after Material Ready
                     </div>
                   )}
                 </div>

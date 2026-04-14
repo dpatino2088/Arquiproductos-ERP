@@ -15,6 +15,7 @@ import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useFilteredMfgSubmodules } from './manufacturingSubmodules';
 import WorkloadHeatmap from '../../components/manufacturing/WorkloadHeatmap';
 import StatusTabs from '../../components/shared/StatusTabs';
+import { isWorkDay, endHourForDay } from '../../lib/scheduling';
 
 function toMonthStart(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), 1);
@@ -37,13 +38,74 @@ function dayInRange(day: Date, startIso: string | null, endIso: string | null): 
   return dStart <= end && dEnd >= start;
 }
 
+function dayKeyLocal(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function nextWorkStart(d: Date): Date {
+  const out = new Date(d);
+  out.setHours(8, 0, 0, 0);
+  while (!isWorkDay(out.getDay())) {
+    out.setDate(out.getDate() + 1);
+    out.setHours(8, 0, 0, 0);
+  }
+  return out;
+}
+
+function workedDayKeys(startIso: string | null, estimatedHours: number | null | undefined, endIso: string | null): string[] {
+  if (!startIso) return [];
+  const start = parseIsoDate(startIso);
+  const hours = Number(estimatedHours ?? 0);
+
+  if (Number.isFinite(hours) && hours > 0) {
+    const keys = new Set<string>();
+    let cursor = new Date(start);
+    let remaining = hours;
+
+    while (remaining > 0.0001) {
+      if (!isWorkDay(cursor.getDay())) {
+        cursor = nextWorkStart(cursor);
+        continue;
+      }
+
+      const dayEnd = endHourForDay(cursor.getDay());
+      let currentHour = cursor.getHours() + cursor.getMinutes() / 60;
+      if (currentHour < 8) {
+        cursor.setHours(8, 0, 0, 0);
+        currentHour = 8;
+      }
+      if (currentHour >= dayEnd) {
+        cursor = nextWorkStart(new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 1, 8, 0, 0, 0));
+        continue;
+      }
+
+      keys.add(dayKeyLocal(cursor));
+      const availableToday = Math.max(0, dayEnd - currentHour);
+      const consume = Math.min(remaining, availableToday);
+      remaining -= consume;
+      cursor = new Date(cursor.getTime() + consume * 3600_000);
+    }
+    return [...keys];
+  }
+
+  if (!endIso) return [dayKeyLocal(start)];
+  const end = parseIsoDate(endIso);
+  const keys = new Set<string>();
+  const cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate(), 0, 0, 0, 0);
+  const endDay = new Date(end.getFullYear(), end.getMonth(), end.getDate(), 0, 0, 0, 0);
+  while (cursor <= endDay) {
+    if (isWorkDay(cursor.getDay())) keys.add(dayKeyLocal(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return [...keys];
+}
+
 function getBlockVariant(mo: ManufacturingOrder, isLate: boolean, materialIncomplete: boolean): string {
   if (mo.status === 'cancelled') return 'bg-gray-100 border-gray-200 text-gray-500';
   if (materialIncomplete) return 'bg-amber-50 border-amber-300 text-amber-900';
   if (isLate) return 'bg-red-50 border-red-300 text-red-900';
   switch (mo.status) {
     case 'draft':
-    case 'planned':
       return 'bg-gray-100 border-gray-300 text-gray-800';
     case 'in_production':
       return 'bg-blue-50 border-blue-300 text-blue-900';
@@ -174,7 +236,7 @@ function DroppableDay({
 
 type StatusFilterOpt = { key: string; label: string; statuses?: readonly string[]; virtual?: boolean };
 const STATUS_FILTER_OPTIONS: StatusFilterOpt[] = [
-  { key: 'planned', label: 'Planned', statuses: ['draft', 'confirmed', 'procurement', 'materials_ready', 'planned'] },
+  { key: 'planned', label: 'Pre-Production', statuses: ['draft', 'confirmed', 'procurement', 'materials_ready'] },
   { key: 'in_production', label: 'In Production', statuses: ['in_production', 'quality_check', 'ready_for_pickup'] },
   { key: 'completed', label: 'Completed', statuses: ['delivered', 'completed'] },
   { key: 'late', label: 'Late', virtual: true },
@@ -193,7 +255,7 @@ export default function ProductionCalendar() {
   const [dealerFilter, setDealerFilter] = useState<string | null>(null);
   const [statusTab, setStatusTab] = useState<'all' | 'planned' | 'in_production' | 'completed' | 'late'>('all');
   const { manufacturingOrders, loading, error, refetch } = useManufacturingOrders(dealerFilter ?? undefined);
-  const { updateManufacturingOrder, isUpdating } = useUpdateManufacturingOrder();
+  const { updateManufacturingOrder } = useUpdateManufacturingOrder();
   const [monthCursor, setMonthCursor] = useState(() => toMonthStart(new Date()));
   const [materialReadinessMap, setMaterialReadinessMap] = useState<Record<string, { status: string; has_shortage: boolean }>>({});
   const justDroppedRef = useRef(false);
@@ -201,6 +263,14 @@ export default function ProductionCalendar() {
   const [calendarViewMode, setCalendarViewMode] = useState<'month' | 'week' | 'gantt'>('month');
   const { centers: workCenters } = useWorkCenters();
   const [wcToMoIds, setWcToMoIds] = useState<Record<string, Set<string>>>({});
+  const [calendarTaskRows, setCalendarTaskRows] = useState<Array<{
+    id: string;
+    manufacturing_order_id: string;
+    work_center_id: string | null;
+    planned_start_at: string | null;
+    planned_end_at: string | null;
+    estimated_duration_hours: number | null;
+  }>>([]);
   const [ganttTasks, setGanttTasks] = useState<Record<string, { id: string; wc_name: string; wc_code: string; status: string; planned_start_at: string | null; planned_end_at: string | null }[]>>({});
 
   const monthStart = useMemo(() => toMonthStart(monthCursor), [monthCursor]);
@@ -320,11 +390,40 @@ export default function ProductionCalendar() {
     return map;
   }, [scheduledMOs, today]);
 
+  const moTaskDayMap = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    for (const t of calendarTaskRows) {
+      if (!t.manufacturing_order_id || !t.planned_start_at) continue;
+      const keys = workedDayKeys(t.planned_start_at, t.estimated_duration_hours, t.planned_end_at);
+      if (!map.has(t.manufacturing_order_id)) map.set(t.manufacturing_order_id, new Set());
+      const bucket = map.get(t.manufacturing_order_id)!;
+      for (const k of keys) bucket.add(k);
+    }
+    return map;
+  }, [calendarTaskRows]);
+
+  const wcTaskDayMap = useMemo(() => {
+    const map = new Map<string, Map<string, Set<string>>>();
+    for (const t of calendarTaskRows) {
+      if (!t.work_center_id || !t.manufacturing_order_id || !t.planned_start_at) continue;
+      const keys = workedDayKeys(t.planned_start_at, t.estimated_duration_hours, t.planned_end_at);
+      if (!map.has(t.work_center_id)) map.set(t.work_center_id, new Map());
+      const byDay = map.get(t.work_center_id)!;
+      for (const k of keys) {
+        if (!byDay.has(k)) byDay.set(k, new Set());
+        byDay.get(k)!.add(t.manufacturing_order_id);
+      }
+    }
+    return map;
+  }, [calendarTaskRows]);
+
 
   const getMOsForDay = (day: Date) =>
-    scheduledMOs.filter((mo) =>
-      dayInRange(day, mo.planned_start_at ?? null, mo.planned_end_at ?? null)
-    );
+    scheduledMOs.filter((mo) => {
+      const days = moTaskDayMap.get(mo.id);
+      if (days && days.size > 0) return days.has(dayKeyLocal(day));
+      return dayInRange(day, mo.planned_start_at ?? null, mo.planned_end_at ?? null);
+    });
 
   const loadPerDay = useMemo(() => {
     return displayDays.map((day) => getMOsForDay(day).length);
@@ -360,6 +459,32 @@ export default function ProductionCalendar() {
           if (row?.mo_id) map[row.mo_id] = { status: row.status ?? 'incomplete', has_shortage: Boolean(row.has_shortage) };
         }
         setMaterialReadinessMap(map);
+      });
+  }, [moIdsInMonth.join(',')]);
+
+  useEffect(() => {
+    if (moIdsInMonth.length === 0) {
+      setCalendarTaskRows([]);
+      return;
+    }
+    supabase
+      .from('WorkOrderTasks')
+      .select('id, manufacturing_order_id, work_center_id, planned_start_at, planned_end_at, estimated_duration_hours')
+      .in('manufacturing_order_id', moIdsInMonth)
+      .eq('deleted', false)
+      .then(({ data, error: err }: { data: unknown; error: unknown }) => {
+        if (err || !Array.isArray(data)) {
+          setCalendarTaskRows([]);
+          return;
+        }
+        setCalendarTaskRows(data as Array<{
+          id: string;
+          manufacturing_order_id: string;
+          work_center_id: string | null;
+          planned_start_at: string | null;
+          planned_end_at: string | null;
+          estimated_duration_hours: number | null;
+        }>);
       });
   }, [moIdsInMonth.join(',')]);
 
@@ -442,12 +567,14 @@ export default function ProductionCalendar() {
 
   const getMOsForDayAndWC = (day: Date, wcId: string) => {
     const moIds = wcToMoIds[wcId];
-    if (!moIds || moIds.size === 0) return [];
-    return scheduledMOs.filter(
-      (mo) =>
-        moIds.has(mo.id) &&
-        dayInRange(day, mo.planned_start_at ?? null, mo.planned_end_at ?? null)
-    );
+    const dayMap = wcTaskDayMap.get(wcId);
+    const key = dayKeyLocal(day);
+    return scheduledMOs.filter((mo) => {
+      const byTasks = dayMap?.get(key);
+      if (byTasks && byTasks.size > 0) return byTasks.has(mo.id);
+      if (!moIds || moIds.size === 0) return false;
+      return moIds.has(mo.id) && dayInRange(day, mo.planned_start_at ?? null, mo.planned_end_at ?? null);
+    });
   };
 
   const handleDragEnd = useCallback(
@@ -496,7 +623,7 @@ export default function ProductionCalendar() {
   const goNext = () => setMonthCursor((d) => new Date(d.getFullYear(), d.getMonth() + 1, 1));
 
   const handleAutoSchedule = useCallback(async () => {
-    const schedulableStatuses = new Set(['draft', 'confirmed', 'procurement', 'materials_ready', 'planned']);
+    const schedulableStatuses = new Set(['draft', 'confirmed', 'procurement', 'materials_ready']);
     const toSchedule = manufacturingOrders.filter((mo) => {
       if (!schedulableStatuses.has(mo.status)) return false;
       const readiness = materialReadinessMap[mo.id];

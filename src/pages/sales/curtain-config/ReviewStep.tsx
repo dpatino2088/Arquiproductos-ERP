@@ -7,6 +7,7 @@ import DimensionsStackView from '../../../components/DimensionsStackView';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { formatMoney, formatUom } from '../../../lib/format';
 import { useCostSettings } from '../../../hooks/useCosts';
+import { computeSelectedSnapshotTotals } from '../../../lib/bom/snapshotSelectedTotals';
 
 // ============================================================================
 // BOM Preview Snapshot types (from ConfiguredProducts.bom_preview_snapshot)
@@ -65,6 +66,8 @@ interface BOMBreakdownLine {
   kind?: 'roll' | 'parent' | 'child' | 'accessory' | 'labor' | 'other';
   meta?: Record<string, unknown>;
 }
+
+const OPTIONAL_HARDWARE_ROLES = new Set(['headbox', 'side_channel', 'bottom_channel', 'bottom_bar']);
 
 interface ReviewStepProps {
   config: ProductConfig;
@@ -203,8 +206,21 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
 
     const lines: BOMBreakdownLine[] = [];
     const configAny = config as any;
+    const explicitNoneByRole: Record<string, boolean> = {
+      headbox: String(configAny.headbox_item_id ?? '').toUpperCase() === 'NONE',
+      side_channel: String(configAny.side_channel_item_id ?? '').toUpperCase() === 'NONE',
+      bottom_channel: String(configAny.bottom_channel_item_id ?? '').toUpperCase() === 'NONE',
+      bottom_bar: String(configAny.bottom_bar_item_id ?? '').toUpperCase() === 'NONE',
+    };
 
     const processItem = (item: BOMSnapshotItem, isChild = false, parentRole?: string) => {
+      const normalizedRole = String(item.role || '').toLowerCase();
+      const isExplicitlyExcluded = explicitNoneByRole[normalizedRole] === true;
+      // In snapshot mode, optional hardware flagged as not selected should not appear in Review.
+      if ((isExplicitlyExcluded || (item.selected === false && OPTIONAL_HARDWARE_ROLES.has(normalizedRole))) && !isChild) {
+        return;
+      }
+
       // For roll/fabric: always use the UOM derived from roll_pricing_mode (fixes old snapshots with hardcoded m²)
       const resolvedUom = (item.kind === 'roll' || item.role === 'fabric')
         ? fabricUom
@@ -286,15 +302,21 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
 
         // 2. Build map of selected items from config
         const configAny = config as any;
+        const normalizedRoleSelection = (value: unknown): string | null => {
+          if (value == null) return null;
+          const s = String(value).trim();
+          if (!s || s.toUpperCase() === 'NONE') return null;
+          return s;
+        };
         const selectedItems: Record<string, string | null> = {
-          bottom_bar: configAny.bottom_bar_item_id || null,
-          headbox: configAny.headbox_item_id || null,
-          side_channel: configAny.side_channel_item_id || null,
-          bottom_channel: configAny.bottom_channel_item_id || null,
-          motor: configAny.motor_item_id || null,
-          drive: configAny.drive_item_id || null,
-          tube: configAny.tube_item_id || null,
-          track: configAny.track_item_id || null,
+          bottom_bar: normalizedRoleSelection(configAny.bottom_bar_item_id),
+          headbox: normalizedRoleSelection(configAny.headbox_item_id),
+          side_channel: normalizedRoleSelection(configAny.side_channel_item_id),
+          bottom_channel: normalizedRoleSelection(configAny.bottom_channel_item_id),
+          motor: normalizedRoleSelection(configAny.motor_item_id),
+          drive: normalizedRoleSelection(configAny.drive_item_id),
+          tube: normalizedRoleSelection(configAny.tube_item_id),
+          track: normalizedRoleSelection(configAny.track_item_id),
         };
 
         // 3. Collect all catalog item IDs we need to fetch
@@ -399,6 +421,9 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
         parentComponents.forEach((comp: any) => {
           const role = (comp.component_role || '').toLowerCase();
           const selectedId = selectedItems[role];
+          const isOptionalRole = OPTIONAL_HARDWARE_ROLES.has(role);
+          const isOptionalAndNotSelected = isOptionalRole && comp.is_required === false && !selectedId;
+          if (isOptionalAndNotSelected) return;
           const itemId = selectedId || comp.component_item_id;
 
           if (!itemId) return; // Skip if no item
@@ -503,6 +528,7 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
 
   // ── HARD LOCK: bom_preview_snapshot.totals is PRIMARY. configured_product_totals + CP columns fallback. NO calculations.
   const snapshotTotals = (config as any).bom_preview_snapshot?.totals ?? null;
+  const selectedSnapshotTotals = computeSelectedSnapshotTotals((config as any).bom_preview_snapshot);
   const configuredProductTotals = (config as any).configured_product_totals ?? null;
   // Prefer snapshot; fallback to configured_product_totals (e.g. createConfiguredProductPreview fallback path)
   const totals = snapshotTotals ?? (configuredProductTotals && typeof configuredProductTotals === 'object' ? configuredProductTotals : null);
@@ -529,8 +555,8 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
 
   const effectiveTotals: TotalsShape = useMemo(() => {
     const t = totals as Record<string, number> | null;
-    const rollMsrp = (t?.roll_msrp_total != null ? Number(t.roll_msrp_total) : null) ?? (cpDirect.roll_msrp_total != null ? Number(cpDirect.roll_msrp_total) : null) ?? 0;
-    const bomTotal = (t?.bom_total != null ? Number(t.bom_total) : null) ?? (t?.bom_msrp_total != null ? Number(t.bom_msrp_total) : null) ?? (cpDirect.bom_total != null ? Number(cpDirect.bom_total) : null) ?? 0;
+    const rollMsrp = (selectedSnapshotTotals?.rollMsrp != null ? Number(selectedSnapshotTotals.rollMsrp) : null) ?? (t?.roll_msrp_total != null ? Number(t.roll_msrp_total) : null) ?? (cpDirect.roll_msrp_total != null ? Number(cpDirect.roll_msrp_total) : null) ?? 0;
+    const bomTotal = (selectedSnapshotTotals?.bomMsrp != null ? Number(selectedSnapshotTotals.bomMsrp) : null) ?? (t?.bom_total != null ? Number(t.bom_total) : null) ?? (t?.bom_msrp_total != null ? Number(t.bom_msrp_total) : null) ?? (cpDirect.bom_total != null ? Number(cpDirect.bom_total) : null) ?? 0;
     const accessoriesTotal = (t?.accessories_total != null ? Number(t.accessories_total) : null) ?? (cpDirect.accessories_total != null ? Number(cpDirect.accessories_total) : null) ?? 0;
     const rawLaborPct =
       (t?.labor_msrp_pct != null ? Number(t.labor_msrp_pct) : null) ??
@@ -542,7 +568,11 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
       0;
     const laborPct = rawLaborPct <= 1 ? rawLaborPct : rawLaborPct / 100;
     const laborAmount = (t?.labor_amount != null ? Number(t.labor_amount) : null) ?? (t?.labor_msrp != null ? Number(t.labor_msrp) : null) ?? (cpDirect.labor_amount != null ? Number(cpDirect.labor_amount) : null) ?? (cpDirect.labor_msrp != null ? Number(cpDirect.labor_msrp) : null) ?? 0;
-    const snapshotTotalMsrp = (t?.total_msrp != null ? Number(t.total_msrp) : null) ?? (t?.unit_msrp_total != null ? Number(t.unit_msrp_total) : null) ?? null;
+    const snapshotTotalMsrp =
+      (selectedSnapshotTotals?.totalMsrp != null ? Number(selectedSnapshotTotals.totalMsrp) : null) ??
+      (t?.total_msrp != null ? Number(t.total_msrp) : null) ??
+      (t?.unit_msrp_total != null ? Number(t.unit_msrp_total) : null) ??
+      null;
     const derivedTotalMsrp = (rollMsrp + bomTotal + accessoriesTotal) > 0 && laborAmount > 0
       ? (rollMsrp + bomTotal + accessoriesTotal + laborAmount)
       : null;
@@ -557,7 +587,7 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
       msrp_product_subtotal: msrpProductSubtotal,
       total_msrp: totalMsrp,
     };
-  }, [totals, cpDirect, costSettings]);
+  }, [totals, cpDirect, costSettings, selectedSnapshotTotals]);
 
   // TOTAL PRODUCT MSRP (unit) — from totals/CP first; fallback: sum breakdown lines (preview without saved totals)
   const totalProductMsrpUnit = useMemo(() => {
@@ -602,8 +632,8 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
   // DISPLAY ONLY: 1) bom_preview_snapshot.totals 2) CP columns. No calculations.
   const effectiveCosts = useMemo(() => {
     const t = totals as Record<string, number> | null;
-    const rollCostFromData = (t?.roll_total_cost != null ? Number(t.roll_total_cost) : null) ?? (cpDirect.roll_total_cost != null ? Number(cpDirect.roll_total_cost) : null) ?? null;
-    const bomCostFromData = (t?.bom_total_cost != null ? Number(t.bom_total_cost) : null) ?? (cpDirect.bom_total_cost != null ? Number(cpDirect.bom_total_cost) : null) ?? null;
+    const rollCostFromData = (selectedSnapshotTotals?.rollCost != null ? Number(selectedSnapshotTotals.rollCost) : null) ?? (t?.roll_total_cost != null ? Number(t.roll_total_cost) : null) ?? (cpDirect.roll_total_cost != null ? Number(cpDirect.roll_total_cost) : null) ?? null;
+    const bomCostFromData = (selectedSnapshotTotals?.bomCost != null ? Number(selectedSnapshotTotals.bomCost) : null) ?? (t?.bom_total_cost != null ? Number(t.bom_total_cost) : null) ?? (cpDirect.bom_total_cost != null ? Number(cpDirect.bom_total_cost) : null) ?? null;
     const accessoriesCost = (t?.accessories_total_cost != null ? Number(t.accessories_total_cost) : null) ?? (cpDirect.accessories_total_cost != null ? Number(cpDirect.accessories_total_cost) : null) ?? 0;
     const productCostFromData = (t?.unit_product_cost != null ? Number(t.unit_product_cost) : null) ?? (cpDirect.unit_product_cost != null ? Number(cpDirect.unit_product_cost) : null) ?? null;
     const laborCostFromData = (t?.unit_labor_cost != null ? Number(t.unit_labor_cost) : null) ?? (t?.labor_cost != null ? Number(t.labor_cost) : null) ?? (t?.labor_cost_snapshot != null ? Number(t.labor_cost_snapshot) : null) ?? (cpDirect.unit_labor_cost != null ? Number(cpDirect.unit_labor_cost) : null) ?? null;
@@ -641,7 +671,7 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
       labor_pct: laborCostPct,
       total_cost: totalCost,
     };
-  }, [cpDirect, totals, breakdownLines, costSettings]);
+  }, [cpDirect, totals, breakdownLines, costSettings, selectedSnapshotTotals]);
 
   const unitDealerPriceFromDataRaw =
     (t?.unit_dealer_price != null ? Number(t.unit_dealer_price) : null) ??

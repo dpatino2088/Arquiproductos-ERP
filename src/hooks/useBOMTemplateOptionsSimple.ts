@@ -51,6 +51,8 @@ export interface RoleOptionsResult {
   options: RoleOption[];
   loading: boolean;
   error: string | null;
+  /** true when at least one BOM component with this role has is_required=true */
+  roleRequired: boolean;
 }
 
 export interface TemplateFilterState {
@@ -402,6 +404,7 @@ export function useBOMTemplateOptionsSimple(
   const [options, setOptions] = useState<RoleOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [roleRequired, setRoleRequired] = useState(false);
   const { activeOrganizationId } = useOrganizationContext();
 
   const safePanelCount = Math.min(3, Math.max(1, panelCount));
@@ -540,7 +543,7 @@ export function useBOMTemplateOptionsSimple(
         // Get PARENT components from BOMComponents
         const { data: allComponents, error: componentsError } = await supabase
           .from('BOMComponents')
-          .select('component_item_id, component_role, bom_template_id')
+          .select('component_item_id, component_role, bom_template_id, is_required')
           .eq('organization_id', activeOrganizationId)
           .in('bom_template_id', templateIds)
           .is('parent_component_id', null)
@@ -555,6 +558,8 @@ export function useBOMTemplateOptionsSimple(
         const components = (allComponents || []).filter((c: { component_role: string; component_item_id?: string; bom_template_id: string }) =>
           (c.component_role || '').toLowerCase().trim() === normalizedRole
         );
+
+        setRoleRequired(components.some((c: any) => c.is_required !== false));
 
         // Collect unique component_item_ids and track templates
         const componentItemIds = new Set<string>();
@@ -657,7 +662,7 @@ export function useBOMTemplateOptionsSimple(
     fetchOptions();
   }, [activeOrganizationId, productTypeId, hardwareColor, role, templateIdsKey, safePanelCount]);
 
-  return { options, loading, error };
+  return { options, loading, error, roleRequired };
 }
 
 /**

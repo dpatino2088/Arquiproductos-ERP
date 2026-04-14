@@ -6,12 +6,11 @@ import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useGranularAccess } from '../../hooks/usePermissions';
-import { Plus, Edit, Trash2, Search, Filter, Wrench, Copy, GripVertical, Package, Shield, Ruler } from 'lucide-react';
+import { Plus, Edit, Trash2, Search, Filter, Wrench, Copy, GripVertical, Package, Shield } from 'lucide-react';
 import BOMTemplateModal from './bom-templates/BOMTemplateModal';
 import BOMRolesTab from './bom-templates/BOMRolesTab';
-import BOMEngineeringTab from './bom-templates/BOMEngineeringTab';
 
-type BOMInternalTab = 'templates' | 'roles' | 'engineering';
+type BOMInternalTab = 'templates' | 'roles';
 
 interface BOMTemplateRow {
   id: string;
@@ -76,7 +75,7 @@ export default function BOMTemplates() {
   const [activeTab, setActiveTab] = useState<BOMInternalTab>(() => {
     try {
       const saved = sessionStorage.getItem('bom:activeTab');
-      if (saved === 'roles' || saved === 'engineering') return saved;
+      if (saved === 'roles') return saved;
     } catch { /* ignore */ }
     return 'templates';
   });
@@ -403,7 +402,6 @@ export default function BOMTemplates() {
         {([
           { key: 'templates' as BOMInternalTab, label: 'Templates', icon: Wrench },
           { key: 'roles' as BOMInternalTab, label: 'Roles', icon: Shield },
-          { key: 'engineering' as BOMInternalTab, label: 'Engineering', icon: Ruler },
         ]).map(({ key, label, icon: Icon }) => (
           <button
             key={key}
@@ -423,11 +421,6 @@ export default function BOMTemplates() {
       {/* Roles tab */}
       <div hidden={activeTab !== 'roles'}>
         <BOMRolesTab />
-      </div>
-
-      {/* Engineering tab */}
-      <div hidden={activeTab !== 'engineering'}>
-        <BOMEngineeringTab />
       </div>
 
       {/* Templates tab */}
@@ -649,12 +642,6 @@ export default function BOMTemplates() {
           editingTemplateId={editingTemplateId}
           onClose={handleCloseModal}
           onSave={handleSaveComplete}
-          onGoToEngineering={(templateId) => {
-            try { sessionStorage.setItem('bom:eng:templateId', templateId); } catch { /* ignore */ }
-            handleCloseModal();
-            setActiveTab('engineering');
-            window.dispatchEvent(new CustomEvent('bom:selectTemplate', { detail: templateId }));
-          }}
         />
       )}
 

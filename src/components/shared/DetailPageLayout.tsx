@@ -83,7 +83,7 @@ export default function DetailPageLayout({
 
       {/* Tabs — idéntico a StatusTabs (Standard View A); detalle en Standard View B */}
       <div className="shrink-0 w-full max-w-6xl mx-auto px-4 md:px-6">
-        <div className="overflow-x-auto border border-gray-200 border-b-0 rounded-t-lg mb-4 bg-white">
+        <div className="overflow-x-auto border border-gray-200 rounded-lg mb-4 bg-white">
           <nav className="flex min-w-0" role="tablist">
             {tabs.map((tab) => {
               const isActive = tab.id === activeTab;

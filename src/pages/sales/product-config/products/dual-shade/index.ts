@@ -46,12 +46,13 @@ function validateStep(stepId: string, config: ProductConfig): boolean {
       return hasCollection && hasVariant;
     }
 
-    case 'hardware':
-      // ✅ NUEVO FLUJO SECUENCIAL: Hardware requiere color + bottom bar + headbox (obligatorio para dual)
+    case 'hardware': {
       const hasColor = !!((dualConfig as any).hardwareColor || (dualConfig as any).hardware_color);
       const hasBottomBar = !!((dualConfig as any).bottom_bar_item_id || (dualConfig as any).bottom_bar_sku);
-      const hasHeadbox = !!((dualConfig as any).headbox_item_id || (dualConfig as any).headbox_sku);
+      const hbPolicy: string = (dualConfig as any)._headboxPolicy ?? 'optional';
+      const hasHeadbox = hbPolicy === 'none' || (dualConfig as any).headbox_item_id != null;
       return hasColor && hasBottomBar && hasHeadbox;
+    }
 
     case 'operating-system':
       // ✅ NUEVO FLUJO: Operating system + drive/motor específico + tube obligatorios

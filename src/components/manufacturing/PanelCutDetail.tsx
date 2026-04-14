@@ -63,17 +63,27 @@ export default function PanelCutDetail({
 
   let heatsealLengthM = 0;
   let heatsealCost = 0;
+  const computedTotalDropMm = Math.max(
+    0,
+    productHeightMm
+      + (rule.tube_wrap_mm || 0)
+      + (rule.bottom_wrap_mm || 0)
+      + (rule.safety_margin_mm || 0)
+      + (rule.top_hem_mm || 0)
+      + (rule.bottom_hem_mm || 0),
+  );
+  const effectiveCutHeightMm = computedTotalDropMm > 0 ? computedTotalDropMm : cutHeightMm;
   if (needsHeatseal) {
     if (hsDir === 'horizontal') {
       heatsealLengthM = cutWidthMm / 1000;
     } else {
-      heatsealLengthM = cutHeightMm / 1000;
+      heatsealLengthM = effectiveCutHeightMm / 1000;
     }
     heatsealCost = heatsealLengthM * rule.heatseal_price_per_m * (numDrops - 1);
   }
 
-  const totalFabricArea = numDrops * rollWidthMm * cutHeightMm;
-  const panelArea = cutWidthMm * cutHeightMm;
+  const totalFabricArea = numDrops * rollWidthMm * effectiveCutHeightMm;
+  const panelArea = cutWidthMm * effectiveCutHeightMm;
   const trimWaste = totalFabricArea - panelArea;
   const trimWastePct = totalFabricArea > 0 ? Math.round((trimWaste / totalFabricArea) * 100) : 0;
 
@@ -91,7 +101,7 @@ export default function PanelCutDetail({
   const marginBottom = 36;
   const availW = maxSvgDim - marginLeft - marginRight;
   const availH = maxSvgDim - marginTop - marginBottom;
-  const panelRatio = cutWidthMm / (cutHeightMm || 1);
+  const panelRatio = cutWidthMm / (effectiveCutHeightMm || 1);
   let rectW: number, rectH: number;
   if (panelRatio > 1) {
     rectW = availW;
@@ -105,7 +115,7 @@ export default function PanelCutDetail({
   const rectX = marginLeft;
   const rectY = marginTop;
 
-  const totalDropMm = cutHeightMm;
+  const totalDropMm = effectiveCutHeightMm;
   const zones: Array<{ label: string; mm: number; color: string; textColor: string; type: 'fold' | 'zone' | 'area' }> = [];
 
   if (rule.safety_margin_mm > 0) zones.push({ label: `Safety +${rule.safety_margin_mm}mm`, mm: rule.safety_margin_mm, color: '#fef3c7', textColor: '#92400e', type: 'zone' });
@@ -118,8 +128,10 @@ export default function PanelCutDetail({
   if (rule.bottom_hem_mm > 0) bottomZones.push({ label: `Bottom hem +${rule.bottom_hem_mm}mm`, mm: rule.bottom_hem_mm, color: '#d1fae5', textColor: '#065f46', type: 'fold' });
 
   const bottomZoneMm = bottomZones.reduce((s, z) => s + z.mm, 0);
-  const visibleMm = totalDropMm - topZoneMm - bottomZoneMm;
-  const pxPerMm = rectH / totalDropMm;
+  const visibleMm = Math.max(0, totalDropMm - topZoneMm - bottomZoneMm);
+  const pxPerMm = rectH / (totalDropMm || 1);
+  const cutHeightDeltaMm = Math.round((cutHeightMm || 0) - totalDropMm);
+  const hasHeightMismatch = Math.abs(cutHeightDeltaMm) > 1;
 
   // Side hem zones for drapery
   const hasSideHems = rule.side_hem_mm > 0;
@@ -269,7 +281,7 @@ export default function PanelCutDetail({
               stroke="#6b7280" strokeWidth={0.8} />
             <text x={rectX + rectW + 12} y={rectY + rectH / 2 + 3}
               fontSize={7} fill="#374151" fontWeight={600} textAnchor="start">
-              {Math.round(cutHeightMm)}mm
+              {Math.round(totalDropMm)}mm
             </text>
 
             {/* Width dimension (bottom) */}
@@ -306,9 +318,9 @@ export default function PanelCutDetail({
               <g>
                 {Array.from({ length: numDrops - 1 }, (_, i) => {
                   const dropFromBottom = (i + 1) * usableRollWidthMm;
-                  const remainderOnTop = cutHeightMm - dropFromBottom;
+                  const remainderOnTop = totalDropMm - dropFromBottom;
                   if (remainderOnTop <= 0) return null;
-                  const joinY = rectY + (remainderOnTop / cutHeightMm) * rectH;
+                  const joinY = rectY + (remainderOnTop / totalDropMm) * rectH;
                   const primaryH = Math.round(usableRollWidthMm);
                   const secondaryH = Math.round(remainderOnTop);
                   return (
@@ -319,7 +331,7 @@ export default function PanelCutDetail({
                         ⚡ HEATSEAL
                       </text>
                       {/* Secondary (top) dimension */}
-                      <text x={rectX - 2} y={rectY + (remainderOnTop / cutHeightMm) * rectH / 2 + 3}
+                      <text x={rectX - 2} y={rectY + (remainderOnTop / totalDropMm) * rectH / 2 + 3}
                         textAnchor="end" fontSize={6} fill="#92400e" fontWeight={500}>
                         {secondaryH}mm
                       </text>
@@ -401,8 +413,14 @@ export default function PanelCutDetail({
               )}
               <div className="flex justify-between border-t border-gray-200 pt-1 font-semibold text-gray-900">
                 <span>Total drop</span>
-                <span className="font-mono">{Math.round(cutHeightMm)} mm</span>
+                <span className="font-mono">{Math.round(totalDropMm)} mm</span>
               </div>
+              {hasHeightMismatch && (
+                <div className="flex justify-between text-[11px] text-amber-700">
+                  <span>Cut job recorded</span>
+                  <span className="font-mono">{Math.round(cutHeightMm)} mm ({cutHeightDeltaMm > 0 ? '+' : ''}{cutHeightDeltaMm} mm delta)</span>
+                </div>
+              )}
             </div>
           </div>
 

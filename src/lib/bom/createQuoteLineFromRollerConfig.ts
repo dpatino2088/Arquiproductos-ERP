@@ -387,77 +387,9 @@ export async function createQuoteLineFromRollerConfig(
 
       // ✅ AGREGAR ACCESORIOS AL BOM
       // Si se generó BOM exitosamente, agregar líneas para accesorios
-      if (bomInstanceId) {
-        try {
-          // Obtener accesorios de la quote line
-          const { data: accessories } = await supabase
-            .from('QuoteLineComponents')
-            .select('catalog_item_id, qty')
-            .eq('organization_id', organizationId)
-            .eq('quote_line_id', finalLineId)
-            .or('source.eq.accessory,component_role.eq.accessory')
-            .eq('deleted', false);
-
-          if (accessories && accessories.length > 0) {
-            // Obtener detalles de catalog items y MSRP
-            const accessoryIds = accessories.map((acc: { catalog_item_id: string }) => acc.catalog_item_id).filter(Boolean);
-            if (accessoryIds.length > 0) {
-              const { data: catalogItems } = await supabase
-                .from('CatalogItems')
-                .select('id, sku, name, unit_of_measure, cost_exw')
-                .in('id', accessoryIds)
-                .eq('is_active', true);
-
-              // Obtener MSRP para los precios (aunque no se guarda en BOMInstanceLines, se usa para cálculos)
-              const { data: msrpData } = await supabase
-                .from('CatalogItemsMSRP')
-                .select('catalog_item_id, msrp')
-                .in('catalog_item_id', accessoryIds)
-                .or(`organization_id.eq.${organizationId},organization_id.is.null`);
-
-              // Crear mapa de MSRP
-              const msrpMap = new Map<string, number>();
-              msrpData?.forEach((msrp: { catalog_item_id: string; msrp: number | null }) => {
-                if (msrp.catalog_item_id && msrp.msrp != null) {
-                  msrpMap.set(msrp.catalog_item_id, Number(msrp.msrp));
-                }
-              });
-
-              // Insertar líneas de accesorios en BOMInstanceLines
-              const bomLines = accessories.map((accessory: { catalog_item_id: string; qty?: number }) => {
-                const catalogItem = catalogItems?.find((ci: { id: string }) => ci.id === accessory.catalog_item_id);
-                if (!catalogItem) return null;
-
-                return {
-                  organization_id: organizationId,
-                  bom_instance_id: bomInstanceId,
-                  resolved_part_id: accessory.catalog_item_id,
-                  part_role: 'accessory',
-                  qty: accessory.qty || 1,
-                  uom: catalogItem.unit_of_measure || 'each',
-                  unit_cost_exw: catalogItem.cost_exw || 0,
-                  deleted: false,
-                };
-              }).filter(Boolean);
-
-              if (bomLines.length > 0) {
-                const { error: insertError } = await supabase
-                  .from('BOMInstanceLines')
-                  .insert(bomLines);
-
-                if (insertError) {
-                  console.error('[createQuoteLineFromRollerConfig] Error adding accessories to BOM:', insertError);
-                } else {
-                  console.log(`[createQuoteLineFromRollerConfig] Added ${bomLines.length} accessory lines to BOM`);
-                }
-              }
-            }
-          }
-        } catch (accessoryError) {
-          console.error('[createQuoteLineFromRollerConfig] Error adding accessories to BOM:', accessoryError);
-          // Don't fail the whole operation
-        }
-      }
+      // Accessories are no longer inserted into BOMInstanceLines.
+      // They live at the SO level (SaleOrderAccessories) and are
+      // copied from QuoteLineComponents during Quote→SO conversion.
     }
   } catch (bomError) {
     console.error('[createQuoteLineFromRollerConfig] BOM generation failed:', bomError);

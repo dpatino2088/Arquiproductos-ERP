@@ -15,6 +15,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { FileText, ShoppingBag, Edit, ArrowLeft, ShieldCheck, Unlock } from 'lucide-react';
 import { getAppUsersDisplayNames } from '../../lib/appUsersDisplayNames';
+import QuoteAttachmentsTab from '../../components/sales/QuoteAttachmentsTab';
 
 const SALES_SUBMODULES = [
   { id: 'quotes', label: 'Quotes', href: '/sales/quotes', icon: FileText },
@@ -39,6 +40,7 @@ interface Quote {
   customer_id: string | null;
   contact_id: string | null;
   dealer_id: string | null;
+  organization_id: string;
   description: string | null;
   notes: string | null;
   priority: string | null;
@@ -110,8 +112,10 @@ interface TimelineEvent {
 }
 
 const MFG_STATUS_STEPS = [
-  { id: 'draft', label: 'Pending Review' },
-  { id: 'planned', label: 'Planned' },
+  { id: 'draft', label: 'Draft' },
+  { id: 'confirmed', label: 'Reviewed' },
+  { id: 'procurement', label: 'Procurement' },
+  { id: 'materials_ready', label: 'Material Ready' },
   { id: 'in_production', label: 'In Production' },
   { id: 'quality_check', label: 'Quality Check' },
   { id: 'ready_for_pickup', label: 'Ready for Pickup' },
@@ -174,7 +178,7 @@ export default function QuoteDetail() {
       await initSessionContext();
       const quoteRes = await supabase
         .from('Quotes')
-        .select('id, quote_no, status, customer_id, contact_id, dealer_id, description, notes, priority, subtotal, tax_amount, total_amount, expires_at, approved_at, converted_at, created_at, created_by_user_id, measures_confirmed, measures_confirmed_at, measures_confirmed_by')
+        .select('id, quote_no, status, customer_id, contact_id, dealer_id, organization_id, description, notes, priority, subtotal, tax_amount, total_amount, expires_at, approved_at, converted_at, created_at, created_by_user_id, measures_confirmed, measures_confirmed_at, measures_confirmed_by')
         .eq('id', quoteId)
         .eq('organization_id', activeOrganizationId)
         .eq('deleted', false)
@@ -577,12 +581,14 @@ export default function QuoteDetail() {
         { id: 'overview', label: 'Overview' },
         { id: 'lines', label: 'Lines', count: lines.length },
         { id: 'proposals', label: 'Proposals', count: proposals.length },
+        { id: 'attachments', label: 'Attachments' },
         { id: 'timeline', label: 'Timeline' },
       ]
     : [
         { id: 'overview', label: 'Overview' },
         { id: 'lines', label: 'Lines', count: lines.length },
         { id: 'proposals', label: 'Proposals', count: proposals.length },
+        { id: 'attachments', label: 'Attachments' },
         { id: 'timeline', label: 'Timeline' },
       ];
 
@@ -880,7 +886,7 @@ export default function QuoteDetail() {
                 <th className="px-4 py-3 text-left font-medium text-gray-700">#</th>
                 <th className="px-4 py-3 text-left font-medium text-gray-700">Name / SKU</th>
                 <th className="px-4 py-3 text-left font-medium text-gray-700">Product Type</th>
-                <th className="px-4 py-3 text-left font-medium text-gray-700">Width x Height</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">Width x Height (mm)</th>
                 <th className="px-4 py-3 text-right font-medium text-gray-700">Qty</th>
                 <th className="px-4 py-3 text-right font-medium text-gray-700">Unit Price</th>
                 <th className="px-4 py-3 text-right font-medium text-gray-700">Total</th>
@@ -907,7 +913,7 @@ export default function QuoteDetail() {
                         {line.sku && <div className="text-xs text-gray-500">{line.sku}</div>}
                       </td>
                       <td className="px-4 py-4">{line.product_type ?? '—'}</td>
-                      <td className="px-4 py-4">{dims.length ? `${line.width_m} x ${line.height_m}` : '—'}</td>
+                      <td className="px-4 py-4">{dims.length ? `${Math.round((line.width_m ?? 0) * 1000)} × ${Math.round((line.height_m ?? 0) * 1000)}` : '—'}</td>
                       <td className="px-4 py-4 text-right">{qty}</td>
                       <td className="px-4 py-4 text-right font-mono">{formatCurrencyDisplay(unitPrice)}</td>
                       <td className="px-4 py-4 text-right font-mono">{formatCurrencyDisplay(lineTotal)}</td>
@@ -971,6 +977,13 @@ export default function QuoteDetail() {
             </table>
           )}
         </div>
+      )}
+
+      {activeTab === 'attachments' && (
+        <QuoteAttachmentsTab
+          quoteId={quote.id}
+          organizationId={quote.organization_id}
+        />
       )}
 
       {activeTab === 'timeline' && (

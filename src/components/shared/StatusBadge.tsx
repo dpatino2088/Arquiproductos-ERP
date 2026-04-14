@@ -132,6 +132,10 @@ const STATUS_MAPS: Record<StatusBadgeProps['type'], Record<string, string>> = {
     cancelled: 'red',
   },
   moLineStatus: {
+    draft: 'gray',
+    reviewed: 'blue',
+    confirmed: 'blue',
+    materials_ready: 'emerald',
     ok: 'emerald',
     ready: 'emerald',
     incomplete: 'amber',
@@ -184,6 +188,10 @@ const STATUS_LABEL_OVERRIDES: Partial<Record<StatusBadgeProps['type'], Record<st
     ready_for_pickup: 'Ready for Pickup',
   },
   moLineStatus: {
+    draft: 'Draft',
+    reviewed: 'Reviewed',
+    confirmed: 'Confirmed',
+    materials_ready: 'Material Ready',
     ok: 'OK',
     ready: 'OK',
     incomplete: 'Material Pending',

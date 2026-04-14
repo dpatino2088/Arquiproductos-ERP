@@ -1,0 +1,34 @@
+---
+description: Per-panel deduction rules for multi-panel BOM assemblies (roller shades, drapery, etc.)
+alwaysApply: true
+---
+
+# Per-Panel Deduction Logic
+
+Multi-panel products decompose linearly. Intermediates are **always shared** between adjacent panels (½ per side).
+
+## Layout Model (N panels)
+
+```
+[Bracket+Drive] | Tube₁ | [Intermediate] | Tube₂ | [Intermediate] | … | TubeN | [Bracket+EndPlug]
+```
+
+## Deductions per panel position
+
+| Position | Panels affected | Deductions |
+|----------|----------------|------------|
+| **Left edge** (panel 1) | First panel only | Bracket + Drive + ½ Intermediate |
+| **Center** (panels 2…N-1) | All middle panels | ½ Intermediate (left) + ½ Intermediate (right) = 1 full Intermediate |
+| **Right edge** (panel N) | Last panel only | ½ Intermediate + Bracket + EndPlug (+ Drive if applicable) |
+| **Single panel** (N=1) | The only panel | Bracket×2 + Drive + EndPlug (no intermediates) |
+
+## Rules
+
+1. **N-1 rule**: N panels produce N-1 intermediates. **1 panel = 0 intermediates.** `compute_instance_cut_breakdown` must `CONTINUE` (skip) any intermediate deduction when `v_panel_count <= 1`. This applies to both top-level deductor loop AND child deduction loop.
+2. **Intermediates are always shared**: each intermediate bracket's `delta_x_mm` is split 50/50 between the two panels it separates. Works for 2, 3, or 100 panels.
+3. **Edge components** (bracket, drive, end_plug) only deduct from the panel at their edge.
+4. **Per-panel base width** comes from `ConfiguredProducts.config_snapshot.panels[i].width_mm`.
+5. **Per-panel actual cuts** come from `BOMInstanceLines` with `panel_index`.
+6. The breakdown must show, for each panel: base → each deduction (component, delta, position reason) → final cut.
+7. Fabric per-panel follows the same tube deduction pattern (fabric width = tube cut width for roller shades).
+8. Bottom bar per-panel: only outer panels get end_cap deductions; center panels get none.

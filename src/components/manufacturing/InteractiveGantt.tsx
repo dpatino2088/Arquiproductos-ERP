@@ -13,6 +13,7 @@ interface InteractiveGanttProps {
   onMoveTask: (taskId: string, newStartDate: Date) => void;
   canEdit: boolean;
   urgencyMap?: Map<string, string>;
+  lineLabels?: Map<string, string>;
 }
 
 const PX_PER_HOUR = 24;
@@ -86,6 +87,7 @@ export default function InteractiveGantt({
   onMoveTask,
   canEdit,
   urgencyMap,
+  lineLabels,
 }: InteractiveGanttProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [dragState, setDragState] = useState<{
@@ -106,6 +108,37 @@ export default function InteractiveGantt({
     d.setHours(8, 0, 0, 0);
     return d;
   }, [startDate]);
+
+  type RowItem = { type: 'header'; label: string } | { type: 'task'; task: WorkOrderTask };
+  const ROW_HEADER_H = 28;
+
+  const rowItems = useMemo<RowItem[]>(() => {
+    if (!lineLabels || lineLabels.size === 0) {
+      return tasks.map(t => ({ type: 'task' as const, task: t }));
+    }
+    const byLine = new Map<string, WorkOrderTask[]>();
+    const ungrouped: WorkOrderTask[] = [];
+    for (const t of tasks) {
+      const key = t.sales_order_line_id ?? '__ungrouped__';
+      if (t.sales_order_line_id && lineLabels.has(t.sales_order_line_id)) {
+        const arr = byLine.get(key) ?? [];
+        arr.push(t);
+        byLine.set(key, arr);
+      } else {
+        ungrouped.push(t);
+      }
+    }
+    const items: RowItem[] = [];
+    for (const [lineId, lineTasks] of byLine.entries()) {
+      items.push({ type: 'header', label: lineLabels.get(lineId) ?? lineId });
+      for (const t of lineTasks) items.push({ type: 'task', task: t });
+    }
+    if (ungrouped.length > 0) {
+      if (byLine.size > 0) items.push({ type: 'header', label: 'Other' });
+      for (const t of ungrouped) items.push({ type: 'task', task: t });
+    }
+    return items;
+  }, [tasks, lineLabels]);
 
   const barPositions = useMemo(() => {
     const positions = new Map<string, { left: number; width: number }>();
@@ -192,7 +225,15 @@ export default function InteractiveGantt({
         {/* Fixed left column: task labels */}
         <div style={{ width: LABEL_W, minWidth: LABEL_W }} className="shrink-0 border-r border-gray-100">
           <div className="h-6 mb-1" />
-          {tasks.map((task) => {
+          {rowItems.map((item, ri) => {
+            if (item.type === 'header') {
+              return (
+                <div key={`hdr-${ri}`} style={{ height: ROW_HEADER_H }} className="flex items-center">
+                  <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider px-2">{item.label}</span>
+                </div>
+              );
+            }
+            const task = item.task;
             const slot = slotMap.get(task.id);
             if (!slot) return null;
             const isSelected = selectedTaskId === task.id;
@@ -230,7 +271,13 @@ export default function InteractiveGantt({
             </div>
 
             {/* Task rows */}
-            {tasks.map((task) => {
+            {rowItems.map((item, ri) => {
+              if (item.type === 'header') {
+                return (
+                  <div key={`hdr-${ri}`} style={{ height: ROW_HEADER_H }} className="relative border-t border-gray-100" />
+                );
+              }
+              const task = item.task;
               const pos = barPositions.get(task.id);
               if (!pos) return null;
               const isSelected = selectedTaskId === task.id;

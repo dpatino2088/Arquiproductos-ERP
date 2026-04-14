@@ -39,6 +39,7 @@ export default function DeliveryNoteDetail() {
 
   const params = new URLSearchParams(window.location.search);
   const moIdParam = params.get('mo_id');
+  const soIdParam = params.get('so_id');
 
   const { manufacturingOrder: mo } = useManufacturingOrder(moIdParam ?? deliveryNote?.manufacturing_order_id ?? null);
 
@@ -47,8 +48,12 @@ export default function DeliveryNoteDetail() {
   }, [registerSubmodules, filteredSubmodules]);
 
   useEffect(() => {
-    if (moIdParam && !deliveryNoteId && user?.id) {
-      createDeliveryNote(moIdParam, user.id, user.name)
+    if (!deliveryNoteId && user?.id && (moIdParam || soIdParam)) {
+      createDeliveryNote(
+        { moId: moIdParam ?? undefined, salesOrderId: soIdParam ?? undefined },
+        user.id,
+        user.name,
+      )
         .then((result) => {
           setDeliveryNoteId(result.id);
           addNotification({ type: 'success', title: 'Delivery Note Created', message: result.delivery_number });
@@ -57,7 +62,7 @@ export default function DeliveryNoteDetail() {
           addNotification({ type: 'error', title: 'Error', message: e.message });
         });
     }
-  }, [moIdParam, deliveryNoteId, user?.id]);
+  }, [moIdParam, soIdParam, deliveryNoteId, user?.id]);
 
   useEffect(() => { if (deliveryNoteId) refetch(); }, [deliveryNoteId, refetch]);
 
@@ -133,6 +138,17 @@ export default function DeliveryNoteDetail() {
     };
 
     const pdfLines: DeliveryNotePDFLine[] = lines.map((l) => {
+      if (l.line_type === 'accessory') {
+        return {
+          product_name: l.accessory?.catalog_item_name ?? 'Accessory',
+          area: null,
+          position: null,
+          measurements: null,
+          product_type: 'Accessory',
+          qty: l.quantity_delivered,
+          checked: l.checked,
+        };
+      }
       const sol = l.mo_line?.SaleOrderLine;
       const descParts: string[] = [];
       const collVar = sol?.collection_name && sol?.variant_name
@@ -231,7 +247,7 @@ export default function DeliveryNoteDetail() {
     );
   }
 
-  if (!deliveryNote && !isCreating && !moIdParam) {
+  if (!deliveryNote && !isCreating && !moIdParam && !soIdParam) {
     return (
       <div className="p-6">
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-sm text-yellow-800">
@@ -318,23 +334,33 @@ export default function DeliveryNoteDetail() {
                 <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-500">No lines</td></tr>
               ) : (
                 lines.map((line) => {
+                  const isAccessory = line.line_type === 'accessory';
                   const sol = line.mo_line?.SaleOrderLine;
-                  const descParts: string[] = [];
-                  const collVar = sol?.collection_name && sol?.variant_name
-                    ? `${sol.collection_name} - ${sol.variant_name}`
-                    : sol?.collection_name ?? sol?.variant_name ?? '';
-                  const skuTag = sol?.CatalogItems?.sku ? ` (${sol.CatalogItems.sku})` : '';
-                  if (collVar) descParts.push(`${collVar}${skuTag}`);
-                  if (sol?.drive_type) {
-                    descParts.push(sol.drive_type === 'motor' ? 'Motorized' : sol.drive_type === 'manual' ? 'Manual' : sol.drive_type);
+
+                  let descParts: string[] = [];
+                  if (isAccessory) {
+                    descParts = [line.accessory?.catalog_item_name ?? 'Accessory'];
+                    if (line.accessory?.catalog_item_sku) {
+                      descParts[0] += ` (${line.accessory.catalog_item_sku})`;
+                    }
+                  } else {
+                    const collVar = sol?.collection_name && sol?.variant_name
+                      ? `${sol.collection_name} - ${sol.variant_name}`
+                      : sol?.collection_name ?? sol?.variant_name ?? '';
+                    const skuTag = sol?.CatalogItems?.sku ? ` (${sol.CatalogItems.sku})` : '';
+                    if (collVar) descParts.push(`${collVar}${skuTag}`);
+                    if (sol?.drive_type) {
+                      descParts.push(sol.drive_type === 'motor' ? 'Motorized' : sol.drive_type === 'manual' ? 'Manual' : sol.drive_type);
+                    }
+                    if (descParts.length === 0) {
+                      descParts.push(sol?.CatalogItems?.name ?? sol?.description ?? 'Item');
+                    }
                   }
-                  if (descParts.length === 0) {
-                    descParts.push(sol?.CatalogItems?.name ?? sol?.description ?? 'Item');
-                  }
+
                   return (
                     <tr
                       key={line.id}
-                      className={`border-t hover:bg-gray-50 ${line.checked ? 'bg-green-50/50' : ''}`}
+                      className={`border-t hover:bg-gray-50 ${line.checked ? 'bg-green-50/50' : ''} ${isAccessory ? 'bg-amber-50/30' : ''}`}
                     >
                       <td className="px-3 py-3 text-center">
                         <button
@@ -359,19 +385,32 @@ export default function DeliveryNoteDetail() {
                           )}
                         </button>
                       </td>
-                      <td className="px-3 py-3 text-gray-700">{sol?.area ?? '—'}</td>
-                      <td className="px-3 py-3 text-center text-gray-700">{sol?.position ?? '—'}</td>
+                      <td className="px-3 py-3 text-gray-700">
+                        {isAccessory ? (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700">ACC</span>
+                        ) : (
+                          sol?.area ?? '—'
+                        )}
+                      </td>
+                      <td className="px-3 py-3 text-center text-gray-700">
+                        {isAccessory ? '—' : (sol?.position ?? '—')}
+                      </td>
                       <td className="px-3 py-3">
                         {descParts.map((part, i) => (
                           <div key={i} className={i === 0 ? 'font-medium text-gray-900' : 'text-xs text-gray-500'}>{part}</div>
                         ))}
+                        {!isAccessory && line.manufacturing_order_no && (
+                          <div className="text-[10px] text-gray-400 mt-0.5">{line.manufacturing_order_no}</div>
+                        )}
                       </td>
                       <td className="px-3 py-3 text-gray-600 text-sm tabular-nums">
-                        {sol?.width_m && sol?.height_m
+                        {!isAccessory && sol?.width_m && sol?.height_m
                           ? `${Math.round(Number(sol.width_m) * 1000)} x ${Math.round(Number(sol.height_m) * 1000)}`
                           : '—'}
                       </td>
-                      <td className="px-3 py-3 text-center text-gray-600 text-xs">{sol?.product_type ?? '—'}</td>
+                      <td className="px-3 py-3 text-center text-gray-600 text-xs">
+                        {isAccessory ? 'Accessory' : (sol?.product_type ?? '—')}
+                      </td>
                       <td className="px-3 py-3 text-right tabular-nums">{line.quantity_delivered}</td>
                       <td className="px-3 py-3 text-center">
                         {line.checked ? (

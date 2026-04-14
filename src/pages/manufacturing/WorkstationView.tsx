@@ -659,16 +659,15 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
                     {(() => {
                       const upstreamOk = !isAssemblyStation || !task.siblingStatuses?.length ||
                         task.siblingStatuses.every(s => s.status === 'completed');
-                      const plannedStartDue = !!task.planned_start_at && parseIsoDate(task.planned_start_at).getTime() <= Date.now();
                       return (
                         <>
-                          {task.status === 'pending' && upstreamOk && plannedStartDue && (
+                          {task.status === 'pending' && upstreamOk && (
                             <button type="button" onClick={() => startTask(task.id)} className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-700">
                               <Play className="h-3 w-3" /> Start
                             </button>
                           )}
-                          {task.status === 'pending' && (!upstreamOk || !plannedStartDue) && (
-                            <span className="inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded bg-gray-100 text-gray-400 border border-gray-200" title="Blocked by dependencies or scheduled start date/time">
+                          {task.status === 'pending' && !upstreamOk && (
+                            <span className="inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded bg-gray-100 text-gray-400 border border-gray-200" title="Blocked by dependencies">
                               <AlertTriangle className="h-3 w-3" /> Blocked
                             </span>
                           )}

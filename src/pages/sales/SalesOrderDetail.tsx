@@ -17,6 +17,7 @@ import { useSOFulfillmentSummary } from '../../hooks/useInventoryAllocations';
 import { usePayments } from '../../hooks/usePayments';
 import { generateInvoicePDF } from '../../lib/pdf/generateInvoicePDF';
 import type { InvoicePDFData, InvoicePDFDealer, InvoicePDFLine, GenerateInvoicePDFOptions } from '../../lib/pdf/generateInvoicePDF';
+import SOAttachmentsTab from '../../components/sales/SOAttachmentsTab';
 
 const SALES_SUBMODULES = [
   { id: 'quotes', label: 'Quotes', href: '/sales/quotes', icon: FileText },
@@ -115,8 +116,10 @@ interface InvoicePdfDealer {
 }
 
 const MFG_STATUS_STEPS = [
-  { id: 'draft', label: 'Pending Review' },
-  { id: 'planned', label: 'Planned' },
+  { id: 'draft', label: 'Draft' },
+  { id: 'confirmed', label: 'Reviewed' },
+  { id: 'procurement', label: 'Procurement' },
+  { id: 'materials_ready', label: 'Material Ready' },
   { id: 'in_production', label: 'In Production' },
   { id: 'quality_check', label: 'Quality Check' },
   { id: 'ready_for_pickup', label: 'Ready for Pickup' },
@@ -207,7 +210,7 @@ export default function SalesOrderDetail() {
         supabase
           .from('SalesOrders')
           .select(`
-            id, sales_order_no, quote_id, status, status_before_cancel, customer_id, dealer_id,
+            id, sales_order_no, quote_id, status, status_before_cancel, customer_id, dealer_id, organization_id,
             total_amount, subtotal, tax_amount, discount_amount,
             priority, created_at, expected_delivery_date, completed_at, closed_at,
             DirectoryCustomers:customer_id (customer_name),
@@ -335,7 +338,7 @@ export default function SalesOrderDetail() {
               nextDisplayMap.set(mo.id, 'partial_completed');
               return;
             }
-            if (statuses.includes('in_production') && statuses.includes('planned')) {
+            if (statuses.includes('in_production') && statuses.includes('materials_ready')) {
               nextDisplayMap.set(mo.id, 'partial');
               return;
             }
@@ -769,6 +772,7 @@ export default function SalesOrderDetail() {
     { id: 'lines', label: 'Lines' },
     { id: 'manufacturing', label: 'Manufacturing' },
     { id: 'payments', label: 'Payments' },
+    { id: 'attachments', label: 'Attachments' },
     { id: 'timeline', label: 'Timeline' },
   ];
 
@@ -1541,6 +1545,13 @@ export default function SalesOrderDetail() {
           </div>
 
         </div>
+      )}
+
+      {activeTab === 'attachments' && (
+        <SOAttachmentsTab
+          salesOrderId={so.id}
+          organizationId={so.organization_id}
+        />
       )}
 
       {activeTab === 'timeline' && (

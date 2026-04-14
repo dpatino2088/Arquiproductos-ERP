@@ -24,6 +24,7 @@ export interface WorkOrderTask {
   organization_id: string;
   manufacturing_order_id: string;
   work_center_id: string;
+  sales_order_line_id: string | null;
   sequence: number;
   status: 'pending' | 'in_progress' | 'completed';
   assigned_to: string | null;
@@ -56,6 +57,7 @@ export function useWorkOrderTasks(moId: string | null | undefined) {
         .from('WorkOrderTasks')
         .select(`
           id, organization_id, manufacturing_order_id, work_center_id,
+          sales_order_line_id,
           sequence, status, assigned_to, assigned_to_user_id, completed_by_user_id,
           started_at, completed_at,
           estimated_duration_hours, planned_start_at, planned_end_at,
@@ -89,6 +91,7 @@ export function useWorkOrderTasks(moId: string | null | undefined) {
         organization_id: t.organization_id,
         manufacturing_order_id: t.manufacturing_order_id,
         work_center_id: t.work_center_id,
+        sales_order_line_id: t.sales_order_line_id ?? null,
         sequence: t.sequence,
         status: t.status,
         assigned_to: t.assigned_to,

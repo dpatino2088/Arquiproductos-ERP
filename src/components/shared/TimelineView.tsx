@@ -24,6 +24,7 @@ export interface TimelineViewProps {
 const ACTION_DOT_COLORS: Record<string, string> = {
   created: 'bg-green-500',
   status_changed: 'bg-blue-500',
+  line_status_changed: 'bg-sky-500',
   payment_recorded: 'bg-emerald-500',
   converted: 'bg-purple-500',
   approved: 'bg-amber-500',

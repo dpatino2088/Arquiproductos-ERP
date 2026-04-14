@@ -11,7 +11,7 @@ INSERT INTO storage.buckets (
   updated_at
 )
 VALUES (
-  gen_random_uuid()::text,
+  'mo-attachments',
   'mo-attachments',
   true,
   10485760,  -- 10 MB

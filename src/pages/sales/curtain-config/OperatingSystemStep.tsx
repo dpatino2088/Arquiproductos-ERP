@@ -20,6 +20,7 @@ import Label from '../../../components/ui/Label';
 import { useBOMTemplateQuestions } from '../../../hooks/useBOMTemplateQuestions';
 import { useBOMTemplateOptionsSimple, RoleOption } from '../../../hooks/useBOMTemplateOptionsSimple';
 import { Image as ImageIcon, X } from 'lucide-react';
+import CatalogItemImage from '../../../components/ui/CatalogItemImage';
 import { supabase } from '../../../lib/supabase/client';
 import { useOrganizationContext } from '../../../context/OrganizationContext';
 import { useUIStore } from '../../../stores/ui-store';
@@ -926,15 +927,13 @@ export default function OperatingSystemStep({
                         </button>
                       )}
                       <div className="aspect-square flex items-center justify-center bg-white border-b border-gray-200">
-                        {item.image_url ? (
-                          <img
-                            src={item.image_url}
-                            alt={item.name || item.sku}
-                            className="w-full h-full object-contain p-2"
-                          />
-                        ) : (
-                          <ImageIcon className="w-12 h-12 text-gray-400" />
-                        )}
+                        <CatalogItemImage
+                          src={item.image_url}
+                          alt={item.name || item.sku}
+                          size="lg"
+                          objectFit="contain"
+                          className="w-full h-full !rounded-none !border-0"
+                        />
                       </div>
                       <div className="p-4 bg-gray-100 flex-1">
                         <h3 className={`font-semibold text-sm ${isSelected ? 'text-gray-900 font-semibold' : 'text-gray-900'}`}>
@@ -1042,15 +1041,13 @@ export default function OperatingSystemStep({
                         </button>
                       )}
                       <div className="aspect-square flex items-center justify-center bg-white border-b border-gray-200">
-                        {item.image_url ? (
-                          <img
-                            src={item.image_url}
-                            alt={item.name || item.sku}
-                            className="w-full h-full object-contain p-2"
-                          />
-                        ) : (
-                          <ImageIcon className="w-12 h-12 text-gray-400" />
-                        )}
+                        <CatalogItemImage
+                          src={item.image_url}
+                          alt={item.name || item.sku}
+                          size="lg"
+                          objectFit="contain"
+                          className="w-full h-full !rounded-none !border-0"
+                        />
                       </div>
                       <div className="p-4 bg-gray-100 flex-1">
                         <h3 className={`font-semibold text-sm ${isSelected ? 'text-gray-900 font-semibold' : 'text-gray-900'}`}>
@@ -1133,15 +1130,13 @@ export default function OperatingSystemStep({
                         </button>
                       )}
                       <div className="aspect-square flex items-center justify-center bg-white border-b border-gray-200">
-                        {item.image_url ? (
-                          <img
-                            src={item.image_url}
-                            alt={item.name || item.sku}
-                            className="w-full h-full object-contain p-2"
-                          />
-                        ) : (
-                          <ImageIcon className="w-12 h-12 text-gray-400" />
-                        )}
+                        <CatalogItemImage
+                          src={item.image_url}
+                          alt={item.name || item.sku}
+                          size="lg"
+                          objectFit="contain"
+                          className="w-full h-full !rounded-none !border-0"
+                        />
                       </div>
                       <div className="p-4 bg-gray-100 flex-1">
                         <h3 className={`font-semibold text-sm ${isSelected ? 'text-gray-900 font-semibold' : 'text-gray-900'}`}>

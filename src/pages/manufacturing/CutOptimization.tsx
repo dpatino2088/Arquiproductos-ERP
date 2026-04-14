@@ -5,6 +5,8 @@ import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAuth } from '../../hooks/useAuth';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { useFilteredMfgSubmodules } from './manufacturingSubmodules';
+import { router } from '../../lib/router';
+import { useUIStore } from '../../stores/ui-store';
 import CutPlanVisualizer from '../../components/manufacturing/CutPlanVisualizer';
 import RollCutVisualizer from '../../components/manufacturing/RollCutVisualizer';
 import FabricSpecsCard from '../../components/manufacturing/FabricSpecsCard';
@@ -13,7 +15,7 @@ import { optimize1D, type CutPiece } from '../../lib/cutOptimizer';
 import { optimize2D, type FabricPiece, type PlacedFabricPiece } from '../../lib/cutOptimizer2D';
 import { generateConsolidated1DPDF, generateCutPlanPDF, type ConsolidatedCutGroup } from '../../lib/pdf/generateCutPlanPDF';
 import { generateThermalCutStickersPDF, openThermalStickerPrintWindow, type ThermalCutLabel } from '../../lib/pdf/thermalCutStickerPdf';
-import { Scissors, Layers, RefreshCw, Loader2, ChevronDown, ChevronRight, Printer, MoreVertical, CheckCircle2, Circle } from 'lucide-react';
+import { Scissors, Layers, RefreshCw, Loader2, ChevronDown, ChevronRight, Printer, MoreVertical, CheckCircle2, Circle, ArrowLeft } from 'lucide-react';
 import StatusTabs from '../../components/shared/StatusTabs';
 
 type Mode = 'profiles' | 'fabric';
@@ -29,6 +31,8 @@ interface PendingCut {
   qty: number;
   mo_id: string;
   mo_number: string;
+  sales_order_line_id: string | null;
+  line_label: string | null;
   so_number: string | null;
   part_role: string;
   stock_length_mm: number | null;
@@ -84,6 +88,14 @@ interface SkuGroup {
   canHeatseal: boolean;
 }
 
+function formatMoLineRef(cut: Pick<PendingCut, 'mo_number' | 'line_label'>): string {
+  return cut.line_label ? `${cut.mo_number} · ${cut.line_label}` : cut.mo_number;
+}
+
+function skuAnchorId(sku: string): string {
+  return `cut-sku-${encodeURIComponent(sku)}`;
+}
+
 export default function CutOptimization() {
   const filteredSubmodules = useFilteredMfgSubmodules();
   const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
@@ -103,10 +115,22 @@ export default function CutOptimization() {
   const [excludedMOs, setExcludedMOs] = useState<Set<string>>(new Set());
   const [expandedSkuMOs, setExpandedSkuMOs] = useState<Set<string>>(new Set());
   const [expandedSpec, setExpandedSpec] = useState<string | null>(null);
+  const [ineligibleCutCount, setIneligibleCutCount] = useState(0);
   const [selectedFabricPiece, setSelectedFabricPiece] = useState<{ piece: PlacedFabricPiece; skuGroup: SkuGroup } | null>(null);
   const [actionsOpen, setActionsOpen] = useState(false);
   const [selectedPieceMaterials, setSelectedPieceMaterials] = useState<Array<{ sku: string; item_name: string; component_role: string; qty: number; uom: string }>>([]);
   const [materialsLoading, setMaterialsLoading] = useState(false);
+  const [confirmCut, setConfirmCut] = useState<{ sku: string; markCompleted: boolean } | null>(null);
+  const [focusedSku, setFocusedSku] = useState<string | null>(null);
+  const addNotification = useUIStore((s) => s.addNotification);
+
+  useEffect(() => {
+    const qp = new URLSearchParams(window.location.search);
+    const requestedMode = qp.get('mode');
+    if (requestedMode === 'profiles' || requestedMode === 'fabric') {
+      setMode(requestedMode);
+    }
+  }, []);
 
   useEffect(() => {
     registerSubmodules('Manufacturing', filteredSubmodules);
@@ -124,7 +148,7 @@ export default function CutOptimization() {
 
       let taskQuery = supabase
         .from('WorkOrderTasks')
-        .select('id, manufacturing_order_id, work_center_id')
+        .select('id, manufacturing_order_id, work_center_id, status, assigned_to_user_id, planned_start_at, sales_order_line_id')
         .eq('deleted', false)
         .in('status', ['pending', 'in_progress', 'completed']);
 
@@ -149,6 +173,30 @@ export default function CutOptimization() {
       const taskIds = matchedTasks.map((t: any) => t.id);
       const moIds = [...new Set(matchedTasks.map((t: any) => t.manufacturing_order_id))];
 
+      // Build stable WOL labels (L1/L2/...) per MO based on MOL creation order
+      const lineIndexByMoSol: Record<string, number> = {};
+      if (moIds.length > 0) {
+        const { data: molRows } = await supabase
+          .from('ManufacturingOrderLines')
+          .select('manufacturing_order_id, sales_order_line_id, created_at')
+          .in('manufacturing_order_id', moIds)
+          .eq('deleted', false)
+          .order('manufacturing_order_id', { ascending: true })
+          .order('created_at', { ascending: true });
+        const seenByMo: Record<string, Set<string>> = {};
+        const idxByMo: Record<string, number> = {};
+        for (const r of (molRows ?? [])) {
+          const moId = (r as any).manufacturing_order_id as string;
+          const solId = (r as any).sales_order_line_id as string | null;
+          if (!solId) continue;
+          if (!seenByMo[moId]) { seenByMo[moId] = new Set<string>(); idxByMo[moId] = 0; }
+          if (seenByMo[moId].has(solId)) continue;
+          seenByMo[moId].add(solId);
+          idxByMo[moId] += 1;
+          lineIndexByMoSol[`${moId}::${solId}`] = idxByMo[moId];
+        }
+      }
+
       const [{ data: lines }, { data: mos }] = await Promise.all([
         supabase
           .from('WorkOrderTaskLines')
@@ -163,11 +211,11 @@ export default function CutOptimization() {
 
       const moMap: Record<string, string> = {};
       const moToSoId: Record<string, string | null> = {};
-      const activeMoIds = new Set<string>();
+      const inProductionMoIds = new Set<string>();
       (mos ?? []).forEach((m: any) => {
         moMap[m.id] = m.manufacturing_order_no;
         moToSoId[m.id] = m.sales_order_id ?? null;
-        activeMoIds.add(m.id);
+        if (m.status === 'in_production') inProductionMoIds.add(m.id);
       });
 
       const soIds = [...new Set((mos ?? []).map((m: any) => m.sales_order_id).filter(Boolean))];
@@ -179,11 +227,22 @@ export default function CutOptimization() {
         soMap[so.id] = so.sales_order_no ?? null;
       });
 
-      // Only keep tasks whose MO is active (not draft/planned/completed)
+      // Only keep tasks eligible to be listed in Cut Optimization:
+      // - MO must be in production
+      // - task must have a calendar date (planned_start_at)
+      // - task must have operator assigned
       const taskToMo: Record<string, string> = {};
+      const taskToSol: Record<string, string | null> = {};
+      const taskToLineLabel: Record<string, string | null> = {};
       matchedTasks.forEach((t: any) => {
-        if (activeMoIds.has(t.manufacturing_order_id)) {
+        const isMoEligible = inProductionMoIds.has(t.manufacturing_order_id);
+        const hasCalendar = Boolean(t.planned_start_at);
+        const hasOperator = Boolean(t.assigned_to_user_id);
+        if (isMoEligible && hasCalendar && hasOperator) {
           taskToMo[t.id] = t.manufacturing_order_id;
+          taskToSol[t.id] = t.sales_order_line_id ?? null;
+          const idx = t.sales_order_line_id ? lineIndexByMoSol[`${t.manufacturing_order_id}::${t.sales_order_line_id}`] : null;
+          taskToLineLabel[t.id] = idx ? `L${idx}` : null;
         }
       });
 
@@ -264,8 +323,6 @@ export default function CutOptimization() {
         const cutLength = l.cut_length_mm != null ? Number(l.cut_length_mm) : null;
         const cutHeight = l.cut_width_mm != null ? Number(l.cut_width_mm) : null;
 
-        if (!taskToMo[l.task_id]) return false;
-
         if (mode === 'fabric') {
           // Cut Optimization (fabric) is the roll-cut order: only fabric panels with full 2D cuts.
           return role === 'fabric'
@@ -278,8 +335,9 @@ export default function CutOptimization() {
           && cutLength != null && cutLength > 0;
       };
 
-      const cuts: PendingCut[] = (lines ?? [])
-        .filter((l: any) => isLineEligibleForMode(l))
+      const modeEligibleLines = (lines ?? []).filter((l: any) => isLineEligibleForMode(l));
+      const cuts: PendingCut[] = modeEligibleLines
+        .filter((l: any) => Boolean(taskToMo[l.task_id]))
         .map((l: any) => {
         const moId = taskToMo[l.task_id];
         const ci = l.catalog_item_id ? catMap[l.catalog_item_id] : null;
@@ -294,6 +352,8 @@ export default function CutOptimization() {
           qty: Number(l.qty),
           mo_id: moId,
           mo_number: moMap[moId] ?? '',
+          sales_order_line_id: taskToSol[l.task_id] ?? null,
+          line_label: taskToLineLabel[l.task_id] ?? null,
           so_number: moToSoId[moId] ? soMap[moToSoId[moId] as string] ?? null : null,
           part_role: l.component_role ?? '',
           stock_length_mm: ci?.stock_length_mm != null ? Number(ci.stock_length_mm) : null,
@@ -309,10 +369,12 @@ export default function CutOptimization() {
         };
       });
 
+      setIneligibleCutCount(Math.max(0, modeEligibleLines.length - cuts.length));
       setPendingCuts(cuts);
       setSelectedSkus(new Set(cuts.map(c => c.sku)));
     } catch (err) {
       console.error('Failed to fetch pending cuts:', err);
+      setIneligibleCutCount(0);
     } finally {
       setLoading(false);
     }
@@ -467,7 +529,68 @@ export default function CutOptimization() {
   const pendingCount = useMemo(() => pendingCuts.filter(c => !c.completed).length, [pendingCuts]);
   const completedCount = useMemo(() => pendingCuts.filter(c => c.completed).length, [pendingCuts]);
 
-  const markGroupReady = useCallback(async (sku: string, markCompleted: boolean) => {
+  const requestMarkCut = useCallback(async (sku: string, markCompleted: boolean) => {
+    if (!markCompleted) {
+      // Undo: no gate needed
+      setConfirmCut({ sku, markCompleted });
+      return;
+    }
+
+    const groupCuts = pendingCuts.filter(c => c.sku === sku);
+    const wotlIds = groupCuts.map(c => c.wotl_id);
+    if (wotlIds.length === 0) return;
+
+    // Validate: all parent tasks must be in_progress and their MO in in_production
+    const { data: taskRows } = await supabase
+      .from('WorkOrderTaskLines')
+      .select('task_id')
+      .in('id', wotlIds);
+    const taskIds = [...new Set((taskRows ?? []).map((r: any) => r.task_id))];
+
+    if (taskIds.length > 0) {
+      const { data: tasks } = await supabase
+        .from('WorkOrderTasks')
+        .select('id, status, assigned_to_user_id, assigned_to, manufacturing_order_id')
+        .in('id', taskIds);
+
+      const notStarted = (tasks ?? []).filter((t: any) => t.status === 'pending');
+      const noOperator = (tasks ?? []).filter((t: any) => !t.assigned_to_user_id);
+      const moIds = [...new Set((tasks ?? []).map((t: any) => t.manufacturing_order_id).filter(Boolean))];
+      let moDraftCount = 0;
+      if (moIds.length > 0) {
+        const { data: mos } = await supabase
+          .from('ManufacturingOrders')
+          .select('id, status')
+          .in('id', moIds);
+        moDraftCount = (mos ?? []).filter((m: any) => m.status !== 'in_production').length;
+      }
+
+      if (noOperator.length > 0) {
+        addNotification({ type: 'warning', title: 'Operator Required', message: `Assign an operator to the cut station before marking as cut. Go to MO > Work Orders tab.` });
+        return;
+      }
+      if (moDraftCount > 0) {
+        addNotification({
+          type: 'warning',
+          title: 'MO Not In Production',
+          message: 'This Work Order is still draft/planned. Move the MO to In Production before marking materials as cut.',
+        });
+        return;
+      }
+      if (notStarted.length > 0) {
+        addNotification({ type: 'warning', title: 'Task Not Started', message: `The cut task must be started (In Progress) before marking lines as cut. Start it from the Work Order detail.` });
+        return;
+      }
+    }
+
+    setConfirmCut({ sku, markCompleted });
+  }, [pendingCuts, addNotification]);
+
+  const executeMarkCut = useCallback(async () => {
+    if (!confirmCut) return;
+    const { sku, markCompleted } = confirmCut;
+    setConfirmCut(null);
+
     const groupCuts = pendingCuts.filter(c => c.sku === sku);
     const wotlIds = groupCuts.map(c => c.wotl_id);
     if (wotlIds.length === 0) return;
@@ -480,17 +603,23 @@ export default function CutOptimization() {
         .in('id', wotlIds);
 
       if (error) {
-        console.error('Failed to update cut status:', error);
+        addNotification({ type: 'error', title: 'Update Failed', message: error.message });
         return;
       }
 
       setPendingCuts(prev => prev.map(c =>
         c.sku === sku ? { ...c, completed: markCompleted } : c,
       ));
+
+      addNotification({
+        type: 'success',
+        title: markCompleted ? 'Marked as Cut' : 'Reverted',
+        message: `${sku}: ${wotlIds.length} line(s) ${markCompleted ? 'marked as cut' : 'reverted to pending'}.`,
+      });
     } finally {
       setMarkingReady(null);
     }
-  }, [pendingCuts]);
+  }, [confirmCut, pendingCuts, addNotification]);
 
   // All SKU groups (unfiltered) for the sidebar
   const allSkuGroups: SkuGroup[] = useMemo(() => {
@@ -536,7 +665,7 @@ export default function CutOptimization() {
           canHeatseal,
         };
       });
-  }, [pendingCuts, fabricRuleMap]);
+  }, [statusFilteredCuts, fabricRuleMap]);
 
   // Filtered groups: exclude deselected MOs, recalculate moNumbers/cuts
   const skuGroups: SkuGroup[] = useMemo(() => {
@@ -577,6 +706,33 @@ export default function CutOptimization() {
 
   const selectAll = () => setSelectedSkus(new Set(statusFilteredCuts.map(c => c.sku)));
   const selectNone = () => setSelectedSkus(new Set());
+
+  const locateSkuPlan = useCallback((sku: string) => {
+    // Ensure the material is visible on the right panel before scrolling.
+    setSelectedSkus((prev) => {
+      if (prev.has(sku)) return prev;
+      const next = new Set(prev);
+      next.add(sku);
+      return next;
+    });
+
+    requestAnimationFrame(() => {
+      const el = document.getElementById(skuAnchorId(sku));
+      if (!el) {
+        addNotification({
+          type: 'warning',
+          title: 'Plan not visible',
+          message: `Enable material ${sku} to locate its cut order.`,
+        });
+        return;
+      }
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setFocusedSku(sku);
+      window.setTimeout(() => {
+        setFocusedSku((prev) => (prev === sku ? null : prev));
+      }, 2200);
+    });
+  }, [addNotification]);
 
   const MO_HEX_COLORS = [
     '#60a5fa', '#34d399', '#fbbf24', '#fb7185',
@@ -635,7 +791,7 @@ export default function CutOptimization() {
           moId: c.mo_id,
           moNumber: c.mo_number,
           sku: c.sku,
-          label: c.mo_number,
+          label: formatMoLineRef(c),
         }));
 
       return {
@@ -830,6 +986,10 @@ export default function CutOptimization() {
 
   return (
     <div className="py-6 px-6 space-y-6">
+      <button onClick={() => router.navigate('/manufacturing/work-orders')} className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700">
+        <ArrowLeft className="w-4 h-4" /> Back to Work Orders
+      </button>
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -915,6 +1075,12 @@ export default function CutOptimization() {
         onChange={(v) => setCutStatus(v as CutStatusFilter)}
       />
 
+      {ineligibleCutCount > 0 && (
+        <div className="px-3 py-2 rounded-md border border-amber-200 bg-amber-50 text-xs text-amber-800">
+          {ineligibleCutCount} cut line(s) hidden because WO/MO is not eligible (operator missing, calendar missing, or MO not in production).
+        </div>
+      )}
+
       {loading ? (
         <div className="flex items-center justify-center py-20">
           <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
@@ -953,11 +1119,21 @@ export default function CutOptimization() {
               <div className="max-h-[60vh] overflow-y-auto divide-y divide-gray-100">
                 {allSkuGroups.map(group => {
                   const moIds = [...new Set(group.cuts.map(c => c.mo_id))];
-                  const moEntries = [...new Set(group.cuts.map(c => `${c.mo_id}|${c.mo_number}`))].map(e => {
-                    const [id, num] = e.split('|');
-                    const count = group.cuts.filter(c => c.mo_id === id).length;
-                    return { id, number: num, pieceCount: count };
+                  const moEntryMap = new Map<string, { id: string; number: string; lineLabels: Set<string>; pieceCount: number }>();
+                  group.cuts.forEach((c) => {
+                    if (!moEntryMap.has(c.mo_id)) {
+                      moEntryMap.set(c.mo_id, { id: c.mo_id, number: c.mo_number, lineLabels: new Set<string>(), pieceCount: 0 });
+                    }
+                    const entry = moEntryMap.get(c.mo_id)!;
+                    if (c.line_label) entry.lineLabels.add(c.line_label);
+                    entry.pieceCount += 1;
                   });
+                  const moEntries = [...moEntryMap.values()].map((e) => ({
+                    id: e.id,
+                    number: e.number,
+                    lineLabel: e.lineLabels.size > 0 ? [...e.lineLabels].sort().join(', ') : null,
+                    pieceCount: e.pieceCount,
+                  }));
                   const isExpanded = expandedSkuMOs.has(group.sku);
                   const activeMoCount = moEntries.filter(m => !excludedMOs.has(m.id)).length;
 
@@ -966,7 +1142,7 @@ export default function CutOptimization() {
 
                   return (
                     <div key={group.sku} className={isGroupCompleted && cutStatus === 'all' ? 'opacity-60' : ''}>
-                      <div className="flex items-start gap-2.5 px-4 py-2.5 hover:bg-gray-50">
+                      <div className={`flex items-start gap-2.5 px-4 py-2.5 hover:bg-gray-50 border-l-[3px] ${isGroupCompleted ? 'border-l-green-500 bg-green-50/30' : 'border-l-transparent'}`}>
                         <input
                           type="checkbox"
                           checked={selectedSkus.has(group.sku)}
@@ -996,6 +1172,13 @@ export default function CutOptimization() {
                             </div>
                           )}
                           <div className="flex items-center gap-2 mt-1">
+                            <button
+                              type="button"
+                              onClick={() => locateSkuPlan(group.sku)}
+                              className="text-[10px] text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded hover:bg-blue-100"
+                            >
+                              Locate
+                            </button>
                             {moEntries.length > 1 && (
                               <button
                                 type="button"
@@ -1013,19 +1196,19 @@ export default function CutOptimization() {
                             <button
                               type="button"
                               disabled={isMarking}
-                              onClick={() => markGroupReady(group.sku, !isGroupCompleted)}
-                              className={`text-[10px] font-medium flex items-center gap-1 ml-auto px-2 py-0.5 rounded border transition-colors ${
+                              onClick={() => requestMarkCut(group.sku, !isGroupCompleted)}
+                              className={`text-[10px] font-medium flex items-center gap-1 ml-auto px-2.5 py-1 rounded border transition-colors ${
                                 isGroupCompleted
-                                  ? 'text-amber-700 bg-amber-50 border-amber-200 hover:bg-amber-100'
-                                  : 'text-green-700 bg-green-50 border-green-200 hover:bg-green-100'
+                                  ? 'text-green-700 bg-green-50 border-green-200 hover:bg-green-100'
+                                  : 'text-gray-600 bg-gray-50 border-gray-200 hover:bg-gray-100'
                               }`}
                             >
                               {isMarking ? (
                                 <Loader2 className="w-3 h-3 animate-spin" />
                               ) : isGroupCompleted ? (
-                                <><Circle className="w-3 h-3" /> Undo</>
+                                <><CheckCircle2 className="w-3 h-3" /> Cut</>
                               ) : (
-                                <><CheckCircle2 className="w-3 h-3" /> Mark Ready</>
+                                <><Circle className="w-3 h-3" /> Mark Cut</>
                               )}
                             </button>
                           </div>
@@ -1045,7 +1228,9 @@ export default function CutOptimization() {
                                 })}
                                 className="rounded border-gray-300 w-3.5 h-3.5"
                               />
-                              <span className="text-[10px] font-mono text-gray-600 group-hover:text-gray-900">{mo.number}</span>
+                              <span className="text-[10px] font-mono text-gray-600 group-hover:text-gray-900">
+                                {mo.number}{mo.lineLabel ? ` · ${mo.lineLabel}` : ''}
+                              </span>
                               <span className="text-[9px] text-gray-400 ml-auto">{mo.pieceCount} pc</span>
                             </label>
                           ))}
@@ -1075,36 +1260,41 @@ export default function CutOptimization() {
                   moId: c.mo_id,
                   moNumber: c.mo_number,
                   sku: c.sku,
-                  label: `${c.mo_number}`,
+                  label: formatMoLineRef(c),
                 }));
               if (pieces.length === 0) return null;
               return (
-                <CutPlanVisualizer
+                <div
+                  id={skuAnchorId(group.sku)}
                   key={group.sku}
-                  pieces={pieces}
-                  stockLengthMm={group.stockLengthMm}
-                  title={`${group.sku} — ${group.itemName}`}
-                  subtitle={`${pieces.length} pieces · MOs: ${group.moNumbers.join(', ')}`}
-                  onPrintStickers={async () => {
-                    const labels: ThermalCutLabel[] = group.cuts
-                      .filter(c => c.cut_length_mm != null && c.cut_length_mm > 0)
-                      .map(c => ({
-                        soNumber: c.so_number,
-                        moNumber: c.mo_number,
-                        stationCode: 'CUT-PROFILE' as const,
-                        sku: c.sku,
-                        itemName: c.item_name,
-                        cutWidthMm: c.cut_length_mm,
-                        cutHeightMm: null,
-                        curtainWidthMm: c.product_width_m != null ? c.product_width_m * 1000 : null,
-                        curtainHeightMm: c.product_height_m != null ? c.product_height_m * 1000 : null,
-                        refId: c.bil_id,
-                      }));
-                    if (labels.length === 0) return;
-                    const doc = await generateThermalCutStickersPDF(labels);
-                    openThermalStickerPrintWindow(doc);
-                  }}
-                />
+                  className={`rounded-lg transition-all ${focusedSku === group.sku ? 'ring-2 ring-blue-400 ring-offset-2' : ''}`}
+                >
+                  <CutPlanVisualizer
+                    pieces={pieces}
+                    stockLengthMm={group.stockLengthMm}
+                    title={`${group.sku} — ${group.itemName}`}
+                    subtitle={`${pieces.length} pieces · MOs: ${group.moNumbers.join(', ')}`}
+                    onPrintStickers={async () => {
+                      const labels: ThermalCutLabel[] = group.cuts
+                        .filter(c => c.cut_length_mm != null && c.cut_length_mm > 0)
+                        .map(c => ({
+                          soNumber: c.so_number,
+                          moNumber: c.mo_number,
+                          stationCode: 'CUT-PROFILE' as const,
+                          sku: c.sku,
+                          itemName: c.item_name,
+                          cutWidthMm: c.cut_length_mm,
+                          cutHeightMm: null,
+                          curtainWidthMm: c.product_width_m != null ? c.product_width_m * 1000 : null,
+                          curtainHeightMm: c.product_height_m != null ? c.product_height_m * 1000 : null,
+                          refId: c.bil_id,
+                        }));
+                      if (labels.length === 0) return;
+                      const doc = await generateThermalCutStickersPDF(labels);
+                      openThermalStickerPrintWindow(doc);
+                    }}
+                  />
+                </div>
               );
             })}
 
@@ -1118,7 +1308,11 @@ export default function CutOptimization() {
               const totalPanels = group.cuts.length;
 
               return (
-                <div key={group.sku} className="space-y-3">
+                <div
+                  id={skuAnchorId(group.sku)}
+                  key={group.sku}
+                  className={`space-y-3 rounded-lg transition-all ${focusedSku === group.sku ? 'ring-2 ring-blue-400 ring-offset-2' : ''}`}
+                >
                   <RollCutVisualizer
                     pieces={fabricPieces}
                     rollWidthMm={group.rollWidthMm}
@@ -1264,6 +1458,34 @@ export default function CutOptimization() {
                 ))}
               </div>
             )}
+          </div>
+        </div>
+      )}
+      {/* Confirm Cut Dialog */}
+      {confirmCut && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-sm p-6">
+            <h3 className="text-sm font-semibold text-gray-900 mb-2">
+              {confirmCut.markCompleted ? 'Confirm Cut Completed' : 'Revert Cut Status'}
+            </h3>
+            <p className="text-sm text-gray-600 mb-1">
+              {confirmCut.markCompleted
+                ? <>Are you sure <span className="font-mono font-semibold">{confirmCut.sku}</span> has been cut?</>
+                : <>Revert <span className="font-mono font-semibold">{confirmCut.sku}</span> back to pending?</>
+              }
+            </p>
+            <p className="text-xs text-gray-400 mb-5">
+              {confirmCut.markCompleted
+                ? 'This will mark all pieces for this material as completed. The material will move to the Completed tab.'
+                : 'This will mark all pieces as not cut. The material will return to the Pending tab.'
+              }
+            </p>
+            <div className="flex items-center justify-end gap-2">
+              <button type="button" onClick={() => setConfirmCut(null)} className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded hover:bg-gray-200">Cancel</button>
+              <button type="button" onClick={executeMarkCut} className={`px-3 py-1.5 text-xs font-medium text-white rounded ${confirmCut.markCompleted ? 'bg-green-600 hover:bg-green-700' : 'bg-amber-600 hover:bg-amber-700'}`}>
+                {confirmCut.markCompleted ? 'Yes, Mark as Cut' : 'Yes, Revert'}
+              </button>
+            </div>
           </div>
         </div>
       )}

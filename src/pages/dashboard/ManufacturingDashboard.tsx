@@ -11,7 +11,7 @@ import { useManufacturingOrders } from '../../hooks/useManufacturing';
 import StatusBadge from '../../components/shared/StatusBadge';
 import { router } from '../../lib/router';
 
-const OPEN_STATUSES = ['draft', 'reviewed', 'planned', 'material_ready', 'in_production'];
+const OPEN_STATUSES = ['draft', 'confirmed', 'procurement', 'materials_ready', 'in_production'];
 const IN_PRODUCTION = ['in_production'];
 const READY_STATUSES = ['ready_for_delivery'];
 const DELIVERED_STATUSES = ['delivered'];

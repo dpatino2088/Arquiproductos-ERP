@@ -6,11 +6,14 @@ import { generateNextSequentialNumber } from '../lib/sequential-numbers';
 export interface DeliveryNoteLine {
   id: string;
   delivery_note_id: string;
-  mo_line_id: string;
+  mo_line_id: string | null;
+  so_accessory_id: string | null;
+  line_type: 'product' | 'accessory';
   quantity_delivered: number;
   checked: boolean;
   checked_at: string | null;
   notes: string | null;
+  manufacturing_order_no?: string | null;
   mo_line?: {
     quantity: number;
     sales_order_line_id: string | null;
@@ -27,12 +30,18 @@ export interface DeliveryNoteLine {
       CatalogItems?: { name: string; sku: string } | null;
     } | null;
   };
+  accessory?: {
+    catalog_item_name: string | null;
+    catalog_item_sku: string | null;
+    qty: number;
+  } | null;
 }
 
 export interface DeliveryNote {
   id: string;
   organization_id: string;
-  manufacturing_order_id: string;
+  manufacturing_order_id: string | null;
+  sales_order_id: string | null;
   delivery_number: string;
   status: string;
   delivered_by_user_id: string | null;
@@ -47,19 +56,37 @@ export function useCreateDeliveryNote() {
   const { activeOrganizationId } = useOrganizationContext();
   const [isCreating, setIsCreating] = useState(false);
 
-  const createDeliveryNote = useCallback(async (moId: string, userId: string, userName?: string) => {
+  const createDeliveryNote = useCallback(async (
+    params: { moId?: string; salesOrderId?: string },
+    userId: string,
+    userName?: string,
+  ) => {
     if (!activeOrganizationId) throw new Error('No organization selected');
+    const { moId, salesOrderId } = params;
+    if (!moId && !salesOrderId) throw new Error('moId or salesOrderId required');
     setIsCreating(true);
     try {
       const deliveryNumber = await generateNextSequentialNumber(
         'DN', 'DeliveryNotes', 'delivery_number', activeOrganizationId,
       );
 
+      let resolvedSoId = salesOrderId ?? null;
+
+      if (!resolvedSoId && moId) {
+        const { data: mo } = await supabase
+          .from('ManufacturingOrders')
+          .select('sales_order_id')
+          .eq('id', moId)
+          .single();
+        resolvedSoId = mo?.sales_order_id ?? null;
+      }
+
       const { data: dn, error: dnErr } = await supabase
         .from('DeliveryNotes')
         .insert({
           organization_id: activeOrganizationId,
-          manufacturing_order_id: moId,
+          sales_order_id: resolvedSoId,
+          manufacturing_order_id: moId ?? null,
           delivery_number: deliveryNumber,
           status: 'pending',
           delivered_by_user_id: userId,
@@ -70,25 +97,81 @@ export function useCreateDeliveryNote() {
 
       if (dnErr) throw new Error(dnErr.message);
 
-      const { data: readyLines, error: rlErr } = await supabase
-        .from('ManufacturingOrderLines')
-        .select('id, quantity')
-        .eq('manufacturing_order_id', moId)
-        .eq('deleted', false)
-        .eq('delivery_status', 'ready');
+      const dnLines: any[] = [];
 
-      if (rlErr) throw new Error(rlErr.message);
+      if (salesOrderId) {
+        const { data: mos } = await supabase
+          .from('ManufacturingOrders')
+          .select('id')
+          .eq('sales_order_id', salesOrderId)
+          .eq('deleted', false)
+          .in('status', ['ready_for_pickup', 'delivered']);
 
-      if (readyLines && readyLines.length > 0) {
-        const lines = readyLines.map((ml: any) => ({
-          delivery_note_id: dn.id,
-          mo_line_id: ml.id,
-          quantity_delivered: ml.quantity,
-          checked: false,
-        }));
+        if (mos && mos.length > 0) {
+          const moIds = mos.map((m: any) => m.id);
+          const { data: readyLines } = await supabase
+            .from('ManufacturingOrderLines')
+            .select('id, quantity')
+            .in('manufacturing_order_id', moIds)
+            .eq('deleted', false)
+            .eq('delivery_status', 'ready');
+
+          if (readyLines) {
+            for (const ml of readyLines) {
+              dnLines.push({
+                delivery_note_id: dn.id,
+                mo_line_id: ml.id,
+                line_type: 'product',
+                quantity_delivered: ml.quantity,
+                checked: false,
+              });
+            }
+          }
+        }
+
+        const { data: accessories } = await supabase
+          .from('SaleOrderAccessories')
+          .select('id, qty')
+          .eq('sales_order_id', salesOrderId)
+          .eq('deleted', false)
+          .eq('delivery_status', 'pending');
+
+        if (accessories) {
+          for (const acc of accessories) {
+            dnLines.push({
+              delivery_note_id: dn.id,
+              so_accessory_id: acc.id,
+              line_type: 'accessory',
+              quantity_delivered: acc.qty,
+              checked: false,
+            });
+          }
+        }
+      } else if (moId) {
+        const { data: readyLines } = await supabase
+          .from('ManufacturingOrderLines')
+          .select('id, quantity')
+          .eq('manufacturing_order_id', moId)
+          .eq('deleted', false)
+          .eq('delivery_status', 'ready');
+
+        if (readyLines) {
+          for (const ml of readyLines) {
+            dnLines.push({
+              delivery_note_id: dn.id,
+              mo_line_id: ml.id,
+              line_type: 'product',
+              quantity_delivered: ml.quantity,
+              checked: false,
+            });
+          }
+        }
+      }
+
+      if (dnLines.length > 0) {
         const { error: lErr } = await supabase
           .from('DeliveryNoteLines')
-          .insert(lines);
+          .insert(dnLines);
         if (lErr) throw new Error(lErr.message);
       }
 
@@ -127,62 +210,110 @@ export function useDeliveryNote(deliveryNoteId: string | null) {
         .order('created_at');
 
       if (dnLines && dnLines.length > 0) {
-        const molIds = dnLines.map((l: any) => l.mo_line_id);
-        const { data: mols } = await supabase
-          .from('ManufacturingOrderLines')
-          .select('id, quantity, sales_order_line_id')
-          .in('id', molIds);
+        const productLines = dnLines.filter((l: any) => l.mo_line_id);
+        const accessoryLineIds = dnLines.filter((l: any) => l.so_accessory_id).map((l: any) => l.so_accessory_id);
 
-        const solIds = [...new Set((mols ?? []).map((m: any) => m.sales_order_line_id).filter(Boolean))];
-        let solMap = new Map<string, any>();
-        if (solIds.length > 0) {
-          const { data: sols } = await supabase
-            .from('SaleOrderLines')
-            .select('id, description, product_type, area, position, collection_name, variant_name, width_m, height_m, catalog_item_id, quote_line_id')
-            .in('id', solIds);
-          if (sols) {
-            const catIds = [...new Set(sols.map((s: any) => s.catalog_item_id).filter(Boolean))];
-            let catMap = new Map<string, any>();
-            if (catIds.length > 0) {
-              const { data: cats } = await supabase.from('CatalogItems').select('id, name, sku').in('id', catIds);
-              if (cats) catMap = new Map(cats.map((c: any) => [c.id, c]));
+        // Resolve product lines (MOLines → SOLines → CatalogItems)
+        const molIds = productLines.map((l: any) => l.mo_line_id);
+        let molMap = new Map<string, any>();
+        let moNoMap = new Map<string, string>();
+
+        if (molIds.length > 0) {
+          const { data: mols } = await supabase
+            .from('ManufacturingOrderLines')
+            .select('id, quantity, sales_order_line_id, manufacturing_order_id')
+            .in('id', molIds);
+
+          const moIds = [...new Set((mols ?? []).map((m: any) => m.manufacturing_order_id).filter(Boolean))];
+          if (moIds.length > 0) {
+            const { data: mosData } = await supabase
+              .from('ManufacturingOrders')
+              .select('id, manufacturing_order_no')
+              .in('id', moIds);
+            if (mosData) moNoMap = new Map(mosData.map((m: any) => [m.id, m.manufacturing_order_no]));
+          }
+
+          const solIds = [...new Set((mols ?? []).map((m: any) => m.sales_order_line_id).filter(Boolean))];
+          let solMap = new Map<string, any>();
+          if (solIds.length > 0) {
+            const { data: sols } = await supabase
+              .from('SaleOrderLines')
+              .select('id, description, product_type, area, position, collection_name, variant_name, width_m, height_m, catalog_item_id, quote_line_id')
+              .in('id', solIds);
+            if (sols) {
+              const catIds = [...new Set(sols.map((s: any) => s.catalog_item_id).filter(Boolean))];
+              let catMap = new Map<string, any>();
+              if (catIds.length > 0) {
+                const { data: cats } = await supabase.from('CatalogItems').select('id, name, sku').in('id', catIds);
+                if (cats) catMap = new Map(cats.map((c: any) => [c.id, c]));
+              }
+
+              const qlIds = [...new Set(sols.map((s: any) => s.quote_line_id).filter(Boolean))];
+              let qlMap = new Map<string, string>();
+              if (qlIds.length > 0) {
+                const { data: qls } = await supabase.from('QuoteLines').select('id, drive_type').in('id', qlIds);
+                if (qls) qlMap = new Map(qls.map((q: any) => [q.id, q.drive_type]));
+              }
+
+              const ptCodes = [...new Set(sols.map((s: any) => s.product_type).filter(Boolean))];
+              let ptNameMap = new Map<string, string>();
+              if (ptCodes.length > 0) {
+                const { data: pts } = await supabase
+                  .from('ProductTypes')
+                  .select('code, name')
+                  .in('code', ptCodes);
+                if (pts) ptNameMap = new Map(pts.map((p: any) => [p.code, p.name]));
+              }
+
+              solMap = new Map(sols.map((s: any) => [s.id, {
+                ...s,
+                product_type: ptNameMap.get(s.product_type) ?? s.product_type ?? null,
+                drive_type: s.quote_line_id ? qlMap.get(s.quote_line_id) ?? null : null,
+                CatalogItems: s.catalog_item_id ? catMap.get(s.catalog_item_id) ?? null : null,
+              }]));
             }
+          }
 
-            const qlIds = [...new Set(sols.map((s: any) => s.quote_line_id).filter(Boolean))];
-            let qlMap = new Map<string, string>();
-            if (qlIds.length > 0) {
-              const { data: qls } = await supabase.from('QuoteLines').select('id, drive_type').in('id', qlIds);
-              if (qls) qlMap = new Map(qls.map((q: any) => [q.id, q.drive_type]));
+          molMap = new Map((mols ?? []).map((m: any) => [m.id, {
+            ...m,
+            SaleOrderLine: solMap.get(m.sales_order_line_id) ?? null,
+            manufacturing_order_no: moNoMap.get(m.manufacturing_order_id) ?? null,
+          }]));
+        }
+
+        // Resolve accessory lines (SaleOrderAccessories → CatalogItems)
+        let accMap = new Map<string, any>();
+        if (accessoryLineIds.length > 0) {
+          const { data: accessories } = await supabase
+            .from('SaleOrderAccessories')
+            .select('id, catalog_item_id, qty')
+            .in('id', accessoryLineIds);
+
+          if (accessories) {
+            const accCatIds = [...new Set(accessories.map((a: any) => a.catalog_item_id).filter(Boolean))];
+            let accCatMap = new Map<string, any>();
+            if (accCatIds.length > 0) {
+              const { data: cats } = await supabase.from('CatalogItems').select('id, name, sku').in('id', accCatIds);
+              if (cats) accCatMap = new Map(cats.map((c: any) => [c.id, c]));
             }
-
-            const ptCodes = [...new Set(sols.map((s: any) => s.product_type).filter(Boolean))];
-            let ptNameMap = new Map<string, string>();
-            if (ptCodes.length > 0) {
-              const { data: pts } = await supabase
-                .from('ProductTypes')
-                .select('code, name')
-                .in('code', ptCodes);
-              if (pts) ptNameMap = new Map(pts.map((p: any) => [p.code, p.name]));
-            }
-
-            solMap = new Map(sols.map((s: any) => [s.id, {
-              ...s,
-              product_type: ptNameMap.get(s.product_type) ?? s.product_type ?? null,
-              drive_type: s.quote_line_id ? qlMap.get(s.quote_line_id) ?? null : null,
-              CatalogItems: s.catalog_item_id ? catMap.get(s.catalog_item_id) ?? null : null,
+            accMap = new Map(accessories.map((a: any) => [a.id, {
+              catalog_item_name: accCatMap.get(a.catalog_item_id)?.name ?? null,
+              catalog_item_sku: accCatMap.get(a.catalog_item_id)?.sku ?? null,
+              qty: a.qty,
             }]));
           }
         }
 
-        const molMap = new Map((mols ?? []).map((m: any) => [m.id, {
-          ...m,
-          SaleOrderLine: solMap.get(m.sales_order_line_id) ?? null,
-        }]));
-
-        setLines(dnLines.map((l: any) => ({
-          ...l,
-          mo_line: molMap.get(l.mo_line_id) ?? null,
-        })));
+        setLines(dnLines.map((l: any) => {
+          const molData = l.mo_line_id ? molMap.get(l.mo_line_id) : null;
+          return {
+            ...l,
+            line_type: l.line_type ?? (l.so_accessory_id ? 'accessory' : 'product'),
+            manufacturing_order_no: molData?.manufacturing_order_no ?? null,
+            mo_line: molData ? { ...molData } : null,
+            accessory: l.so_accessory_id ? accMap.get(l.so_accessory_id) ?? null : null,
+          };
+        }));
       }
     } finally {
       setLoading(false);

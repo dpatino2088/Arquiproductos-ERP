@@ -17,7 +17,7 @@ import { useEffect } from 'react';
 import { RollerBOMConfigState } from '../../../lib/bom/types';
 import { useRollerCatalogItems } from '../../../hooks/useRollerCatalogItems';
 import Label from '../../ui/Label';
-import { Image as ImageIcon } from 'lucide-react';
+import CatalogItemImage from '../../ui/CatalogItemImage';
 
 interface HardwareStepProps {
   config: RollerBOMConfigState;
@@ -171,11 +171,7 @@ export default function HardwareStep({ config, onUpdate, organizationId }: Hardw
                   }`}
                 >
                   <div className="p-4 flex flex-col items-center justify-center min-h-[100px]">
-                    {item.image_url ? (
-                      <img src={item.image_url} alt={item.name} className="w-12 h-12 object-contain mb-2" />
-                    ) : (
-                      <ImageIcon className="w-12 h-12 text-gray-400 mb-2" />
-                    )}
+                    <CatalogItemImage src={item.image_url} alt={item.name} size="md" objectFit="contain" className="mb-2" />
                     <div className="text-center">
                       <div className="text-sm font-medium text-gray-900">{item.name}</div>
                       <div className="text-xs text-gray-500 mt-1">{item.sku}</div>
@@ -257,11 +253,7 @@ export default function HardwareStep({ config, onUpdate, organizationId }: Hardw
                 }`}
               >
                 <div className="p-4 flex flex-col items-center justify-center min-h-[100px]">
-                  {item.image_url ? (
-                    <img src={item.image_url} alt={item.name} className="w-12 h-12 object-contain mb-2" />
-                  ) : (
-                    <ImageIcon className="w-12 h-12 text-gray-400 mb-2" />
-                  )}
+                  <CatalogItemImage src={item.image_url} alt={item.name} size="md" objectFit="contain" className="mb-2" />
                   <div className="text-center">
                     <div className="text-sm font-medium text-gray-900">{item.name}</div>
                     <div className="text-xs text-gray-500 mt-1">{item.sku}</div>
@@ -331,11 +323,7 @@ export default function HardwareStep({ config, onUpdate, organizationId }: Hardw
                   }`}
                 >
                   <div className="p-4 flex flex-col items-center justify-center min-h-[100px]">
-                    {item.image_url ? (
-                      <img src={item.image_url} alt={item.name} className="w-12 h-12 object-contain mb-2" />
-                    ) : (
-                      <ImageIcon className="w-12 h-12 text-gray-400 mb-2" />
-                    )}
+                    <CatalogItemImage src={item.image_url} alt={item.name} size="md" objectFit="contain" className="mb-2" />
                     <div className="text-center">
                       <div className="text-sm font-medium text-gray-900">{item.name}</div>
                       <div className="text-xs text-gray-500 mt-1">{item.sku}</div>
@@ -378,11 +366,7 @@ export default function HardwareStep({ config, onUpdate, organizationId }: Hardw
                     }`}
                   >
                     <div className="p-4 flex flex-col items-center justify-center min-h-[100px]">
-                      {item.image_url ? (
-                        <img src={item.image_url} alt={item.name} className="w-12 h-12 object-contain mb-2" />
-                      ) : (
-                        <ImageIcon className="w-12 h-12 text-gray-400 mb-2" />
-                      )}
+                      <CatalogItemImage src={item.image_url} alt={item.name} size="md" objectFit="contain" className="mb-2" />
                       <div className="text-center">
                         <div className="text-sm font-medium text-gray-900">{item.name}</div>
                         <div className="text-xs text-gray-500 mt-1">{item.sku}</div>

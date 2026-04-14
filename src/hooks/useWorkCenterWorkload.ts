@@ -31,6 +31,14 @@ function toDateKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+const WORK_START = 8;
+const WORK_END = 17;
+const SAT_WORK_END = 12;
+
+function dayEndHour(dow: number): number {
+  return dow === 6 ? SAT_WORK_END : WORK_END;
+}
+
 function distributeHoursPerDay(
   startIso: string,
   endIso: string,
@@ -40,36 +48,42 @@ function distributeHoursPerDay(
   const end = new Date(endIso);
   const result: { dateKey: string; hours: number }[] = [];
 
-  let workingDays = 0;
-  const cursor = new Date(start);
-  cursor.setHours(0, 0, 0, 0);
+  const startDay = new Date(start);
+  startDay.setHours(0, 0, 0, 0);
   const endDay = new Date(end);
   endDay.setHours(0, 0, 0, 0);
 
-  while (cursor <= endDay) {
-    if (cursor.getDay() !== 0) workingDays++;
+  let remaining = totalHours;
+  const cursor = new Date(startDay);
+  const startHour = start.getHours() + start.getMinutes() / 60;
+
+  while (cursor <= endDay && remaining > 0.001) {
+    const dow = cursor.getDay();
+    if (dow !== 0) {
+      const endH = dayEndHour(dow);
+      const beginH = cursor.getTime() === startDay.getTime()
+        ? Math.max(WORK_START, startHour)
+        : WORK_START;
+      const available = Math.max(0, endH - beginH);
+      const consume = Math.min(remaining, available);
+      if (consume > 0) {
+        result.push({ dateKey: toDateKey(cursor), hours: Math.round(consume * 10) / 10 });
+        remaining -= consume;
+      }
+    }
     cursor.setDate(cursor.getDate() + 1);
   }
 
-  if (workingDays === 0) return result;
-
-  const hoursPerWorkDay = totalHours / workingDays;
-
-  const cursor2 = new Date(start);
-  cursor2.setHours(0, 0, 0, 0);
-  while (cursor2 <= endDay) {
-    if (cursor2.getDay() !== 0) {
-      result.push({ dateKey: toDateKey(cursor2), hours: hoursPerWorkDay });
-    }
-    cursor2.setDate(cursor2.getDate() + 1);
+  if (remaining > 0.001 && result.length > 0) {
+    result[result.length - 1].hours += Math.round(remaining * 10) / 10;
   }
 
   return result;
 }
 
-function computeLevel(totalHours: number, _capacity: number): 'ok' | 'warning' | 'overload' {
-  if (totalHours <= 8) return 'ok';
-  if (totalHours <= 12) return 'warning';
+function computeLevel(totalHours: number, capacity: number): 'ok' | 'warning' | 'overload' {
+  if (totalHours <= capacity) return 'ok';
+  if (totalHours <= capacity * 1.5) return 'warning';
   return 'overload';
 }
 

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
 import { useOrganizationContext } from '../context/OrganizationContext';
 import { useAuth } from './useAuth';
@@ -13,7 +14,6 @@ export type ManufacturingOrderStatus =
   | 'confirmed'
   | 'procurement'
   | 'materials_ready'
-  | 'planned'
   | 'in_production'
   | 'quality_check'
   | 'ready_for_pickup'
@@ -404,6 +404,14 @@ export function useManufacturingMaterials(manufacturingOrderId: string): UseManu
           console.log('🔍 useManufacturingMaterials: Fetching BOM for manufacturingOrderId:', safeManufacturingOrderId, 'organization:', activeOrganizationId);
         }
 
+        // Fetch MO quantity so we can multiply per-unit BOM lines
+        const { data: moRow } = await supabase
+          .from('ManufacturingOrders')
+          .select('quantity')
+          .eq('id', safeManufacturingOrderId)
+          .single();
+        const moQty = Math.max(1, Number(moRow?.quantity ?? 1));
+
         const { data: bomInstances, error: bomError } = await supabase
           .from('BOMInstances')
           .select('id, organization_id, quote_line_id, sales_order_line_id')
@@ -517,6 +525,7 @@ export function useManufacturingMaterials(manufacturingOrderId: string): UseManu
           const catalogItem = line.resolved_part_id ? catalogItemsMap.get(line.resolved_part_id) : null;
           const dims = biDimsMap.get(line.bom_instance_id);
 
+          const perUnitQty = Number(line.qty) || 0;
           return {
             bom_instance_line_id: line.id,
             bom_instance_id: line.bom_instance_id,
@@ -526,12 +535,12 @@ export function useManufacturingMaterials(manufacturingOrderId: string): UseManu
             item_name: catalogItem?.name || 'N/A',
             part_role: line.part_role || 'accessory',
             uom: line.uom || 'ea',
-            qty: Number(line.qty) || 0,
-            total_qty: Number(line.qty) || 0,
+            qty: perUnitQty * moQty,
+            total_qty: perUnitQty * moQty,
             unit_cost_exw: line.unit_cost_exw ? Number(line.unit_cost_exw) : undefined,
-            total_cost_exw: Number(line.total_cost_exw) || 0,
+            total_cost_exw: (Number(line.total_cost_exw) || 0) * moQty,
             unit_msrp: line.unit_msrp ? Number(line.unit_msrp) : undefined,
-            total_msrp: line.total_msrp ? Number(line.total_msrp) : undefined,
+            total_msrp: (Number(line.total_msrp) || 0) * moQty,
             cut_length_mm: line.cut_length_mm ? Number(line.cut_length_mm) : null,
             cut_width_mm: line.cut_width_mm ? Number(line.cut_width_mm) : null,
             cut_height_mm: line.cut_height_mm ? Number(line.cut_height_mm) : null,
@@ -775,6 +784,8 @@ export function useMoMaterialReadiness(moId: string | null): {
 
 export function useTransitionMOStatus() {
   const [isTransitioning, setIsTransitioning] = useState(false);
+  const queryClient = useQueryClient();
+  const { activeOrganizationId } = useOrganizationContext();
 
   const transitionStatus = useCallback(
     async (moId: string, newStatus: string, userId: string, userName?: string) => {
@@ -789,12 +800,16 @@ export function useTransitionMOStatus() {
         if (error) throw error;
         const result = data as { ok?: boolean; error?: string; from?: string; to?: string };
         if (result?.ok === false && result?.error) throw new Error(result.error);
+        if (activeOrganizationId) {
+          queryClient.invalidateQueries({ queryKey: ['material-demand', activeOrganizationId] });
+        }
+        queryClient.invalidateQueries({ queryKey: ['inventory-allocations'] });
         return data as { ok: boolean; from: string; to: string };
       } finally {
         setIsTransitioning(false);
       }
     },
-    []
+    [queryClient, activeOrganizationId]
   );
 
   return { transitionStatus, isTransitioning };

@@ -22,6 +22,7 @@ export interface BOMComponentDraft {
   affects_role: string | null;
   cut_axis: string | null;
   cut_delta_mm: number;
+  delta_mode?: 'subtract' | 'add' | 'info' | null;
   cut_delta_scope?: string | null;
   engineering_delta_source?: string | null;
   engineering_attr_key?: string | null;
@@ -60,18 +61,6 @@ export interface ComponentFormData {
   per_panel: boolean;
   condition_key: string;
   condition_value: string;
-}
-
-export interface EngineeringData {
-  depends_on_role: string;
-  affects_role: string;
-  cut_axis: 'length' | 'width' | 'height' | 'none';
-  cut_delta_mm: number | null;
-  cut_delta_scope: 'per_side' | 'per_item' | 'none';
-  engineering_delta_source: 'fixed' | 'derived';
-  engineering_attr_key: string;
-  engineering_scope: 'total' | 'per_side';
-  engineering_source_role: string;
 }
 
 export interface ChildFormData {
@@ -145,18 +134,6 @@ export const INITIAL_FORM_DATA: ComponentFormData = {
   per_panel: false,
   condition_key: '',
   condition_value: '',
-};
-
-export const INITIAL_ENGINEERING_DATA: EngineeringData = {
-  depends_on_role: '',
-  affects_role: '',
-  cut_axis: 'none',
-  cut_delta_mm: null,
-  cut_delta_scope: 'none',
-  engineering_delta_source: 'fixed',
-  engineering_attr_key: '',
-  engineering_scope: 'total',
-  engineering_source_role: '',
 };
 
 export const INITIAL_CHILD_FORM_DATA: ChildFormData = {

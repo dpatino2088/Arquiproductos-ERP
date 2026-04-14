@@ -1,3 +1,6 @@
+import { Fragment, useState } from 'react';
+import type { CutBreakdownItem, PanelCut, PanelDeduction } from './AssemblyDetail';
+
 interface RollerAssemblyDiagramProps {
   widthMm: number;
   heightMm: number;
@@ -17,6 +20,309 @@ interface RollerAssemblyDiagramProps {
   hardwareColor?: string | null;
   fabricName?: string | null;
   fabricLayers?: number;
+  cutBreakdown?: CutBreakdownItem[] | null;
+  bomTemplateCode?: string | null;
+}
+
+function formatRole(role: string): string {
+  return role
+    .split('_')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+const posLabel: Record<string, string> = { left: 'Izq', center: 'Centro', right: 'Der' };
+const posBg: Record<string, string> = {
+  left: 'bg-blue-50 text-blue-700',
+  center: 'bg-amber-50 text-amber-700',
+  right: 'bg-emerald-50 text-emerald-700',
+};
+
+function PanelCutsTable({ panels, isFabric }: { panels: PanelCut[]; isFabric?: boolean }) {
+  const [expandedPanel, setExpandedPanel] = useState<number | null>(null);
+  const formatSignedDeduction = (value: number) =>
+    value === 0 ? '—' : `${value > 0 ? '−' : '+'}${Math.abs(value).toFixed(1)}`;
+  if (!panels || panels.length === 0) return null;
+  return (
+    <div className="mt-1.5 border border-gray-100 rounded overflow-hidden">
+      <table className="w-full text-[10px]">
+        <thead>
+          <tr className="bg-gray-50 text-gray-500">
+            <th className="text-left px-2 py-1">Panel</th>
+            <th className="text-center px-2 py-1">Pos</th>
+            <th className="text-right px-2 py-1">Base</th>
+            <th className="text-right px-2 py-1 text-red-500">Desc.</th>
+            <th className="text-right px-2 py-1 font-bold text-blue-600">Corte</th>
+            {isFabric && <th className="text-right px-2 py-1 text-purple-600">Alto</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {panels.map((p) => {
+            const deds = (p.deductions ?? []) as PanelDeduction[];
+            const hasDeds = deds.length > 0;
+            const isOpen = expandedPanel === p.panel;
+            const panelDeduction = p.calc_ded ?? p.deduction;
+            return (
+              <Fragment key={p.panel}>
+                <tr
+                  className={`border-t border-gray-50 ${hasDeds ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                  onClick={() => hasDeds && setExpandedPanel(isOpen ? null : p.panel)}
+                >
+                  <td className="px-2 py-1 font-medium text-gray-700">
+                    <span className="inline-flex items-center gap-1">
+                      {hasDeds && (
+                        <svg className={`w-2.5 h-2.5 text-gray-400 transition-transform ${isOpen ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                        </svg>
+                      )}
+                      #{p.panel}
+                    </span>
+                  </td>
+                  <td className="px-2 py-1 text-center">
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${posBg[p.position] ?? ''}`}>
+                      {posLabel[p.position] ?? p.position}
+                    </span>
+                  </td>
+                  <td className="px-2 py-1 text-right text-gray-600">{p.base_mm.toFixed(1)}</td>
+                  <td className="px-2 py-1 text-right font-semibold text-red-600">
+                    {formatSignedDeduction(panelDeduction)}
+                  </td>
+                  <td className="px-2 py-1 text-right font-bold text-blue-700">{p.cut_mm.toFixed(1)}</td>
+                  {isFabric && (
+                    <td className="px-2 py-1 text-right text-purple-700">
+                      {p.cut_height != null ? p.cut_height.toFixed(1) : '—'}
+                    </td>
+                  )}
+                </tr>
+                {isOpen && deds.length > 0 && (
+                  <tr>
+                    <td colSpan={isFabric ? 6 : 5} className="px-3 py-1.5 bg-gray-50/50">
+                      <div className="font-mono text-[10px] space-y-0.5 pl-3">
+                        {deds.map((d, i) => (
+                          <div key={i} className="flex justify-between text-gray-600">
+                            <span>
+                              − {formatRole(d.role)}
+                              {d.qty > 1 ? ` ×${d.qty}` : ''}
+                              <span className="text-gray-400 ml-1">({d.sku})</span>
+                              {d.note && <span className="text-[9px] ml-1 text-amber-600">[{d.note}]</span>}
+                            </span>
+                            {d.mode === 'info' ? (
+                              <span className="text-slate-500">Info</span>
+                            ) : (
+                              <span className="text-red-600">{formatSignedDeduction(d.total)}</span>
+                            )}
+                          </div>
+                        ))}
+                        <div className="border-t border-gray-200 pt-0.5 flex justify-between font-semibold text-gray-800">
+                          <span>= Corte</span>
+                          <span className="text-blue-700">{p.cut_mm.toFixed(1)} mm</span>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function BreakdownItemRow({ item }: { item: CutBreakdownItem }) {
+  const [open, setOpen] = useState(false);
+  const isFabric = item.role === 'fabric';
+  const deductions = item.deductions ?? [];
+  const nonConditional = deductions.filter((d) => !d.conditional);
+  const conditional = deductions.filter((d) => d.conditional);
+  const hasPerPanel = item.per_panel && (item.panel_cuts?.length ?? 0) > 0;
+  const panelCount = item.panel_count ?? 1;
+
+  return (
+    <div className="border-b border-gray-100 last:border-b-0">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between px-3 py-2 hover:bg-gray-50 transition-colors"
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <svg
+            className={`w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
+          <span className="text-xs font-bold text-gray-800 truncate">{item.label}</span>
+          {item.sku !== '?' && (
+            <span className="text-[10px] text-gray-400 font-mono shrink-0">{item.sku}</span>
+          )}
+          <span
+            className={`text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0 ${
+              item.axis === 'height'
+                ? 'bg-purple-50 text-purple-600'
+                : item.axis === 'special'
+                  ? 'bg-amber-50 text-amber-600'
+                  : 'bg-blue-50 text-blue-600'
+            }`}
+          >
+            {item.axis === 'height' ? '↕ H' : item.axis === 'special' ? '⊞' : '↔ W'}
+          </span>
+          {hasPerPanel && (
+            <span className="text-[9px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-medium shrink-0">
+              {panelCount}p
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {!hasPerPanel && !isFabric && (
+            <span className="text-[11px] font-mono font-semibold text-blue-700">
+              {item.resolved_mm.toFixed(1)} mm
+            </span>
+          )}
+          {item.match !== undefined && (
+            <span
+              className={`text-[9px] px-1 py-0.5 rounded font-medium ${
+                item.match ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'
+              }`}
+            >
+              {item.match ? '✓' : '⚠'}
+            </span>
+          )}
+        </div>
+      </button>
+
+      {open && (
+        <div className="px-3 pb-2.5 pl-8 space-y-1.5">
+          <div className="font-mono text-[11px] leading-relaxed space-y-0.5">
+            {isFabric ? (
+              <>
+                {deductions.map((d, i) => (
+                  <div key={i} className="flex justify-between text-gray-600">
+                    <span>{d.label ?? formatRole(d.role)}</span>
+                    <span className={d.total > 0 ? 'text-green-600' : 'text-red-600'}>
+                      {d.total > 0 ? '+' : ''}{d.total.toFixed(1)} mm
+                    </span>
+                  </div>
+                ))}
+                {!hasPerPanel && (
+                  <>
+                    <div className="border-t border-gray-200 pt-1 flex justify-between font-semibold text-gray-900">
+                      <span>Ancho corte</span>
+                      <span className="text-blue-700">{(item.fabric_width_mm ?? item.resolved_mm).toFixed(1)} mm</span>
+                    </div>
+                    {item.resolved_height_mm != null && (
+                      <div className="flex justify-between font-semibold text-gray-900">
+                        <span>Alto corte</span>
+                        <span className="text-blue-700">{item.resolved_height_mm.toFixed(1)} mm</span>
+                      </div>
+                    )}
+                  </>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="flex justify-between text-gray-500 text-[10px]">
+                  <span>Ancho total: {item.base_label}</span>
+                  <span>{item.base_mm.toFixed(1)} mm</span>
+                </div>
+
+                {item.tolerance_mm !== 0 && (
+                  <div className="flex justify-between text-gray-600">
+                    <span>Tolerancia</span>
+                    <span className={item.tolerance_mm > 0 ? 'text-green-600' : 'text-orange-500'}>
+                      {item.tolerance_mm > 0 ? '+' : ''}{item.tolerance_mm.toFixed(1)} mm
+                    </span>
+                  </div>
+                )}
+
+                {(nonConditional.length > 0 || conditional.length > 0) && (
+                  <div className="text-[10px] text-gray-400 mt-1">Descuentos aplicables:</div>
+                )}
+                {nonConditional.map((d, i) => (
+                  <div key={`f-${i}`} className="flex justify-between text-gray-600">
+                    <span>
+                      − {formatRole(d.role)}
+                      {d.qty > 1 ? ` ×${d.qty}` : ''}
+                      <span className="text-gray-400 ml-1 text-[10px]">({d.sku})</span>
+                    </span>
+                    {d.mode === 'info' ? (
+                      <span className="text-slate-500">Info</span>
+                    ) : (
+                      <span className="text-red-600">−{Math.abs(d.total).toFixed(1)} mm</span>
+                    )}
+                  </div>
+                ))}
+                {conditional.length > 0 && (
+                  <div className="mt-0.5 pt-0.5 border-t border-dashed border-gray-200">
+                    {conditional.map((d, i) => (
+                      <div key={`c-${i}`} className="flex justify-between text-gray-500">
+                        <span>
+                          − {formatRole(d.role)}
+                          {d.qty > 1 ? ` ×${d.qty}` : ''}
+                          <span className="text-gray-400 ml-1 text-[10px]">({d.sku})</span>
+                          <span className="text-[9px] ml-1 text-amber-500">[cond]</span>
+                        </span>
+                        {d.mode === 'info' ? (
+                          <span className="text-slate-400">Info</span>
+                        ) : (
+                          <span className="text-red-400">−{Math.abs(d.total).toFixed(1)} mm</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {!hasPerPanel && (
+                  <>
+                    <div className="border-t border-gray-200 pt-1 flex justify-between font-semibold text-gray-900">
+                      <span>= Corte</span>
+                      <span className="text-blue-700">{item.resolved_mm.toFixed(1)} mm</span>
+                    </div>
+                    {item.instance_cut_mm != null && !item.match && (
+                      <div className="flex justify-between text-[10px] text-red-500">
+                        <span>Instancia almacenada</span>
+                        <span>{item.instance_cut_mm.toFixed(1)} mm</span>
+                      </div>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+          </div>
+
+          {hasPerPanel && (
+            <PanelCutsTable panels={item.panel_cuts!} isFabric={isFabric} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BreakdownSection({ items, templateCode }: { items: CutBreakdownItem[]; templateCode?: string | null }) {
+  if (!items || items.length === 0) return null;
+
+  return (
+    <div className="border border-gray-200 rounded-lg overflow-hidden">
+      <div className="px-3 py-2 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
+        <h5 className="text-xs font-semibold text-gray-700">Engineering Breakdown (Auditable)</h5>
+        {templateCode && (
+          <span className="text-[10px] font-mono text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
+            {templateCode}
+          </span>
+        )}
+      </div>
+      <div>
+        {items.map((item) => (
+          <BreakdownItemRow key={item.role} item={item} />
+        ))}
+      </div>
+      <div className="px-3 py-1.5 text-[10px] text-gray-400 bg-gray-50 border-t border-gray-100">
+        Datos: Template BOM cascade + FabricRules, verificado contra instance lines.
+      </div>
+    </div>
+  );
 }
 
 export default function RollerAssemblyDiagram({
@@ -38,6 +344,8 @@ export default function RollerAssemblyDiagram({
   hardwareColor,
   fabricName,
   fabricLayers,
+  cutBreakdown,
+  bomTemplateCode,
 }: RollerAssemblyDiagramProps) {
   const isMotor = operatingSystem === 'motorized' || operatingSystem === 'motor';
   const opSide = operatingSide ?? 'right';
@@ -53,15 +361,16 @@ export default function RollerAssemblyDiagram({
   const pTubeCuts = tubeCutsPerPanel && tubeCutsPerPanel.length === totalPanels
     ? tubeCutsPerPanel
     : null;
-  const pBarCuts = bottomBarCutsPerPanel && bottomBarCutsPerPanel.length === totalPanels
-    ? bottomBarCutsPerPanel
-    : null;
 
   const effectiveTubeCutMm = tubeCutMm != null ? Number(tubeCutMm) : widthMm;
-  const tubeDeductionMm = Math.max(0, widthMm - effectiveTubeCutMm);
 
-  const svgW = 520;
-  const svgH = isMultiPanel ? 350 : 320;
+  // Proportional SVG: aspect ratio clamped between 0.5 and 3
+  const maxSvgW = 540;
+  const aspectRatio = widthMm > 0 && heightMm > 0 ? widthMm / heightMm : 1.5;
+  const clamped = Math.max(0.5, Math.min(3, aspectRatio));
+  const svgW = maxSvgW;
+  const svgH = Math.max(240, Math.min(500, Math.round(maxSvgW / clamped)));
+
   const mx = 50;
   const my = 40;
   const drawW = svgW - mx * 2;
@@ -77,6 +386,8 @@ export default function RollerAssemblyDiagram({
 
   const scaleForDim = (mm: number) => `${mm.toFixed(1)}`;
   const panelColors = ['#dbeafe', '#ede9fe', '#fce7f3', '#fef3c7', '#d1fae5'];
+
+  const hasCutBreakdown = cutBreakdown && cutBreakdown.length > 0;
 
   return (
     <div className="space-y-3">
@@ -117,13 +428,11 @@ export default function RollerAssemblyDiagram({
             const cutLabel = pTubeCuts ? `${pTubeCuts[i]?.toFixed(0)}` : `${pw.toFixed(0)}`;
             const els = (
               <g key={`tube-panel-${i}`}>
-                {/* Tube segment */}
                 <rect x={xOff} y={my + cassetteH} width={pTubeW} height={tubeH} rx={2}
                   fill="#d1d5db" stroke="#9ca3af" strokeWidth={1} />
                 <text x={xOff + pTubeW / 2} y={my + cassetteH + tubeH / 2 + 3} textAnchor="middle" fontSize={5.5} fill="#4b5563">
                   {cutLabel} mm
                 </text>
-                {/* Intermediate bracket after each panel except the last */}
                 {i < totalPanels - 1 && (
                   <>
                     <rect x={xOff + pTubeW} y={my + cassetteH - 3} width={intBrkW} height={bracketH} rx={2}
@@ -139,7 +448,6 @@ export default function RollerAssemblyDiagram({
             return els;
           });
         })() : (
-          /* Single panel tube */
           <>
             <rect x={mx + brkW} y={my + cassetteH} width={drawW - brkW * 2} height={tubeH} rx={2}
               fill="#d1d5db" stroke="#9ca3af" strokeWidth={1} />
@@ -317,110 +625,17 @@ export default function RollerAssemblyDiagram({
         )}
       </svg>
 
-      {/* Engineering Cuts table */}
-      <div className="border border-gray-200 rounded-lg overflow-hidden">
-        <div className="px-3 py-2 bg-gray-50 border-b border-gray-100">
-          <h5 className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Engineering Cuts</h5>
-        </div>
-        {isMultiPanel && pTubeCuts ? (
-          /* Multi-panel cuts table */
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="text-[10px] text-gray-500 border-b border-gray-100 bg-gray-50">
-                <th className="text-left px-3 py-1.5">Panel</th>
-                <th className="text-center px-3 py-1.5">Panel Width</th>
-                <th className="text-center px-3 py-1.5 font-bold text-blue-700">Tube Cut</th>
-                {pBarCuts && <th className="text-center px-3 py-1.5 font-bold text-blue-700">Bar Cut</th>}
-                <th className="text-center px-3 py-1.5">Deduction</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pWidths.map((pw, i) => {
-                const tubeCut = pTubeCuts[i] ?? pw;
-                const barCut = pBarCuts?.[i];
-                const deduction = pw - tubeCut;
-                const position = i === 0 ? 'Left' : i === totalPanels - 1 ? 'Right' : 'Center';
-                return (
-                  <tr key={i} className="border-b border-gray-50">
-                    <td className="px-3 py-1.5 text-gray-700 font-medium">
-                      Panel {i + 1}
-                      <span className="text-[9px] text-gray-400 ml-1">({position})</span>
-                    </td>
-                    <td className="px-3 py-1.5 text-center">{pw.toFixed(0)} mm</td>
-                    <td className="px-3 py-1.5 text-center font-bold text-blue-700">{tubeCut.toFixed(1)} mm</td>
-                    {pBarCuts && (
-                      <td className="px-3 py-1.5 text-center font-bold text-blue-700">
-                        {barCut != null ? `${barCut.toFixed(1)} mm` : '—'}
-                      </td>
-                    )}
-                    <td className="px-3 py-1.5 text-center font-semibold text-red-600">
-                      −{Math.abs(deduction).toFixed(1)} mm
-                    </td>
-                  </tr>
-                );
-              })}
-              <tr className="bg-gray-50 border-t border-gray-200">
-                <td className="px-3 py-1.5 text-gray-700 font-bold">Total</td>
-                <td className="px-3 py-1.5 text-center font-medium">{widthMm.toFixed(0)} mm</td>
-                <td className="px-3 py-1.5 text-center font-bold text-blue-700">
-                  {pTubeCuts.reduce((s, v) => s + v, 0).toFixed(1)} mm
-                </td>
-                {pBarCuts && (
-                  <td className="px-3 py-1.5 text-center font-bold text-blue-700">
-                    {pBarCuts.reduce((s, v) => s + v, 0).toFixed(1)} mm
-                  </td>
-                )}
-                <td className="px-3 py-1.5 text-center font-semibold text-red-600">
-                  −{(widthMm - pTubeCuts.reduce((s, v) => s + v, 0)).toFixed(1)} mm
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        ) : (
-          /* Single-panel cuts table */
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="text-[10px] text-gray-500 border-b border-gray-100 bg-gray-50">
-                <th className="text-left px-3 py-1.5">Part</th>
-                <th className="text-center px-3 py-1.5">Finished Width</th>
-                <th className="text-center px-3 py-1.5 font-bold">Deduction</th>
-                <th className="text-center px-3 py-1.5 font-bold">Cut Width</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr className="border-b border-gray-50">
-                <td className="px-3 py-1.5 text-gray-700">Tube</td>
-                <td className="px-3 py-1.5 text-center">{widthMm.toFixed(1)} mm</td>
-                <td className="px-3 py-1.5 text-center font-semibold text-red-600">−{tubeDeductionMm.toFixed(1)} mm</td>
-                <td className="px-3 py-1.5 text-center font-bold text-blue-700">{effectiveTubeCutMm.toFixed(1)} mm</td>
-              </tr>
-              <tr className="border-b border-gray-50">
-                <td className="px-3 py-1.5 text-gray-700">Fabric</td>
-                <td className="px-3 py-1.5 text-center">{widthMm.toFixed(1)} mm</td>
-                <td className="px-3 py-1.5 text-center font-semibold text-red-600">
-                  {fabricCutMm != null ? `−${Math.max(0, widthMm - Number(fabricCutMm)).toFixed(1)} mm` : '—'}
-                </td>
-                <td className="px-3 py-1.5 text-center font-bold text-blue-700">
-                  {fabricCutMm != null ? `${Number(fabricCutMm).toFixed(1)} mm` : '—'}
-                </td>
-              </tr>
-              <tr>
-                <td className="px-3 py-1.5 text-gray-700">Bottom Bar</td>
-                <td className="px-3 py-1.5 text-center">{widthMm.toFixed(1)} mm</td>
-                <td className="px-3 py-1.5 text-center font-semibold text-red-600">
-                  {bottomBarCutMm != null ? `−${Math.max(0, widthMm - Number(bottomBarCutMm)).toFixed(1)} mm` : '—'}
-                </td>
-                <td className="px-3 py-1.5 text-center font-bold text-blue-700">
-                  {bottomBarCutMm != null ? `${Number(bottomBarCutMm).toFixed(1)} mm` : '—'}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        )}
-        <div className="px-3 py-1.5 text-[10px] text-gray-400 bg-gray-50 border-t border-gray-100">
-          Data source: Engineering cuts from BOM instance lines (MO/WO), not tube-type defaults.
-        </div>
-      </div>
+      {/* Auditable breakdown (from DB function) */}
+      {hasCutBreakdown ? (
+        <BreakdownSection items={cutBreakdown!} templateCode={bomTemplateCode} />
+      ) : (
+        <FallbackCutsTable
+          widthMm={widthMm}
+          effectiveTubeCutMm={effectiveTubeCutMm}
+          fabricCutMm={fabricCutMm}
+          bottomBarCutMm={bottomBarCutMm}
+        />
+      )}
 
       {/* Assembly specs summary */}
       <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs px-1">
@@ -436,6 +651,65 @@ export default function RollerAssemblyDiagram({
         <div className="flex justify-between"><span className="text-gray-500">Cassette</span><span className="font-medium">{hasCassette ? 'Yes' : 'No'}</span></div>
         <div className="flex justify-between"><span className="text-gray-500">Side channels</span><span className="font-medium">{hasSideChannel ? 'Yes' : 'No'}</span></div>
         <div className="flex justify-between"><span className="text-gray-500">Bottom bar</span><span className="font-medium">{hasBottomBar ? 'Yes' : 'No'}</span></div>
+      </div>
+    </div>
+  );
+}
+
+function FallbackCutsTable({
+  widthMm, effectiveTubeCutMm, fabricCutMm, bottomBarCutMm,
+}: {
+  widthMm: number;
+  effectiveTubeCutMm: number;
+  fabricCutMm?: number | null;
+  bottomBarCutMm?: number | null;
+}) {
+  const tubeDeductionMm = Math.max(0, widthMm - effectiveTubeCutMm);
+  return (
+    <div className="border border-gray-200 rounded-lg overflow-hidden">
+      <div className="px-3 py-2 bg-gray-50 border-b border-gray-100">
+        <h5 className="text-xs font-semibold text-gray-700">Engineering Cuts</h5>
+      </div>
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-[10px] text-gray-500 border-b border-gray-100 bg-gray-50">
+            <th className="text-left px-3 py-1.5">Part</th>
+            <th className="text-center px-3 py-1.5">Base</th>
+            <th className="text-center px-3 py-1.5 font-bold">Deduction</th>
+            <th className="text-center px-3 py-1.5 font-bold">Cut</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr className="border-b border-gray-50">
+            <td className="px-3 py-1.5 text-gray-700">Tube</td>
+            <td className="px-3 py-1.5 text-center">{widthMm.toFixed(1)} mm</td>
+            <td className="px-3 py-1.5 text-center font-semibold text-red-600">−{tubeDeductionMm.toFixed(1)} mm</td>
+            <td className="px-3 py-1.5 text-center font-bold text-blue-700">{effectiveTubeCutMm.toFixed(1)} mm</td>
+          </tr>
+          <tr className="border-b border-gray-50">
+            <td className="px-3 py-1.5 text-gray-700">Fabric</td>
+            <td className="px-3 py-1.5 text-center">{widthMm.toFixed(1)} mm</td>
+            <td className="px-3 py-1.5 text-center font-semibold text-red-600">
+              {fabricCutMm != null ? `−${Math.max(0, widthMm - Number(fabricCutMm)).toFixed(1)} mm` : '—'}
+            </td>
+            <td className="px-3 py-1.5 text-center font-bold text-blue-700">
+              {fabricCutMm != null ? `${Number(fabricCutMm).toFixed(1)} mm` : '—'}
+            </td>
+          </tr>
+          <tr>
+            <td className="px-3 py-1.5 text-gray-700">Bottom Bar</td>
+            <td className="px-3 py-1.5 text-center">{widthMm.toFixed(1)} mm</td>
+            <td className="px-3 py-1.5 text-center font-semibold text-red-600">
+              {bottomBarCutMm != null ? `−${Math.max(0, widthMm - Number(bottomBarCutMm)).toFixed(1)} mm` : '—'}
+            </td>
+            <td className="px-3 py-1.5 text-center font-bold text-blue-700">
+              {bottomBarCutMm != null ? `${Number(bottomBarCutMm).toFixed(1)} mm` : '—'}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div className="px-3 py-1.5 text-[10px] text-gray-400 bg-gray-50 border-t border-gray-100">
+        Fallback view — detailed breakdown unavailable for this BOM instance.
       </div>
     </div>
   );

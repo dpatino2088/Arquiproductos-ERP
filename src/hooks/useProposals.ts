@@ -28,6 +28,9 @@ export interface ProposalListItem {
   updated_at: string;
   created_at: string;
   total_amount?: number | null;
+  subtotal_amount?: number | null;
+  discount_amount?: number | null;
+  tax_amount?: number | null;
   customer_name?: string;
   quote_no?: string;
   /** coalesce(AppUsers.display_name, 'Legacy / Imported') for proposal creator */
@@ -36,6 +39,7 @@ export interface ProposalListItem {
   quote_created_at?: string | null;
   /** coalesce(AppUsers.display_name, 'Legacy / Imported') for quote creator */
   quote_created_by?: string;
+  quote_total_amount?: number | null;
   archived?: boolean;
 }
 
@@ -81,7 +85,7 @@ export function useProposalsList() {
 
       let query = supabase
         .from('Proposals')
-        .select('id, proposal_no, version_no, status, quote_id, dealer_id, customer_id, updated_at, created_at, total_amount, created_by_user_id, archived')
+        .select('id, proposal_no, version_no, status, quote_id, dealer_id, customer_id, updated_at, created_at, total_amount, subtotal_amount, discount_amount, tax_amount, created_by_user_id, archived')
         .eq('organization_id', activeOrganizationId)
         .or('deleted.is.false,deleted.is.null')
         .order('created_at', { ascending: false });
@@ -102,11 +106,11 @@ export function useProposalsList() {
       const quoteIds = [...new Set(rows.map((r) => r.quote_id))];
 
       const quotesRes = quoteIds.length
-        ? await supabase.from('Quotes').select('id, quote_no, status, created_at, created_by_user_id, customer_id, contact_id').in('id', quoteIds).or('deleted.is.false,deleted.is.null')
+        ? await supabase.from('Quotes').select('id, quote_no, status, created_at, created_by_user_id, customer_id, contact_id, total_amount').in('id', quoteIds).or('deleted.is.false,deleted.is.null')
         : { data: [] };
       if (signal?.aborted) return;
 
-      const quoteMap = new Map<string, { quote_no?: string; status?: string; created_at?: string; created_by_user_id?: string | null; customer_id?: string; contact_id?: string }>();
+      const quoteMap = new Map<string, { quote_no?: string; status?: string; created_at?: string; created_by_user_id?: string | null; customer_id?: string; contact_id?: string; total_amount?: number | null }>();
       (quotesRes.data || []).forEach((q: any) => {
         quoteMap.set(q.id, {
           quote_no: q.quote_no,
@@ -115,7 +119,21 @@ export function useProposalsList() {
           created_by_user_id: q.created_by_user_id ?? undefined,
           customer_id: q.customer_id ?? undefined,
           contact_id: q.contact_id ?? undefined,
+          total_amount: q.total_amount ?? null,
         });
+      });
+
+      const quoteLinesRes = quoteIds.length
+        ? await supabase.from('QuoteLines').select('quote_id, msrp, dealer_price_total').in('quote_id', quoteIds)
+        : { data: [] };
+      if (signal?.aborted) return;
+
+      const quoteDealerTotalMap = new Map<string, number>();
+      (quoteLinesRes.data || []).forEach((l: any) => {
+        const prev = quoteDealerTotalMap.get(l.quote_id) ?? 0;
+        const dealerTotal = Number(l.dealer_price_total ?? 0);
+        const msrpTotal = Number(l.msrp ?? 0);
+        quoteDealerTotalMap.set(l.quote_id, prev + (dealerTotal > 0 ? dealerTotal : msrpTotal));
       });
 
       const customerIds = new Set<string>();
@@ -156,6 +174,7 @@ export function useProposalsList() {
         r.quote_created_by = q?.created_by_user_id
           ? (appUsersMap.get(q.created_by_user_id) ?? 'Legacy / Imported')
           : 'Legacy / Imported';
+        r.quote_total_amount = quoteDealerTotalMap.get(r.quote_id) ?? null;
         const customerId = r.customer_id ?? q?.customer_id;
         r.customer_name = customerId ? customerMap.get(customerId) : undefined;
       });

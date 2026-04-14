@@ -28,6 +28,7 @@ import { ProductConfig } from '../product-config/types';
 import Label from '../../../components/ui/Label';
 import { useBOMTemplateOptionsSimple, filterTemplatesByComponent, RoleOption } from '../../../hooks/useBOMTemplateOptionsSimple';
 import { Image as ImageIcon, X } from 'lucide-react';
+import CatalogItemImage from '../../../components/ui/CatalogItemImage';
 import { RoleSelection, toRoleSelection } from '../../../lib/bom/selection';
 import { useOrganizationContext } from '../../../context/OrganizationContext';
 import { useUIStore } from '../../../stores/ui-store';
@@ -51,20 +52,7 @@ const HARDWARE_COLOR_OPTIONS = [
   { id: 'Silver', name: 'Silver', color: '#C0C0C0' },
 ];
 
-// Headbox policy per product type code
-// 'required' → always headbox=true, no toggle shown
-// 'optional' → toggle shown, user decides
-// 'none'     → headbox not applicable, hidden
-const HEADBOX_POLICY: Record<string, 'required' | 'optional' | 'none'> = {
-  'roller':       'optional',
-  'roller-shade': 'optional',
-  'roller_shade': 'optional',
-  'dual-shade':   'optional',
-  'dual_shade':   'optional',
-  'triple':       'required',
-  'triple-shade': 'required',
-  'triple_shade': 'required',
-};
+// HEADBOX_POLICY removed — headbox requirement is now data-driven from BOMComponents.is_required
 
 export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: HardwareStepProps) {
   const { activeOrganizationId } = useOrganizationContext();
@@ -73,12 +61,10 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
   const productType = (config as any).productType || (config as any).product_type || '';
   const isRollerShade = productType === 'roller_shade' || productType === 'roller-shade' || productType === 'ROLLER';
 
-  const headboxPolicy: 'required' | 'optional' | 'none' = HEADBOX_POLICY[productType] ?? 'none';
+  // headboxPolicy is derived from BOM data after headboxOptions load (see below)
 
-  // Always show these hardware options
   const showHardwareColor = true;
-  const showCassette = true;
-  const showSideChannel = isRollerShade;
+  // showCassette / showSideChannel are now derived after options load (see below)
   
   const mfrFilteredTemplates: string[] | null = Array.isArray((config as any)._manufacturer_filtered_templates)
     ? (config as any)._manufacturer_filtered_templates
@@ -356,7 +342,7 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
   }, [selectedBottomBar, filteredTemplateIds]);
   
   // ✅ Headbox: desde templates filtrados por Bottom Bar
-  const { options: headboxOptions, loading: loadingHeadbox } = useBOMTemplateOptionsSimple(
+  const { options: headboxOptions, loading: loadingHeadbox, roleRequired: headboxIsRequired } = useBOMTemplateOptionsSimple(
     productTypeId,
     currentHardwareColor,
     'headbox',
@@ -364,6 +350,12 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
     panelCount
   );
   
+  // Data-driven policies: derived from BOMComponents.is_required
+  const headboxPolicy: 'required' | 'optional' | 'none' =
+    headboxOptions.length === 0 && !loadingHeadbox ? 'none' :
+    headboxIsRequired ? 'required' : 'optional';
+  const showCassette = headboxOptions.length > 0 || loadingHeadbox;
+
   // ✅ Tri-state: UNSET (null/undefined) | NONE ('NONE') | SELECTED (uuid)
   const headboxItemId = (config as any).headbox_item_id;
   const selectedHeadbox = headboxOptions.find(opt => String(opt.id) === String(headboxItemId));
@@ -412,13 +404,14 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
   }, [headboxItemId, selectedHeadbox, templatesAfterBottomBar, templatesWithHeadbox]);
   
   // ✅ Side Channel: desde templates filtrados
-  const { options: sideChannelOptions, loading: loadingSideChannel } = useBOMTemplateOptionsSimple(
+  const { options: sideChannelOptions, loading: loadingSideChannel, roleRequired: sideChannelIsRequired } = useBOMTemplateOptionsSimple(
     productTypeId,
     currentHardwareColor,
     'side_channel',
     templatesAfterHeadbox,
     panelCount
   );
+  const showSideChannel = sideChannelOptions.length > 0 || loadingSideChannel;
   
   const sideChannelItemId = (config as any).side_channel_item_id;
   const selectedSideChannel = sideChannelOptions.find(opt => String(opt.id) === String(sideChannelItemId));
@@ -464,7 +457,7 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
   }, [sideChannelItemId, selectedSideChannel, templatesAfterHeadbox, templatesWithSideChannel]);
   
   // ✅ Bottom Channel: desde templates filtrados
-  const { options: bottomChannelOptions, loading: loadingBottomChannel } = useBOMTemplateOptionsSimple(
+  const { options: bottomChannelOptions, loading: loadingBottomChannel, roleRequired: bottomChannelIsRequired } = useBOMTemplateOptionsSimple(
     productTypeId,
     currentHardwareColor,
     'bottom_channel',
@@ -531,6 +524,17 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
     }
   }, [finalFilteredTemplates]);
   
+  // Sync hardware role policies into config so validation can read them
+  useEffect(() => {
+    if (loadingHeadbox || loadingSideChannel) return;
+    const updates: any = {};
+    if ((config as any)._headboxPolicy !== headboxPolicy) updates._headboxPolicy = headboxPolicy;
+    const scPolicy: 'required' | 'optional' | 'none' =
+      !showSideChannel ? 'none' : sideChannelIsRequired ? 'required' : 'optional';
+    if ((config as any)._sideChannelPolicy !== scPolicy) updates._sideChannelPolicy = scPolicy;
+    if (Object.keys(updates).length > 0) onUpdate(updates);
+  }, [headboxPolicy, showSideChannel, sideChannelIsRequired, loadingHeadbox, loadingSideChannel]);
+
   // ✅ DEBUG: Tri-state y conteos (solo dev)
   if (import.meta.env.DEV && hasHardwareColor && !loadingBottomBar) {
     const headboxState = headboxItemId == null ? 'UNSET' : headboxItemId === 'NONE' ? 'NONE' : 'SELECTED';
@@ -800,24 +804,14 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                       <div className="aspect-square flex items-center justify-center bg-white border-b border-gray-200">
                         {isPinned ? (
                           <span className="text-xs text-gray-500">Saved</span>
-                        ) : item.image_url ? (
-                          <img
+                        ) : (
+                          <CatalogItemImage
                             src={item.image_url}
                             alt={item.name || item.sku}
-                            className="w-full h-full object-contain p-2"
-                            onError={(e) => {
-                              e.currentTarget.style.display = 'none';
-                              const parent = e.currentTarget.parentElement;
-                              if (parent) {
-                                const fallback = document.createElement('div');
-                                fallback.className = 'flex items-center justify-center w-full h-full';
-                                fallback.innerHTML = '<svg class="w-12 h-12 text-gray-400" ...></svg>';
-                                parent.appendChild(fallback);
-                              }
-                            }}
+                            size="lg"
+                            objectFit="contain"
+                            className="w-full h-full !rounded-none !border-0"
                           />
-                        ) : (
-                          <ImageIcon className="w-12 h-12 text-gray-400" />
                         )}
                       </div>
                       <div className="p-4 bg-gray-100 flex-1">
@@ -927,15 +921,13 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                         className="cursor-pointer flex flex-col flex-1"
                       >
                         <div className="aspect-square flex items-center justify-center bg-white border-b border-gray-200">
-                          {item.image_url ? (
-                            <img
-                              src={item.image_url}
-                              alt={item.name || item.sku}
-                              className="w-full h-full object-contain p-2"
-                            />
-                          ) : (
-                            <ImageIcon className="w-12 h-12 text-gray-400" />
-                          )}
+                          <CatalogItemImage
+                            src={item.image_url}
+                            alt={item.name || item.sku}
+                            size="lg"
+                            objectFit="contain"
+                            className="w-full h-full !rounded-none !border-0"
+                          />
                         </div>
                         <div className="p-4 bg-gray-100 flex-1">
                           <h3 className={`font-semibold text-sm ${isSelected ? 'text-gray-900 font-semibold' : 'text-gray-900'}`}>
@@ -1051,15 +1043,13 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                         className="cursor-pointer flex flex-col flex-1"
                       >
                         <div className="aspect-square flex items-center justify-center bg-white border-b border-gray-200">
-                          {item.image_url ? (
-                            <img
-                              src={item.image_url}
-                              alt={item.name || item.sku}
-                              className="w-full h-full object-contain p-2"
-                            />
-                          ) : (
-                            <ImageIcon className="w-12 h-12 text-gray-400" />
-                          )}
+                          <CatalogItemImage
+                            src={item.image_url}
+                            alt={item.name || item.sku}
+                            size="lg"
+                            objectFit="contain"
+                            className="w-full h-full !rounded-none !border-0"
+                          />
                         </div>
                         <div className="p-4 bg-gray-100 flex-1">
                           <h3 className={`font-semibold text-sm ${isSelected ? 'text-gray-900 font-semibold' : 'text-gray-900'}`}>
@@ -1175,15 +1165,13 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                         className="cursor-pointer flex flex-col flex-1"
                       >
                         <div className="aspect-square flex items-center justify-center bg-white border-b border-gray-200">
-                          {item.image_url ? (
-                            <img
-                              src={item.image_url}
-                              alt={item.name || item.sku}
-                              className="w-full h-full object-contain p-2"
-                            />
-                          ) : (
-                            <ImageIcon className="w-12 h-12 text-gray-400" />
-                          )}
+                          <CatalogItemImage
+                            src={item.image_url}
+                            alt={item.name || item.sku}
+                            size="lg"
+                            objectFit="contain"
+                            className="w-full h-full !rounded-none !border-0"
+                          />
                         </div>
                         <div className="p-4 bg-gray-100 flex-1">
                           <h3 className={`font-semibold text-sm ${isSelected ? 'text-gray-900 font-semibold' : 'text-gray-900'}`}>
