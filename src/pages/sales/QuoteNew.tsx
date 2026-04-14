@@ -2693,9 +2693,13 @@ export default function QuoteNew() {
                   }
                 }
 
+                // Normalize labor_pct to decimal (0.05 = 5%, 5 = 5%) to avoid double /100.
+                const laborPctDecimal = Number(finalLaborPct) > 1 ? Number(finalLaborPct) / 100 : Number(finalLaborPct);
+                const laborPctPercent = laborPctDecimal * 100;
+
                 // ✅ PRIMERO: Sumar Fabric + BOM (sin labor)
-                // ✅ SEGUNDO: Aplicar labor_pct a la suma (Fabric + BOM) × (1 + labor_pct)
-                finalFabricPlusBomWithLabor = finalFabricPlusBom * (1 + (finalLaborPct / 100));
+                // ✅ SEGUNDO: Aplicar labor_pct a la suma (Fabric + BOM) × (1 + labor_pct_decimal)
+                finalFabricPlusBomWithLabor = finalFabricPlusBom * (1 + laborPctDecimal);
                 
                 // ✅ TERCERO: Sumar Accessories al final
                 // PRECIO FINAL = (Fabric + BOM) × (1 + labor_pct) + Accessories
@@ -2705,7 +2709,7 @@ export default function QuoteNew() {
                 const fabricPlusBom = finalFabricPlusBom;
                 const fabricPlusBomWithLabor = finalFabricPlusBomWithLabor;
                 const totalMSRP = finalTotalMSRP;
-                const laborPct = finalLaborPct;
+                const laborPct = laborPctPercent;
                 
                 // ✅ Costo total (solo para referencia/márgenes, NO precio de venta)
                 const fabricCost = savedCatalogItem?.cost_exw ? savedCatalogItem.cost_exw * savedWidth_m * savedHeight_m * savedQuantity : 0;
