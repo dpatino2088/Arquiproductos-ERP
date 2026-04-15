@@ -130,7 +130,7 @@ export default function Quotes() {
       .from('SalesOrders')
       .select('id, quote_id, sales_order_no, status')
       .in('quote_id', ids)
-      .eq('deleted', false)
+      .or('deleted.is.false,deleted.is.null')
       .then(({ data }: { data: any }) => {
         if (!data) return;
         const m: Record<string, { id: string; no: string; status: string }> = {};

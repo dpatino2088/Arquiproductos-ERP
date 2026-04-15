@@ -974,7 +974,7 @@ export default function QuoteNew() {
               .from('SalesOrders')
               .select('id', { count: 'exact', head: true })
               .eq('quote_id', quoteId)
-              .eq('deleted', false);
+              .or('deleted.is.false,deleted.is.null');
             hasSalesOrder = (count ?? 0) > 0;
           }
           setQuoteData({ ...data, _has_sales_order: hasSalesOrder });

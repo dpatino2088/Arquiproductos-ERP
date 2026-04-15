@@ -227,7 +227,11 @@ export function useClaimActions() {
     setIsActing(true);
     try {
       if (user?.name) {
-        await supabase.rpc('set_config', { setting_name: 'app.current_user_name', setting_value: user.name }).catch(() => {});
+        try {
+          await supabase.rpc('set_config', { setting_name: 'app.current_user_name', setting_value: user.name });
+        } catch {
+          // Non-blocking context hint for timeline attribution
+        }
       }
       const updates: Record<string, any> = { status: newStatus };
       if (newStatus === 'resolved' || newStatus === 'closed') {
@@ -269,7 +273,11 @@ export function useClaimActions() {
     setIsActing(true);
     try {
       if (user.name) {
-        await supabase.rpc('set_config', { setting_name: 'app.current_user_name', setting_value: user.name }).catch(() => {});
+        try {
+          await supabase.rpc('set_config', { setting_name: 'app.current_user_name', setting_value: user.name });
+        } catch {
+          // Non-blocking context hint for timeline attribution
+        }
       }
       const { data, error } = await supabase.rpc('create_service_mo', {
         p_claim_id: claimId,
