@@ -5,13 +5,11 @@ import { useWorkOrderTasks, type WorkOrderTask } from '../../hooks/useWorkOrderT
 import { useMoMaterialReadiness } from '../../hooks/useManufacturing';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useUIStore } from '../../stores/ui-store';
-import { useConfirmDialog } from '../../hooks/useConfirmDialog';
-import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import StatusBadge from '../../components/shared/StatusBadge';
 import { generateWorkOrderPDF } from '../../lib/pdf/workOrderPdf';
 import { generatePartLabelsPDF, type PartLabel } from '../../lib/pdf/partLabelPdf';
 import { router } from '../../lib/router';
-import { ChevronDown, ChevronRight, Printer, Tag, CheckCircle2, Circle, Loader2, Zap, ArrowUpRight, RefreshCw, RotateCcw, Package, CalendarDays, X, Clock } from 'lucide-react';
+import { ChevronDown, ChevronRight, Printer, Tag, CheckCircle2, Circle, Loader2, ArrowUpRight, RefreshCw, RotateCcw, Package, CalendarDays, X, Clock } from 'lucide-react';
 import AssemblyDetail from '../../components/manufacturing/assembly/AssemblyDetail';
 
 interface OperatorOption {
@@ -475,12 +473,10 @@ interface LineProductInfo {
 }
 
 export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', dealerName = '', productName = '', salesOrderNo, moStatus, isServiceMO, claimNo, moType }: WorkOrdersTabProps) {
-  const { tasks, loading, error, generateWorkOrders, refetch: refetchTasks } = useWorkOrderTasks(moId);
+  const { tasks, loading, error, refetch: refetchTasks } = useWorkOrderTasks(moId);
   const { readiness: materialReadiness } = useMoMaterialReadiness(moId);
   const { activeOrganizationId } = useOrganizationContext();
   const addNotification = useUIStore((s) => s.addNotification);
-  const { dialogState, showConfirm, closeDialog, handleConfirm } = useConfirmDialog();
-  const [generating, setGenerating] = useState(false);
   const [operators, setOperators] = useState<OperatorOption[]>([]);
   const [lineProductMap, setLineProductMap] = useState<Map<string, LineProductInfo>>(new Map());
   const [productSpecs, setProductSpecs] = useState<{ widthMm?: number; heightMm?: number; openingDirection?: string; operatingSystem?: string; productLine?: string; panelCount?: number } | undefined>(undefined);
@@ -494,7 +490,6 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
     });
   }, []);
   const materialsIncomplete = materialReadiness?.hasShortage === true;
-  const canGenerateByStatus = ['materials_ready', 'in_production'].includes(moStatus ?? '');
   const allOperatorsAssigned = useMemo(
     () => tasks.length > 0 && tasks.every((t) => Boolean(t.assigned_to_user_id)),
     [tasks],
@@ -644,39 +639,6 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
     addNotification({ type: 'success', title: 'Assigned', message: `Assigned ${displayName} to workstation.` });
   }, [operators, moId, refetchTasks, addNotification]);
 
-  const handleGenerate = async (regenerate = false) => {
-    if (!canGenerateByStatus) {
-      addNotification({
-        type: 'warning',
-        title: 'Status Required',
-        message: 'Work Orders can only be generated when MO is Material Ready, Planned, or In Production.',
-      });
-      return;
-    }
-    if (regenerate) {
-      const confirmed = await showConfirm({
-        title: 'Regenerate Work Orders',
-        message: 'This will delete existing work orders and regenerate them. Continue?',
-        confirmText: 'Regenerate',
-        cancelText: 'Cancel',
-        variant: 'warning',
-      });
-      if (!confirmed) return;
-    }
-    setGenerating(true);
-    try {
-      await generateWorkOrders(regenerate);
-    } catch (e) {
-      addNotification({
-        type: 'error',
-        title: 'Work Orders',
-        message: e instanceof Error ? e.message : 'Error generating work orders',
-      });
-    } finally {
-      setGenerating(false);
-    }
-  };
-
   const handleSaveSchedule = useCallback(async (updates: { id: string; planned_start_at: string }[]) => {
     try {
       if (materialsIncomplete) {
@@ -736,13 +698,10 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
             </span>
           </div>
         )}
-        <Zap className="h-10 w-10 text-gray-300 mx-auto mb-3" />
+        <Package className="h-10 w-10 text-gray-300 mx-auto mb-3" />
         <p className="text-sm text-gray-500 mb-2">No work orders generated yet.</p>
-        <p className="text-xs text-gray-400 mb-4">Work orders are auto-generated when a line is confirmed in the Lines tab.</p>
-        <button type="button" onClick={() => handleGenerate()} disabled={generating || !canGenerateByStatus} className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:opacity-90 disabled:opacity-60">
-          {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
-          Generate All Work Orders
-        </button>
+        <p className="text-xs text-gray-400 mb-1">Create Work Orders from the Lines tab using the line action.</p>
+        <p className="text-xs text-gray-400">This tab only manages existing Work Orders (operators, schedule, and execution).</p>
       </div>
     );
   }
@@ -1000,18 +959,6 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
           </div>
         );
       })}
-
-      <ConfirmDialog
-        isOpen={dialogState.isOpen}
-        onClose={closeDialog}
-        onConfirm={handleConfirm}
-        title={dialogState.title}
-        message={dialogState.message}
-        confirmText={dialogState.confirmText}
-        cancelText={dialogState.cancelText}
-        variant={dialogState.variant}
-        isLoading={dialogState.isLoading}
-      />
 
       {schedulePopup && (
         <SchedulePopup

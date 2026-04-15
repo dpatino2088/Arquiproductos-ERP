@@ -3,8 +3,11 @@ import QRCode from 'qrcode';
 
 export interface ThermalCutLabel {
   soNumber?: string | null;
+  salesOrderId?: string | null;
   moNumber: string;
   stationCode: 'CUT-PROFILE' | 'CUT-ROLL';
+  lineLabel?: string | null;
+  dealerName?: string | null;
   sku: string;
   itemName?: string | null;
   cutWidthMm?: number | null;
@@ -14,8 +17,18 @@ export interface ThermalCutLabel {
   refId?: string | null;
 }
 
-const LABEL_W_MM = 101.6;  // 4 inches
-const LABEL_H_MM = 25.4;   // 1 inch
+// Continuous stock geometry (mm)
+// Each page = one label pitch: 106 wide × 28 tall
+// Printable sticker area: 100 × 25, centered
+const STOCK_W_MM = 106;
+const STOCK_ROW_H_MM = 28;
+const STICKER_W_MM = 100;
+const STICKER_H_MM = 25;
+const STICKER_X_MM = (STOCK_W_MM - STICKER_W_MM) / 2; // 3 mm
+const STICKER_Y_MM = (STOCK_ROW_H_MM - STICKER_H_MM) / 2; // 1.5 mm
+
+// jsPDF format: [shortSide, longSide] → landscape makes width = longSide
+const PAGE_FORMAT: [number, number] = [STOCK_ROW_H_MM, STOCK_W_MM];
 
 function mm(n?: number | null): string {
   if (n == null || Number.isNaN(Number(n))) return '-';
@@ -30,18 +43,19 @@ function trim(s: string, max: number): string {
 export async function generateThermalCutStickersPDF(
   labels: ThermalCutLabel[],
 ): Promise<jsPDF> {
-  const doc = new jsPDF({
-    orientation: 'l',
-    unit: 'mm',
-    format: [LABEL_W_MM, LABEL_H_MM],
-  });
+  const doc = new jsPDF({ orientation: 'l', unit: 'mm', format: PAGE_FORMAT });
 
   for (let i = 0; i < labels.length; i++) {
-    const l = labels[i];
-    if (i > 0) doc.addPage([LABEL_W_MM, LABEL_H_MM], 'l');
+    if (i > 0) doc.addPage(PAGE_FORMAT, 'l');
 
-    const so = trim(l.soNumber ?? '-', 14);
+    const l = labels[i];
+    const labelX = STICKER_X_MM;
+    const labelY = STICKER_Y_MM;
+
+    const so = trim(l.soNumber ?? '-', 26);
     const mo = trim(l.moNumber ?? '-', 14);
+    const woLine = trim(l.lineLabel ?? '-', 8);
+    const dealer = trim(l.dealerName ?? '-', 24);
     const sku = trim(l.sku ?? '-', 22);
     const item = trim(l.itemName ?? '', 30);
     const station = l.stationCode === 'CUT-PROFILE' ? 'PROFILE' : 'ROLL';
@@ -53,11 +67,13 @@ export async function generateThermalCutStickersPDF(
       ? `CURTAIN: ${mm(l.curtainWidthMm)} x ${mm(l.curtainHeightMm)} mm`
       : '';
 
-    // QR code (right side)
-    const qrPayload = `SO:${so}|MO:${mo}|SKU:${l.sku}|CUT:${mm(l.cutWidthMm)}x${mm(l.cutHeightMm)}`;
+    const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+    const qrPayload = l.salesOrderId && baseUrl
+      ? `${baseUrl}/sales/orders/${l.salesOrderId}`
+      : `SO:${so}|MO:${mo}|L:${woLine}|SKU:${l.sku}|CUT:${mm(l.cutWidthMm)}x${mm(l.cutHeightMm)}`;
     const qrSize = 18;
-    const qrX = LABEL_W_MM - qrSize - 2;
-    const qrY = (LABEL_H_MM - qrSize) / 2;
+    const qrX = labelX + STICKER_W_MM - qrSize - 2;
+    const qrY = labelY + (STICKER_H_MM - qrSize) / 2;
 
     try {
       const qrDataUrl = await QRCode.toDataURL(qrPayload, { width: 200, margin: 1 });
@@ -67,38 +83,36 @@ export async function generateThermalCutStickersPDF(
       doc.text('QR err', qrX + 2, qrY + 8);
     }
 
-    const maxTextW = qrX - 4;
-    let y = 4.5;
+    const maxTextW = qrX - (labelX + 2);
+    let y = labelY + 3;
 
-    // Row 1: SO | MO | STATION
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7);
-    doc.text(`${so}  |  ${mo}  |  ${station}`, 2, y, { maxWidth: maxTextW });
-    y += 3.8;
+    doc.setFontSize(6.5);
+    doc.text(`${so}  |  ${mo}  |  ${woLine}  |  ${station}`, labelX + 2, y, { maxWidth: maxTextW });
+    y += 3.4;
 
-    // Row 2: SKU (prominent)
     doc.setFontSize(9);
-    doc.text(sku, 2, y, { maxWidth: maxTextW });
+    doc.text(sku, labelX + 2, y, { maxWidth: maxTextW });
     y += 4.2;
 
-    // Row 3: CUT dimension (bold)
     doc.setFontSize(8);
-    doc.text(cutStr, 2, y, { maxWidth: maxTextW });
-    y += 3.5;
+    doc.text(cutStr, labelX + 2, y, { maxWidth: maxTextW });
+    y += 3.2;
 
-    // Row 4: CURTAIN dimension
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6);
+    doc.text(`DEALER: ${dealer}`, labelX + 2, y, { maxWidth: maxTextW });
+    y += 2.8;
+
     if (curtainStr) {
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(6.5);
-      doc.text(curtainStr, 2, y, { maxWidth: maxTextW });
-      y += 3;
+      doc.setFontSize(5.8);
+      doc.text(curtainStr, labelX + 2, y, { maxWidth: maxTextW });
+      y += 2.6;
     }
 
-    // Row 5: item name (light)
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(5.5);
+    doc.setFontSize(5.2);
     doc.setTextColor(100);
-    doc.text(item, 2, y, { maxWidth: maxTextW });
+    doc.text(item, labelX + 2, y, { maxWidth: maxTextW });
     doc.setTextColor(0);
   }
 

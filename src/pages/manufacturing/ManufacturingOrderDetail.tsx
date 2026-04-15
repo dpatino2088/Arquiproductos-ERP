@@ -302,6 +302,20 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     }, 250);
   }, [refetch, fetchMOLines, fetchTimeline, fetchTaskProgress]);
 
+  const allocationSignature = useMemo(
+    () =>
+      allocations
+        .map((a) => `${a.catalog_item_id}:${Number(a.allocated_qty || 0)}:${String(a.status || '')}`)
+        .sort()
+        .join('|'),
+    [allocations]
+  );
+
+  useEffect(() => {
+    if (!moId) return;
+    refetchMaterialReadiness();
+  }, [moId, allocationSignature, refetchMaterialReadiness]);
+
   useEffect(() => {
     if (autoPromotingLinesRef.current) return;
     const promotable = moLines.filter((l) => {
@@ -556,7 +570,6 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     draft:           { next: 'reviewed',        label: 'Review' },
     reviewed:        { next: 'materials_ready', label: 'Mat. Ready' },
     confirmed:       { next: 'materials_ready', label: 'Mat. Ready' },
-    materials_ready: { next: 'in_production',   label: 'Start Prod.' },
     in_production:   { next: 'completed',       label: 'Complete' },
   };
 
@@ -583,21 +596,35 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     if (!moId || !line.sales_order_line_id) return;
     setAdvancingLineId(line.id);
 
-    const { data, error: rpcErr } = await supabase.rpc('advance_mo_line_status', {
-      p_line_id: line.id,
-      p_new_status: 'in_production',
+    const { data, error: rpcErr } = await supabase.rpc('generate_work_orders_for_line', {
+      p_mo_id: moId,
+      p_sales_order_line_id: line.sales_order_line_id,
+      p_regenerate: false,
     });
     setAdvancingLineId(null);
-    const result = data as { ok: boolean; error?: string; status?: string; wo_generated?: boolean } | null;
+    const result = data as { ok?: boolean; error?: string; tasks_created?: number; lines_created?: number } | null;
     if (rpcErr || !result?.ok) {
-      addNotification({ type: 'error', title: 'Cannot create WO', message: result?.error ?? rpcErr?.message ?? 'Unknown error' });
+      const message = result?.error ?? rpcErr?.message ?? 'Unknown error';
+      if (message.toLowerCase().includes('already exist')) {
+        await fetchTaskProgress();
+        addNotification({ type: 'info', title: 'WO already created', message: 'This line already has Work Orders.' });
+        return;
+      }
+      addNotification({ type: 'error', title: 'Cannot create WO', message });
       return;
     }
-    addNotification({ type: 'success', title: 'Work Order created', message: 'Line moved to In Production' });
-    setMoLines(prev => prev.map(l => l.id === line.id ? { ...l, status: 'in_production' } : l));
-    refetch();
-    fetchTaskProgress();
-  }, [moId, addNotification, refetch, fetchTaskProgress]);
+    await fetchTaskProgress();
+    setWoLineIds((prev) => {
+      const next = new Set(prev);
+      next.add(line.sales_order_line_id as string);
+      return next;
+    });
+    addNotification({
+      type: 'success',
+      title: 'Work Orders created',
+      message: `${Number(result.tasks_created ?? 0)} task(s) and ${Number(result.lines_created ?? 0)} component line(s) generated.`,
+    });
+  }, [moId, addNotification, fetchTaskProgress]);
 
 
   if (!moId) {
@@ -657,7 +684,6 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const customer = so?.DirectoryCustomers?.customer_name ?? '—';
   const dealer = so?.Dealers?.dealer_name ?? '—';
 
-  const materialsIncomplete = materialReadiness?.hasShortage === true;
   const materialsAllocatedComplete = (() => {
     if (!materials || materials.length === 0) return false;
     const requiredByItem = new Map<string, number>();
@@ -677,6 +703,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     }
     return true;
   })();
+  const materialsIncomplete = materialReadiness?.hasShortage === true && !materialsAllocatedComplete;
   const canSetMaterialsReady = !materialsIncomplete && materialsAllocatedComplete;
   const materialDemandEnabledStatuses = ['confirmed', 'procurement', 'materials_ready', 'in_production'] as const;
   const canViewMaterialDemand = materialDemandEnabledStatuses.includes(status as (typeof materialDemandEnabledStatuses)[number]);
@@ -703,11 +730,10 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     financialSummary.total_paid <= 0 ? 'unpaid' :
     financialSummary.balance_due > 0 ? 'partial' : 'paid';
 
+  const isTerminal = status === 'delivered' || status === 'cancelled';
+
   const actionItems: { label: string; onClick: () => void; danger?: boolean; disabled?: boolean; title?: string }[] = [];
-  if (isInternal && canWriteOverview && status !== 'cancelled' && status !== 'delivered') {
-    if (status === 'materials_ready') {
-      actionItems.push({ label: 'Start Production', onClick: () => handleTransition('in_production') });
-    }
+  if (isInternal && canWriteOverview && !isTerminal) {
     if (status === 'in_production' || status === 'completed') {
       actionItems.push({ label: 'Send to QC', onClick: () => handleTransition('quality_check') });
     }
@@ -1193,7 +1219,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
                         <StatusBadge status={lineStatus} type="moLineStatus" size="sm" />
                       </td>
                       <td className="px-4 py-3 text-center">
-                        {lineStatus === 'materials_ready' && (
+                        {!isTerminal && lineStatus === 'materials_ready' && (
                           <button
                             onClick={(e) => { e.stopPropagation(); handleCreateWO(line); }}
                             disabled={advancingLineId === line.id || hasWO}
@@ -1208,7 +1234,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
                             {advancingLineId === line.id ? 'Creating...' : hasWO ? 'WO Ready' : 'Create WO'}
                           </button>
                         )}
-                        {LINE_STATUS_FLOW[lineStatus] && lineStatus !== 'cancelled' && (
+                        {!isTerminal && LINE_STATUS_FLOW[lineStatus] && lineStatus !== 'cancelled' && lineStatus !== 'materials_ready' && (
                           <button
                             onClick={(e) => { e.stopPropagation(); handleAdvanceLine(line.id, lineStatus); }}
                             disabled={advancingLineId === line.id}
@@ -1221,7 +1247,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
                             {advancingLineId === line.id ? '...' : LINE_STATUS_FLOW[lineStatus].label}
                           </button>
                         )}
-                        {(lineStatus === 'reviewed' || lineStatus === 'confirmed') && !materialOk && (
+                        {!isTerminal && (lineStatus === 'reviewed' || lineStatus === 'confirmed') && !materialOk && (
                           <span className="text-[10px] text-gray-400">Waiting material</span>
                         )}
                       </td>
@@ -1244,6 +1270,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
           canViewCosts={canViewCosts}
           isServiceMO={isServiceMO}
           onExclusionsChanged={handleExclusionsChanged}
+          readOnly={isTerminal}
         />
       )}
 
@@ -1264,7 +1291,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
 
       {/* Notes tab */}
       {activeTab === 'notes' && (
-        <NotesTab moId={moId} canEdit={canWriteNotes} />
+        <NotesTab moId={moId} canEdit={canWriteNotes && !isTerminal} />
       )}
 
       {/* Timeline tab */}
@@ -1280,7 +1307,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
 
       {/* Attachments tab */}
       {activeTab === 'attachments' && moId && (
-        <AttachmentsTab moId={moId} organizationId={mo.organization_id} canEdit={canWriteAttachments} />
+        <AttachmentsTab moId={moId} organizationId={mo.organization_id} canEdit={canWriteAttachments && !isTerminal} />
       )}
     </DetailPageLayout>
   );

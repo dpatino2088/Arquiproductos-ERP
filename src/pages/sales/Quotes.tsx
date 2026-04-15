@@ -31,17 +31,6 @@ const formatCurrency = (amount: number) => {
   }).format(amount || 0);
 };
 
-const getSOStatusLabel = (rawStatus: string | null | undefined) => {
-  const normalized = String(rawStatus ?? '').toLowerCase();
-  if (normalized === 'open') return 'SO Open';
-  if (normalized === 'completed') return 'SO Completed';
-  // Keep terminology aligned with Sales Orders list: confirmed == Open
-  if (normalized === 'confirmed') return 'SO Open';
-  if (normalized === 'in_progress') return 'SO In Progress';
-  if (!normalized) return 'SO';
-  return `SO ${normalized.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}`;
-};
-
 export default function Quotes() {
   const { activeOrganizationId } = useOrganizationContext();
   const { isInternal } = useAccessContext();

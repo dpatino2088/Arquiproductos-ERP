@@ -14,7 +14,7 @@ import PanelCutDetail from '../../components/manufacturing/PanelCutDetail';
 import { optimize1D, type CutPiece } from '../../lib/cutOptimizer';
 import { optimize2D, type FabricPiece, type PlacedFabricPiece } from '../../lib/cutOptimizer2D';
 import { generateConsolidated1DPDF, generateCutPlanPDF, type ConsolidatedCutGroup } from '../../lib/pdf/generateCutPlanPDF';
-import { generateThermalCutStickersPDF, openThermalStickerPrintWindow, type ThermalCutLabel } from '../../lib/pdf/thermalCutStickerPdf';
+import { generateThermalCutStickersPDF, type ThermalCutLabel } from '../../lib/pdf/thermalCutStickerPdf';
 import { Scissors, Layers, RefreshCw, Loader2, ChevronDown, ChevronRight, Printer, MoreVertical, CheckCircle2, Circle, ArrowLeft } from 'lucide-react';
 import StatusTabs from '../../components/shared/StatusTabs';
 
@@ -34,6 +34,8 @@ interface PendingCut {
   sales_order_line_id: string | null;
   line_label: string | null;
   so_number: string | null;
+  so_id: string | null;
+  dealer_name: string | null;
   part_role: string;
   stock_length_mm: number | null;
   roll_width_m: number | null;
@@ -220,11 +222,21 @@ export default function CutOptimization() {
 
       const soIds = [...new Set((mos ?? []).map((m: any) => m.sales_order_id).filter(Boolean))];
       const { data: soRows } = soIds.length > 0
-        ? await supabase.from('SalesOrders').select('id, sales_order_no').in('id', soIds)
+        ? await supabase.from('SalesOrders').select('id, sales_order_no, dealer_id').in('id', soIds)
         : { data: [] };
       const soMap: Record<string, string> = {};
+      const soDealerIdMap: Record<string, string | null> = {};
       (soRows ?? []).forEach((so: any) => {
         soMap[so.id] = so.sales_order_no ?? null;
+        soDealerIdMap[so.id] = so.dealer_id ?? null;
+      });
+      const dealerIds = [...new Set((soRows ?? []).map((so: any) => so.dealer_id).filter(Boolean))];
+      const { data: dealerRows } = dealerIds.length > 0
+        ? await supabase.from('Dealers').select('id, dealer_name').in('id', dealerIds)
+        : { data: [] };
+      const dealerMap: Record<string, string | null> = {};
+      (dealerRows ?? []).forEach((d: any) => {
+        dealerMap[d.id] = d.dealer_name ?? null;
       });
 
       // Only keep tasks eligible to be listed in Cut Optimization:
@@ -355,6 +367,8 @@ export default function CutOptimization() {
           sales_order_line_id: taskToSol[l.task_id] ?? null,
           line_label: taskToLineLabel[l.task_id] ?? null,
           so_number: moToSoId[moId] ? soMap[moToSoId[moId] as string] ?? null : null,
+          so_id: moToSoId[moId] ?? null,
+          dealer_name: moToSoId[moId] ? dealerMap[soDealerIdMap[moToSoId[moId] as string] ?? ''] ?? null : null,
           part_role: l.component_role ?? '',
           stock_length_mm: ci?.stock_length_mm != null ? Number(ci.stock_length_mm) : null,
           roll_width_m: ci?.roll_width_m != null ? Number(ci.roll_width_m) : null,
@@ -858,8 +872,11 @@ export default function CutOptimization() {
           .forEach((c) => {
             labels.push({
               soNumber: c.so_number,
+              salesOrderId: c.so_id,
               moNumber: c.mo_number,
               stationCode: 'CUT-PROFILE',
+              lineLabel: c.line_label,
+              dealerName: c.dealer_name,
               sku: c.sku,
               itemName: c.item_name,
               cutWidthMm: c.cut_length_mm,
@@ -877,8 +894,11 @@ export default function CutOptimization() {
           if (drops.length === 0) {
             labels.push({
               soNumber: c.so_number,
+              salesOrderId: c.so_id,
               moNumber: c.mo_number,
               stationCode: 'CUT-ROLL',
+              lineLabel: c.line_label,
+              dealerName: c.dealer_name,
               sku: c.sku,
               itemName: c.item_name,
               cutWidthMm: c.cut_length_mm,
@@ -892,8 +912,11 @@ export default function CutOptimization() {
           drops.forEach((d, idx) => {
             labels.push({
               soNumber: c.so_number,
+              salesOrderId: c.so_id,
               moNumber: c.mo_number,
               stationCode: 'CUT-ROLL',
+              lineLabel: c.line_label,
+              dealerName: c.dealer_name,
               sku: c.sku,
               itemName: c.item_name,
               cutWidthMm: d.widthMm,
@@ -910,7 +933,7 @@ export default function CutOptimization() {
     if (labels.length === 0) return;
 
     const doc = await generateThermalCutStickersPDF(labels);
-    openThermalStickerPrintWindow(doc);
+    doc.save(`Stickers-${mode === 'profiles' ? 'Profiles' : 'Fabric'}-${new Date().toISOString().slice(0, 10)}.pdf`);
   }, [mode, selectedGroups]);
 
   /**
@@ -1273,8 +1296,11 @@ export default function CutOptimization() {
                         .filter(c => c.cut_length_mm != null && c.cut_length_mm > 0)
                         .map(c => ({
                           soNumber: c.so_number,
+                          salesOrderId: c.so_id,
                           moNumber: c.mo_number,
                           stationCode: 'CUT-PROFILE' as const,
+                          lineLabel: c.line_label,
+                          dealerName: c.dealer_name,
                           sku: c.sku,
                           itemName: c.item_name,
                           cutWidthMm: c.cut_length_mm,
@@ -1285,7 +1311,7 @@ export default function CutOptimization() {
                         }));
                       if (labels.length === 0) return;
                       const doc = await generateThermalCutStickersPDF(labels);
-                      openThermalStickerPrintWindow(doc);
+                      doc.save(`Stickers-${group.sku}-${new Date().toISOString().slice(0, 10)}.pdf`);
                     }}
                   />
                 </div>
@@ -1344,8 +1370,11 @@ export default function CutOptimization() {
                         if (drops.length === 0) {
                           labels.push({
                             soNumber: c.so_number,
+                            salesOrderId: c.so_id,
                             moNumber: c.mo_number,
                             stationCode: 'CUT-ROLL',
+                            lineLabel: c.line_label,
+                            dealerName: c.dealer_name,
                             sku: c.sku,
                             itemName: c.item_name,
                             cutWidthMm: c.cut_length_mm,
@@ -1359,8 +1388,11 @@ export default function CutOptimization() {
                         drops.forEach((d, idx) => {
                           labels.push({
                             soNumber: c.so_number,
+                            salesOrderId: c.so_id,
                             moNumber: c.mo_number,
                             stationCode: 'CUT-ROLL',
+                            lineLabel: c.line_label,
+                            dealerName: c.dealer_name,
                             sku: c.sku,
                             itemName: c.item_name,
                             cutWidthMm: d.widthMm,
@@ -1373,7 +1405,7 @@ export default function CutOptimization() {
                       });
                       if (labels.length === 0) return;
                       const doc = await generateThermalCutStickersPDF(labels);
-                      openThermalStickerPrintWindow(doc);
+                      doc.save(`Stickers-${group.sku}-${new Date().toISOString().slice(0, 10)}.pdf`);
                     }}
                   />
 

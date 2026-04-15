@@ -4653,7 +4653,7 @@ export default function QuoteNew() {
                             return (
                               <div className="whitespace-nowrap text-right">
                                 <span className="font-semibold inline-flex items-center gap-1">
-                                  {effective.isCommercialAdjusted && (
+                                  {!isPortal && effective.isCommercialAdjusted && (
                                     <span className="w-1.5 h-1.5 rounded-full bg-orange-400 shrink-0" title="Adjusted" />
                                   )}
                                   {formatCurrency(effective.lineTotal, watch('currency'))}
@@ -4674,13 +4674,15 @@ export default function QuoteNew() {
                             </button>
                             {!isOrdered && (
                               <>
-                                <button
-                                  onClick={() => openCommercialAdjustment(line)}
-                                  className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
-                                  title="Commercial adjustment"
-                                >
-                                  <Settings2 className="w-4 h-4" />
-                                </button>
+                                {!isPortal && (
+                                  <button
+                                    onClick={() => openCommercialAdjustment(line)}
+                                    className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                                    title="Commercial adjustment"
+                                  >
+                                    <Settings2 className="w-4 h-4" />
+                                  </button>
+                                )}
                                 <button
                                   onClick={() => handleDuplicateLine(line.id)}
                                   className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"

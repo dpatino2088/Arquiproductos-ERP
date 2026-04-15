@@ -24,6 +24,8 @@ interface MaterialsTabProps {
   isServiceMO?: boolean;
   /** Called after exclusion changes are saved so parent can refetch readiness */
   onExclusionsChanged?: () => void;
+  /** Locks all mutations (delivered / cancelled MOs) */
+  readOnly?: boolean;
 }
 
 // Category order matches the new BOM structure
@@ -81,6 +83,7 @@ export default function MaterialsTab({
   onBOMGenerated: _onBOMGenerated,
   isServiceMO = false,
   onExclusionsChanged,
+  readOnly = false,
 }: MaterialsTabProps) {
   const { materials, bomTotals, loading, error, hasBomInstances, hasBomLines, debugCounts, refetch: refetchMaterials } = useManufacturingMaterials(moId);
   const [showCosts, setShowCosts] = useState(false);
@@ -104,7 +107,7 @@ export default function MaterialsTab({
   const [expandedSkuId, setExpandedSkuId] = useState<string | null>(null);
   const [materialSubTab, setMaterialSubTab] = useState<'materials' | 'allocation'>('materials');
 
-  const canModifyAllocations = ['draft', 'confirmed', 'procurement', 'materials_ready'].includes(moStatus);
+  const canModifyAllocations = !readOnly && ['draft', 'confirmed', 'procurement', 'materials_ready'].includes(moStatus);
 
   const allocationMap = useMemo(() => {
     const map = new Map<string, number>();
@@ -524,7 +527,7 @@ export default function MaterialsTab({
               ({aggregatedBySku.filter(a => !getEffectiveExcluded(a.catalog_item_id, !!a.excluded)).length} of {aggregatedBySku.length} active)
             </span>
           </div>
-          {hasPendingExclusions && (
+          {hasPendingExclusions && !readOnly && (
             <button
               type="button"
               onClick={handleSaveExclusions}
@@ -579,7 +582,8 @@ export default function MaterialsTab({
                           type="checkbox"
                           checked={!isExcluded}
                           onChange={() => handleToggleExcluded(agg)}
-                          className="rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+                          disabled={readOnly}
+                          className="rounded border-gray-300 text-violet-600 focus:ring-violet-500 disabled:opacity-50 disabled:cursor-not-allowed"
                           onClick={(e) => e.stopPropagation()}
                         />
                       </td>
@@ -681,7 +685,8 @@ export default function MaterialsTab({
                                 type="checkbox"
                                 checked={!matExcluded}
                                 onChange={() => handleToggleExcluded(material)}
-                                className="rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+                                disabled={readOnly}
+                                className="rounded border-gray-300 text-violet-600 focus:ring-violet-500 disabled:opacity-50 disabled:cursor-not-allowed"
                                 onClick={(e) => e.stopPropagation()}
                               />
                             </td>
