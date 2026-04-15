@@ -444,7 +444,8 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       .select('id, claim_no, chargeable')
       .eq('id', mo.claim_id)
       .single()
-      .then(({ data }) => {
+      .then((res: { data: { id: string; claim_no: string; chargeable: boolean } | null }) => {
+        const { data } = res;
         setClaimInfo(data ? { id: data.id, claim_no: data.claim_no, chargeable: !!data.chargeable } : null);
       });
     supabase
@@ -454,7 +455,8 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       .eq('deleted', false)
       .neq('status', 'void')
       .limit(1)
-      .then(({ data }) => {
+      .then((res: { data: { id: string; status: string }[] | null }) => {
+        const { data } = res;
         setClaimInvoicePaid(data != null && data.length > 0 && (data[0] as any).status === 'paid');
       });
   }, [mo?.claim_id]);

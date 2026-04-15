@@ -175,7 +175,7 @@ export default function QuoteDetail() {
       .update({ priority: newPriority })
       .eq('id', quote.id);
     setPriorityOpen(false);
-    if (err) { addNotification({ type: 'error', message: 'Failed to update priority' }); return; }
+    if (err) { addNotification({ type: 'error', title: 'Error', message: 'Failed to update priority' }); return; }
     setQuote((prev) => prev ? { ...prev, priority: newPriority } : prev);
   }, [quote, addNotification]);
 

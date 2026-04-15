@@ -208,10 +208,10 @@ export default function ClaimNew() {
         }
       }
 
-      addNotification({ type: 'success', message: 'Claim created successfully' });
+      addNotification({ type: 'success', title: 'Claim Created', message: 'Claim created successfully' });
       router.navigate(`/service/claims/${claimId}`);
     } catch (err: any) {
-      addNotification({ type: 'error', message: err.message || 'Failed to create claim' });
+      addNotification({ type: 'error', title: 'Error', message: err.message || 'Failed to create claim' });
     } finally {
       setSubmitting(false);
     }

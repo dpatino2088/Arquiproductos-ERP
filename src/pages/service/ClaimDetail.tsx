@@ -68,7 +68,7 @@ export default function ClaimDetail() {
       .update({ priority: newPriority })
       .eq('id', claim.id);
     setPriorityOpen(false);
-    if (error) { addNotification({ type: 'error', message: 'Failed to update priority' }); return; }
+    if (error) { addNotification({ type: 'error', title: 'Error', message: 'Failed to update priority' }); return; }
     refetch();
   }, [claim, addNotification, refetch]);
 
@@ -90,7 +90,8 @@ export default function ClaimDetail() {
       .eq('deleted', false)
       .neq('status', 'void')
       .limit(1)
-      .then(({ data }) => {
+      .then((res: { data: { id: string; invoice_number: string; status: string; total: number }[] | null }) => {
+        const { data } = res;
         setClaimInvoice(data && data.length > 0 ? data[0] as any : null);
       });
   }, [claimId, claim?.chargeable]);
@@ -101,10 +102,10 @@ export default function ClaimDetail() {
     try {
       const { error } = await supabase.from('ServiceClaims').update({ chargeable: value }).eq('id', claim.id);
       if (error) throw error;
-      addNotification({ type: 'success', message: value ? 'Claim marked as chargeable' : 'Claim set to warranty (no charge)' });
+      addNotification({ type: 'success', title: 'Updated', message: value ? 'Claim marked as chargeable' : 'Claim set to warranty (no charge)' });
       refetch();
     } catch (err: any) {
-      addNotification({ type: 'error', message: err.message || 'Failed to update' });
+      addNotification({ type: 'error', title: 'Error', message: err.message || 'Failed to update' });
     } finally {
       setTogglingChargeable(false);
     }
@@ -118,10 +119,10 @@ export default function ClaimDetail() {
       if (error) throw error;
       const result = data as any;
       if (!result?.ok) throw new Error(result?.error ?? 'Failed to create invoice');
-      addNotification({ type: 'success', message: `Invoice ${result.invoice_number} created — $${result.total}` });
+      addNotification({ type: 'success', title: 'Invoice Created', message: `Invoice ${result.invoice_number} created — $${result.total}` });
       setClaimInvoice({ id: result.invoice_id, invoice_number: result.invoice_number, status: 'draft', total: result.total });
     } catch (err: any) {
-      addNotification({ type: 'error', message: err.message || 'Failed to generate invoice' });
+      addNotification({ type: 'error', title: 'Error', message: err.message || 'Failed to generate invoice' });
     } finally {
       setGeneratingInvoice(false);
     }
@@ -137,10 +138,10 @@ export default function ClaimDetail() {
     if (!claim) return;
     try {
       await transitionStatus(claim.id, newStatus);
-      addNotification({ type: 'success', message: `Claim status updated to ${newStatus.replace('_', ' ')}` });
-      refetch();
+      addNotification({ type: 'success', title: 'Status Updated', message: `Claim status updated to ${newStatus.replace('_', ' ')}` });
+      await refetch();
     } catch (err: any) {
-      addNotification({ type: 'error', message: err.message || 'Failed to update status' });
+      addNotification({ type: 'error', title: 'Error', message: err.message || 'Failed to update status' });
     }
   }, [claim, transitionStatus, addNotification, refetch]);
 
@@ -148,10 +149,10 @@ export default function ClaimDetail() {
     if (!claim) return;
     try {
       await updateResolution(claim.id, resolutionType, resolutionNotes);
-      addNotification({ type: 'success', message: 'Resolution updated' });
+      addNotification({ type: 'success', title: 'Updated', message: 'Resolution updated' });
       refetch();
     } catch (err: any) {
-      addNotification({ type: 'error', message: err.message || 'Failed to update resolution' });
+      addNotification({ type: 'error', title: 'Error', message: err.message || 'Failed to update resolution' });
     }
   }, [claim, resolutionType, resolutionNotes, updateResolution, addNotification, refetch]);
 
@@ -161,11 +162,11 @@ export default function ClaimDetail() {
     try {
       const result = await createServiceMO(claim.id, moType);
       if (result) {
-        addNotification({ type: 'success', message: `${moType === 'rework' ? 'Rework' : 'Replacement'} MO ${result.mo_number} created` });
+        addNotification({ type: 'success', title: 'MO Created', message: `${moType === 'rework' ? 'Rework' : 'Replacement'} MO ${result.mo_number} created` });
         refetch();
       }
     } catch (err: any) {
-      addNotification({ type: 'error', message: err.message || 'Failed to create service MO' });
+      addNotification({ type: 'error', title: 'Error', message: err.message || 'Failed to create service MO' });
     } finally {
       setCreatingMO(false);
     }
@@ -210,7 +211,7 @@ export default function ClaimDetail() {
     const s = claim.status;
     const btns: { label: string; status: ClaimStatus; variant?: string }[] = [];
     if (s === 'draft') {
-      btns.push({ label: 'Submit for Review', status: 'under_review' });
+      btns.push({ label: 'Send to Review', status: 'under_review' });
       btns.push({ label: 'Cancel', status: 'closed', variant: 'danger' });
     }
     if (isInternal) {
@@ -269,7 +270,7 @@ export default function ClaimDetail() {
                     : 'text-white bg-primary hover:bg-primary/90'
                 }`}
               >
-                {a.label}
+                {isActing ? 'Working…' : a.label}
               </button>
             ))}
           </div>
@@ -320,6 +321,33 @@ export default function ClaimDetail() {
                       </>
                     )}
                   </dd>
+                </div>
+                <div className="pt-2 border-t border-gray-100">
+                  <div className="flex justify-between items-start gap-3">
+                    <dt className="text-gray-500 pt-1">Status</dt>
+                    <dd className="text-right">
+                      <StatusBadge status={claim.status} type="claim" />
+                      {statusActions.length > 0 && (
+                        <div className="mt-2 flex flex-wrap justify-end gap-1.5">
+                          {statusActions.map((a) => (
+                            <button
+                              key={`inline-${a.status}`}
+                              type="button"
+                              onClick={() => handleTransition(a.status)}
+                              disabled={isActing}
+                              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+                                a.variant === 'danger'
+                                  ? 'text-red-600 border border-red-200 hover:bg-red-50'
+                                  : 'text-primary border border-primary/30 hover:bg-primary/5'
+                              }`}
+                            >
+                              {isActing ? 'Working…' : a.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </dd>
+                  </div>
                 </div>
                 <div className="flex justify-between">
                   <dt className="text-gray-500">Created</dt>

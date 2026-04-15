@@ -226,8 +226,8 @@ export function useClaimActions() {
   const transitionStatus = useCallback(async (claimId: string, newStatus: ClaimStatus) => {
     setIsActing(true);
     try {
-      if (user?.user_metadata?.display_name) {
-        await supabase.rpc('set_config', { setting_name: 'app.current_user_name', setting_value: user.user_metadata.display_name }).catch(() => {});
+      if (user?.name) {
+        await supabase.rpc('set_config', { setting_name: 'app.current_user_name', setting_value: user.name }).catch(() => {});
       }
       const updates: Record<string, any> = { status: newStatus };
       if (newStatus === 'resolved' || newStatus === 'closed') {
@@ -268,14 +268,14 @@ export function useClaimActions() {
     if (!user) return null;
     setIsActing(true);
     try {
-      if (user.user_metadata?.display_name) {
-        await supabase.rpc('set_config', { setting_name: 'app.current_user_name', setting_value: user.user_metadata.display_name }).catch(() => {});
+      if (user.name) {
+        await supabase.rpc('set_config', { setting_name: 'app.current_user_name', setting_value: user.name }).catch(() => {});
       }
       const { data, error } = await supabase.rpc('create_service_mo', {
         p_claim_id: claimId,
         p_mo_type: moType,
         p_user_id: user.id,
-        p_user_name: user.user_metadata?.display_name ?? null,
+        p_user_name: user.name ?? null,
       });
       if (error) throw error;
       const result = data as { ok?: boolean; mo_id?: string; mo_number?: string } | null;

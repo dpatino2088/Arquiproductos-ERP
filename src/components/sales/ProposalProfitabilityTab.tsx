@@ -194,7 +194,7 @@ export default function ProposalProfitabilityTab({
                       ))}
                     </Pie>
                     <Tooltip
-                      formatter={(value: number) => fmt(value, currency)}
+                      formatter={(value) => fmt(Number(value ?? 0), currency)}
                       contentStyle={{ fontSize: '13px', borderRadius: '8px', border: '1px solid #e5e7eb' }}
                     />
                   </PieChart>

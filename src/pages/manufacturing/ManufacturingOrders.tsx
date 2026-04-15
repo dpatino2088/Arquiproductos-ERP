@@ -283,7 +283,8 @@ export default function ManufacturingOrders() {
       .from('ServiceClaims')
       .select('id, claim_no')
       .in('id', claimIds)
-      .then(({ data }) => {
+      .then((res: { data: { id: string; claim_no: string }[] | null }) => {
+        const { data } = res;
         const map: Record<string, string> = {};
         for (const row of (data ?? []) as { id: string; claim_no: string }[]) {
           map[row.id] = row.claim_no;
