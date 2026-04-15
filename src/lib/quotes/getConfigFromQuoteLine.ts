@@ -23,6 +23,7 @@ const PT_MAP: Record<string, string> = {
   DRAPERY: 'drapery',
   AWNING: 'awning',
   FILM: 'window-film',
+  CATALOG: 'catalog',
 };
 
 export interface GetConfigFromQuoteLineParams {
@@ -147,6 +148,14 @@ export async function getConfigFromQuoteLine(
 
   if (productTypeUI === 'dual-shade') {
     config.frontFabric = { variantId: line.catalog_item_id };
+  }
+
+  if (productTypeUI === 'catalog') {
+    config.catalog_item_id = line.catalog_item_id;
+    config.name = line.name || '';
+    config.sku = line.sku || '';
+    config.unit_price = Number(line.unit_msrp) || 0;
+    config.qty = line.quantity || 1;
   }
 
   if (forEdit) {
@@ -314,6 +323,13 @@ export async function getConfigFromQuoteLine(
           config.accessories = accessories;
         } else if (Array.isArray(snap.accessories) && snap.accessories.length > 0) {
           config.accessories = snap.accessories;
+        }
+      }
+
+      // ── Catalog item: map unit_msrp → unit_price for CatalogItemStep ──
+      if (productTypeUI === 'catalog') {
+        if (config.unit_price == null || config.unit_price === 0) {
+          config.unit_price = Number(config.unit_msrp) || 0;
         }
       }
 

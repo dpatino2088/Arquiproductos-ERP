@@ -206,7 +206,7 @@ export default function CutOptimization() {
           .from('ManufacturingOrders')
           .select('id, manufacturing_order_no, status, sales_order_id')
           .in('id', moIds)
-          .not('status', 'in', '("draft","cancelled")'),
+          .not('status', 'in', '("draft","cancelled","delivered","completed")'),
       ]);
 
       const moMap: Record<string, string> = {};
@@ -1074,12 +1074,6 @@ export default function CutOptimization() {
         activeTab={cutStatus}
         onChange={(v) => setCutStatus(v as CutStatusFilter)}
       />
-
-      {ineligibleCutCount > 0 && (
-        <div className="px-3 py-2 rounded-md border border-amber-200 bg-amber-50 text-xs text-amber-800">
-          {ineligibleCutCount} cut line(s) hidden because WO/MO is not eligible (operator missing, calendar missing, or MO not in production).
-        </div>
-      )}
 
       {loading ? (
         <div className="flex items-center justify-center py-20">

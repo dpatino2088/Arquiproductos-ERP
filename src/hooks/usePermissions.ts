@@ -136,6 +136,10 @@ export const MODULE_PERMS = {
     view: ['settings.read'],
     edit: ['settings.write'],
   },
+  service: {
+    view: ['service.claims.read', 'sales.orders.read'],
+    edit: ['service.claims.write', 'sales.orders.write'],
+  },
 } as const;export type ModuleKey = keyof typeof MODULE_PERMS;
 
 /**
@@ -288,6 +292,7 @@ function moduleFromPath(pathname: string): ModuleKey | null {
   if (first === 'financials') return 'financials';
   if (first === 'my-financials') return 'financials';
   if (first === 'partners') return 'partners';
+  if (first === 'service') return 'service';
   if (first === 'settings') return 'settings';
   return null;
 }
@@ -327,6 +332,7 @@ export function getReadPermissionsForPath(pathname: string): string[] {
     '/financials/purchase-orders': ['financials.purchase_orders.read'],
     '/financials/bills': ['financials.bills.read'],
     '/financials/vendor-payments': ['financials.vendor_payments.read'],
+    '/service/claims': ['service.claims.read', 'sales.orders.read'],
   };
   const direct = routeMap[route];
   if (direct) return direct;

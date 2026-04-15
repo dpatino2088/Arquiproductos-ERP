@@ -11,7 +11,7 @@ import StatusBadge from '../../components/shared/StatusBadge';
 import { generateWorkOrderPDF } from '../../lib/pdf/workOrderPdf';
 import { generatePartLabelsPDF, type PartLabel } from '../../lib/pdf/partLabelPdf';
 import { router } from '../../lib/router';
-import { ChevronDown, ChevronRight, Printer, Tag, CheckCircle2, Circle, Loader2, Zap, ArrowUpRight, RefreshCw, Package, CalendarDays, X, Clock } from 'lucide-react';
+import { ChevronDown, ChevronRight, Printer, Tag, CheckCircle2, Circle, Loader2, Zap, ArrowUpRight, RefreshCw, RotateCcw, Package, CalendarDays, X, Clock } from 'lucide-react';
 import AssemblyDetail from '../../components/manufacturing/assembly/AssemblyDetail';
 
 interface OperatorOption {
@@ -27,11 +27,14 @@ interface WorkOrdersTabProps {
   productName?: string;
   salesOrderNo?: string;
   moStatus?: string;
+  isServiceMO?: boolean;
+  claimNo?: string;
+  moType?: string;
 }
 
 function StationCard({ task, moMeta, siblingTasks }: {
   task: WorkOrderTask;
-  moMeta: { moNumber: string; customerName: string; productName: string; salesOrderNo?: string };
+  moMeta: { moNumber: string; customerName: string; productName: string; salesOrderNo?: string; isServiceMO?: boolean; claimNo?: string; moType?: string; productSpecs?: { widthMm?: number; heightMm?: number; openingDirection?: string; operatingSystem?: string; productLine?: string; panelCount?: number } };
   siblingTasks?: WorkOrderTask[];
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -73,6 +76,10 @@ function StationCard({ task, moMeta, siblingTasks }: {
             salesOrderNo: moMeta.salesOrderNo,
             date: formatDate(new Date()),
             lines: task.lines.map((l) => ({ sku: l.sku ?? '', description: l.item_name ?? '', role: l.component_role ?? '', qty: l.qty, uom: l.uom, cutLength: l.cut_length_mm != null ? Number(l.cut_length_mm) : null, cutWidth: l.cut_width_mm != null ? Number(l.cut_width_mm) : null })),
+            isServiceMO: moMeta.isServiceMO,
+            claimNo: moMeta.claimNo,
+            moType: moMeta.moType,
+            productSpecs: moMeta.productSpecs,
           });
           pdf.save(`WO-${moMeta.moNumber}-${task.work_center?.code ?? 'station'}.pdf`);
         }} className="p-1 rounded hover:bg-gray-200 text-gray-400 flex-shrink-0" title="Print work sheet">
@@ -257,11 +264,11 @@ function SchedulePopup({
   const [saving, setSaving] = useState(false);
 
   const [perLineDates, setPerLineDates] = useState<Record<string, string>>(() => {
-    if (isGlobal) return {};
     const m: Record<string, string> = {};
     for (const t of tasks) m[t.id] = clampDateToToday(toDateInput(t.planned_start_at) || '', today);
     return m;
   });
+  const [stationOverrides, setStationOverrides] = useState<Record<string, string>>({});
 
   const computeDates = useCallback((base: string) => {
     const safeBase = clampDateToToday(base, today);
@@ -312,7 +319,16 @@ function SchedulePopup({
   const handleSave = async () => {
     setSaving(true);
     if (isGlobal) {
-      await onSave(computeDates(clampDateToToday(startDate, today)));
+      const base = computeDates(clampDateToToday(startDate, today));
+      const hasOverrides = Object.keys(stationOverrides).length > 0;
+      if (hasOverrides) {
+        for (const u of base) {
+          const t = tasks.find(x => x.id === u.id);
+          const code = t?.work_center?.code ?? '';
+          if (stationOverrides[code]) u.planned_start_at = stationOverrides[code];
+        }
+      }
+      await onSave(base);
     } else {
       const updates = tasks
         .filter(t => perLineDates[t.id])
@@ -347,7 +363,7 @@ function SchedulePopup({
                 type="date"
                 value={startDate}
                 min={today}
-                onChange={e => setStartDate(clampDateToToday(e.target.value, today))}
+                onChange={e => { setStartDate(clampDateToToday(e.target.value, today)); setStationOverrides({}); }}
                 className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 w-full text-gray-700 focus:ring-1 focus:ring-primary focus:border-primary"
               />
             ) : (
@@ -377,35 +393,49 @@ function SchedulePopup({
           {startDate && (
             <div className="space-y-1.5">
               <span className="text-[10px] text-gray-400 uppercase tracking-wide">Station Schedule</span>
-              {preview.map((st, idx) => (
-                <div key={st.code || idx} className="flex items-center gap-3 py-1.5 px-2 rounded bg-gray-50">
-                  <div className="flex-1 min-w-0">
-                    <span className="text-xs font-medium text-gray-700">{st.name}</span>
-                    {st.parallel && <span className="ml-1.5 text-[9px] text-blue-500 font-medium">PARALLEL</span>}
-                    {isGlobal && st.count > 1 && <span className="ml-1.5 text-[9px] text-gray-400">×{st.count} tasks</span>}
-                  </div>
-                  {isGlobal ? (
-                    <span className="text-xs text-gray-600 font-mono">{formatShortDate(st.date)}</span>
-                  ) : (
+              {preview.map((st, idx) => {
+                const overridden = isGlobal && !!stationOverrides[st.code];
+                const displayDate = isGlobal
+                  ? (stationOverrides[st.code] || st.date)
+                  : (perLineDates[tasks.find(t => t.work_center?.code === st.code)?.id ?? ''] || st.date);
+                return (
+                  <div key={st.code || idx} className={`flex items-center gap-3 py-1.5 px-2 rounded ${overridden ? 'bg-amber-50 border border-amber-100' : 'bg-gray-50'}`}>
+                    <div className="flex-1 min-w-0">
+                      <span className="text-xs font-medium text-gray-700">{st.name}</span>
+                      {st.parallel && <span className="ml-1.5 text-[9px] text-blue-500 font-medium">PARALLEL</span>}
+                      {isGlobal && st.count > 1 && <span className="ml-1.5 text-[9px] text-gray-400">×{st.count} tasks</span>}
+                    </div>
                     <input
                       type="date"
-                      value={perLineDates[tasks.find(t => t.work_center?.code === st.code)?.id ?? ''] || st.date}
+                      value={displayDate}
                       min={today}
                       onChange={e => {
-                        const taskId = tasks.find(t => t.work_center?.code === st.code)?.id;
-                        if (taskId) {
-                          const safeDate = clampDateToToday(e.target.value, today);
-                          setPerLineDates(prev => ({ ...prev, [taskId]: safeDate }));
+                        const safeDate = clampDateToToday(e.target.value, today);
+                        if (isGlobal) {
+                          setStationOverrides(prev => ({ ...prev, [st.code]: safeDate }));
+                        } else {
+                          const taskId = tasks.find(t => t.work_center?.code === st.code)?.id;
+                          if (taskId) setPerLineDates(prev => ({ ...prev, [taskId]: safeDate }));
                         }
                       }}
                       className="text-xs border border-gray-200 rounded px-2 py-1 w-32 text-gray-700 focus:ring-1 focus:ring-primary focus:border-primary"
                     />
-                  )}
-                </div>
-              ))}
+                    {overridden && (
+                      <button
+                        type="button"
+                        onClick={() => setStationOverrides(prev => { const n = { ...prev }; delete n[st.code]; return n; })}
+                        className="p-0.5 rounded hover:bg-amber-100 text-amber-500"
+                        title="Reset to auto"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
               {isGlobal && (
                 <p className="text-[10px] text-gray-400 mt-1">
-                  Cut stations run in parallel. Pick starts after cuts. Assembly starts after pick.
+                  Dates auto-calculate from start. Edit any station to override.
                 </p>
               )}
             </div>
@@ -444,7 +474,7 @@ interface LineProductInfo {
   sku: string | null;
 }
 
-export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', dealerName = '', productName = '', salesOrderNo, moStatus }: WorkOrdersTabProps) {
+export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', dealerName = '', productName = '', salesOrderNo, moStatus, isServiceMO, claimNo, moType }: WorkOrdersTabProps) {
   const { tasks, loading, error, generateWorkOrders, refetch: refetchTasks } = useWorkOrderTasks(moId);
   const { readiness: materialReadiness } = useMoMaterialReadiness(moId);
   const { activeOrganizationId } = useOrganizationContext();
@@ -453,6 +483,7 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
   const [generating, setGenerating] = useState(false);
   const [operators, setOperators] = useState<OperatorOption[]>([]);
   const [lineProductMap, setLineProductMap] = useState<Map<string, LineProductInfo>>(new Map());
+  const [productSpecs, setProductSpecs] = useState<{ widthMm?: number; heightMm?: number; openingDirection?: string; operatingSystem?: string; productLine?: string; panelCount?: number } | undefined>(undefined);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [schedulePopup, setSchedulePopup] = useState<{ label: string; tasks: WorkOrderTask[]; isGlobal: boolean } | null>(null);
   const toggleGroup = useCallback((key: string) => {
@@ -508,6 +539,35 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
         });
       }
       setLineProductMap(m);
+    })();
+  }, [moId]);
+
+  useEffect(() => {
+    if (!moId) return;
+    (async () => {
+      const { data: moLines } = await supabase
+        .from('ManufacturingOrderLines')
+        .select('configured_product_id')
+        .eq('manufacturing_order_id', moId)
+        .not('configured_product_id', 'is', null)
+        .limit(1);
+      const cpId = moLines?.[0]?.configured_product_id;
+      if (!cpId) return;
+      const { data: cp } = await supabase
+        .from('ConfiguredProducts')
+        .select('config_snapshot')
+        .eq('id', cpId)
+        .single();
+      if (!cp?.config_snapshot) return;
+      const snap = cp.config_snapshot as any;
+      setProductSpecs({
+        widthMm: snap.width_mm ?? snap.widthMm,
+        heightMm: snap.height_mm ?? snap.heightMm,
+        openingDirection: snap.opening_direction ?? snap.openingDirection,
+        operatingSystem: snap.operating_system ?? snap.operatingSystem,
+        productLine: snap.product_line ?? snap.productLine,
+        panelCount: Array.isArray(snap.panels) ? snap.panels.length : undefined,
+      });
     })();
   }, [moId]);
 
@@ -931,7 +991,7 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
                   <StationCard
                     key={task.id}
                     task={task}
-                    moMeta={{ moNumber, customerName, productName, salesOrderNo }}
+                    moMeta={{ moNumber, customerName, productName, salesOrderNo, isServiceMO, claimNo, moType, productSpecs }}
                     siblingTasks={group.tasks}
                   />
                 ))}

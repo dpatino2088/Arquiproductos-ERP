@@ -34,6 +34,10 @@ export default function DeliveryNoteDetail() {
   const [deliveryNotes, setDeliveryNotes] = useState('');
   const [completing, setCompleting] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [resolvedOrderInfo, setResolvedOrderInfo] = useState<{
+    soNo: string | null; moNo: string | null; claimNo: string | null;
+    claimDetail: string | null; customerName: string | null;
+  } | null>(null);
 
   const { deliveryNote, lines, loading, refetch, toggleLine, completeDelivery, isUpdatingLine } = useDeliveryNote(deliveryNoteId);
 
@@ -42,6 +46,59 @@ export default function DeliveryNoteDetail() {
   const soIdParam = params.get('so_id');
 
   const { manufacturingOrder: mo } = useManufacturingOrder(moIdParam ?? deliveryNote?.manufacturing_order_id ?? null);
+
+  useEffect(() => {
+    if (mo) return;
+    const soId = deliveryNote?.sales_order_id ?? soIdParam;
+    if (!soId) return;
+    (async () => {
+      const { data: soData } = await supabase
+        .from('SalesOrders')
+        .select('sales_order_no, DirectoryCustomers:customer_id(customer_name)')
+        .eq('id', soId)
+        .single();
+      const { data: moData } = await supabase
+        .from('ManufacturingOrders')
+        .select('manufacturing_order_no, claim_id')
+        .eq('sales_order_id', soId)
+        .eq('deleted', false)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      let claimNo: string | null = null;
+      let claimDetail: string | null = null;
+      if (moData?.claim_id) {
+        const { data: claimData } = await supabase
+          .from('ServiceClaims')
+          .select('claim_no, claim_type, resolution_type, description')
+          .eq('id', moData.claim_id)
+          .single();
+        claimNo = claimData?.claim_no ?? null;
+        if (claimData) {
+          const typeLabels: Record<string, string> = {
+            defect: 'Mfg. Defect', damage: 'Damage', wrong_size: 'Wrong Size',
+            wrong_color: 'Wrong Color', missing_parts: 'Missing Parts', other: 'Other',
+          };
+          const resLabels: Record<string, string> = {
+            repair: 'Repair', replace: 'Replacement', credit: 'Credit', none: '',
+          };
+          const parts: string[] = [];
+          if (claimData.claim_type) parts.push(typeLabels[claimData.claim_type] ?? claimData.claim_type);
+          if (claimData.resolution_type && claimData.resolution_type !== 'none')
+            parts.push(resLabels[claimData.resolution_type] ?? claimData.resolution_type);
+          if (claimData.description) parts.push(claimData.description);
+          claimDetail = parts.join(' — ') || null;
+        }
+      }
+      setResolvedOrderInfo({
+        soNo: (soData as any)?.sales_order_no ?? null,
+        moNo: moData?.manufacturing_order_no ?? null,
+        claimNo,
+        claimDetail,
+        customerName: (soData as any)?.DirectoryCustomers?.customer_name ?? null,
+      });
+    })();
+  }, [mo, deliveryNote?.sales_order_id, soIdParam]);
 
   useEffect(() => {
     registerSubmodules('Manufacturing', filteredSubmodules);
@@ -119,13 +176,16 @@ export default function DeliveryNoteDetail() {
       deliveredByDisplay = names.get(deliveryNote.delivered_by_user_id) ?? deliveredByDisplay;
     }
 
-    const customerName = mo?.SalesOrders?.DirectoryCustomers?.customer_name ?? null;
+    const customerName = mo?.SalesOrders?.DirectoryCustomers?.customer_name
+      ?? resolvedOrderInfo?.customerName ?? null;
 
     const pdfData: DeliveryNotePDFData = {
       delivery_number: deliveryNote.delivery_number,
       status: deliveryNote.status as 'completed' | 'partial' | 'pending',
-      mo_number: mo?.manufacturing_order_no ?? null,
-      so_number: mo?.SalesOrders?.sales_order_no ?? null,
+      mo_number: mo?.manufacturing_order_no ?? resolvedOrderInfo?.moNo ?? null,
+      so_number: mo?.SalesOrders?.sales_order_no ?? resolvedOrderInfo?.soNo ?? null,
+      claim_no: resolvedOrderInfo?.claimNo ?? null,
+      claim_detail: resolvedOrderInfo?.claimDetail ?? null,
       delivered_by: deliveredByDisplay,
       received_by: deliveryNote.received_by_name,
       notes: deliveryNote.notes,
@@ -176,7 +236,7 @@ export default function DeliveryNoteDetail() {
 
     const logoOpts = await loadLogoOptions();
     return generateDeliveryNotePDF(pdfData, pdfLines, logoOpts);
-  }, [deliveryNote, mo, lines, loadLogoOptions]);
+  }, [deliveryNote, mo, lines, loadLogoOptions, resolvedOrderInfo]);
 
   const uploadPdfToAttachments = useCallback(async (pdfBlob: Blob, fileName: string) => {
     if (!deliveryNote || !activeOrganizationId || !user) return;

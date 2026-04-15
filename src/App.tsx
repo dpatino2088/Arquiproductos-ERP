@@ -41,6 +41,10 @@ const TestDirectory = lazy(() => import('./pages/directory/TestDirectory'));
 
 const CompanyReports = lazy(() => import('./pages/reports/CompanyReports'));
 
+const ServiceClaims = lazy(() => import('./pages/service/Claims'));
+const ServiceClaimNew = lazy(() => import('./pages/service/ClaimNew'));
+const ServiceClaimDetail = lazy(() => import('./pages/service/ClaimDetail'));
+
 // New module pages
 const Sales = lazy(() => import('./pages/sales/Sales'));
 const SalesDirectory = lazy(() => import('./pages/sales/SalesDirectory'));
@@ -985,6 +989,20 @@ function App() {
       if (isAuthenticated) { setCurrentPage('partners-manufacturers'); } else { setCurrentPage('login'); }
     });
     
+    // Service routes
+    router.addRoute('/service', () => {
+      if (isAuthenticated) { router.navigate('/service/claims', false); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/service/claims', () => {
+      if (isAuthenticated) { setCurrentPage('service-claims'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/service/claims/new', () => {
+      if (isAuthenticated) { setCurrentPage('service-claim-new'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/service/claims/:id', () => {
+      if (isAuthenticated) { setCurrentPage('service-claim-detail'); } else { setCurrentPage('login'); }
+    });
+
     // Reports routes
     router.addRoute('/reports', () => {
       if (isAuthenticated) {
@@ -1436,6 +1454,13 @@ function App() {
       }
       case 'partners-manufacturers':
         return <RequireModule module="partners"><PartnerManufacturers /></RequireModule>;
+
+      case 'service-claims':
+        return <ServiceClaims />;
+      case 'service-claim-new':
+        return <ServiceClaimNew />;
+      case 'service-claim-detail':
+        return <ServiceClaimDetail />;
 
       case 'reports':
         return <CompanyReports />;

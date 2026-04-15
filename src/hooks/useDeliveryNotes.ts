@@ -121,30 +121,10 @@ export function useCreateDeliveryNote() {
               dnLines.push({
                 delivery_note_id: dn.id,
                 mo_line_id: ml.id,
-                line_type: 'product',
                 quantity_delivered: ml.quantity,
                 checked: false,
               });
             }
-          }
-        }
-
-        const { data: accessories } = await supabase
-          .from('SaleOrderAccessories')
-          .select('id, qty')
-          .eq('sales_order_id', salesOrderId)
-          .eq('deleted', false)
-          .eq('delivery_status', 'pending');
-
-        if (accessories) {
-          for (const acc of accessories) {
-            dnLines.push({
-              delivery_note_id: dn.id,
-              so_accessory_id: acc.id,
-              line_type: 'accessory',
-              quantity_delivered: acc.qty,
-              checked: false,
-            });
           }
         }
       } else if (moId) {
@@ -160,7 +140,6 @@ export function useCreateDeliveryNote() {
             dnLines.push({
               delivery_note_id: dn.id,
               mo_line_id: ml.id,
-              line_type: 'product',
               quantity_delivered: ml.quantity,
               checked: false,
             });

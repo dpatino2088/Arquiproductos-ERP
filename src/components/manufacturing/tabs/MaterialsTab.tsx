@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useManufacturingMaterials } from '../../../hooks/useManufacturing';
 import { formatCurrency } from '../../../lib/utils';
 import type { ManufacturingOrderStatus } from '../../../hooks/useManufacturing';
+import { supabase } from '../../../lib/supabase/client';
 import { useOrganizationContext } from '../../../context/OrganizationContext';
 import { useWarehouses } from '../../../hooks/useWarehouses';
 import { useInventoryAvailability } from '../../../hooks/useInventoryAvailability';
@@ -20,6 +21,9 @@ interface MaterialsTabProps {
   canViewCosts?: boolean;
   /** Called after BOM is generated so parent can refresh MO lines / timeline */
   onBOMGenerated?: () => void;
+  isServiceMO?: boolean;
+  /** Called after exclusion changes are saved so parent can refetch readiness */
+  onExclusionsChanged?: () => void;
 }
 
 // Category order matches the new BOM structure
@@ -59,6 +63,8 @@ interface AggregatedMaterial {
   totalCost: number;
   unitMsrp: number | undefined;
   totalMsrp: number;
+  excluded?: boolean;
+  bomInstanceLineIds: string[];
 }
 
 const TABLE_HEAD_CELL = 'py-3 px-6 font-medium text-xs';
@@ -73,8 +79,10 @@ export default function MaterialsTab({
   currency = 'USD',
   canViewCosts = false,
   onBOMGenerated: _onBOMGenerated,
+  isServiceMO = false,
+  onExclusionsChanged,
 }: MaterialsTabProps) {
-  const { materials, bomTotals, loading, error, hasBomInstances, hasBomLines, debugCounts } = useManufacturingMaterials(moId);
+  const { materials, bomTotals, loading, error, hasBomInstances, hasBomLines, debugCounts, refetch: refetchMaterials } = useManufacturingMaterials(moId);
   const [showCosts, setShowCosts] = useState(false);
   useEffect(() => {
     if (!canViewCosts && showCosts) setShowCosts(false);
@@ -114,6 +122,7 @@ export default function MaterialsTab({
         existing.totalQty += m.qty;
         existing.totalCost += m.total_cost_exw;
         existing.totalMsrp += (m.total_msrp || 0);
+        existing.bomInstanceLineIds.push(m.bom_instance_line_id);
       } else {
         map.set(m.catalog_item_id, {
           catalog_item_id: m.catalog_item_id,
@@ -126,14 +135,77 @@ export default function MaterialsTab({
           totalCost: m.total_cost_exw,
           unitMsrp: m.unit_msrp,
           totalMsrp: m.total_msrp || 0,
+          excluded: !!m.excluded,
+          bomInstanceLineIds: [m.bom_instance_line_id],
         });
       }
     }
     return [...map.values()].sort((a, b) => a.sku.localeCompare(b.sku));
   }, [materials]);
 
+  const [localExclusions, setLocalExclusions] = useState<Map<string, boolean> | null>(null);
+  const [isSavingExclusions, setIsSavingExclusions] = useState(false);
+
+  const getEffectiveExcluded = useCallback((catalogItemId: string, serverExcluded: boolean) => {
+    return localExclusions?.get(catalogItemId) ?? serverExcluded;
+  }, [localExclusions]);
+
+  const handleToggleExcluded = useCallback((agg: AggregatedMaterial) => {
+    setLocalExclusions(prev => {
+      const next = new Map(prev ?? new Map());
+      const current = next.get(agg.catalog_item_id) ?? !!agg.excluded;
+      next.set(agg.catalog_item_id, !current);
+      return next;
+    });
+  }, []);
+
+  const hasPendingExclusions = useMemo(() => {
+    if (!localExclusions || localExclusions.size === 0) return false;
+    return aggregatedBySku.some(agg => {
+      const local = localExclusions.get(agg.catalog_item_id);
+      return local !== undefined && local !== !!agg.excluded;
+    });
+  }, [localExclusions, aggregatedBySku]);
+
+  const handleSaveExclusions = useCallback(async () => {
+    if (!localExclusions || localExclusions.size === 0) return;
+    setIsSavingExclusions(true);
+    try {
+      const toExclude: string[] = [];
+      const toInclude: string[] = [];
+      for (const agg of aggregatedBySku) {
+        const local = localExclusions.get(agg.catalog_item_id);
+        if (local !== undefined && local !== !!agg.excluded) {
+          if (local) toExclude.push(...agg.bomInstanceLineIds);
+          else toInclude.push(...agg.bomInstanceLineIds);
+        }
+      }
+      const promises: Promise<unknown>[] = [];
+      if (toExclude.length > 0) {
+        promises.push(supabase.from('BOMInstanceLines').update({ excluded: true }).in('id', toExclude));
+      }
+      if (toInclude.length > 0) {
+        promises.push(supabase.from('BOMInstanceLines').update({ excluded: false }).in('id', toInclude));
+      }
+      await Promise.all(promises);
+      setLocalExclusions(null);
+      refetchMaterials();
+      onExclusionsChanged?.();
+      useUIStore.getState().addNotification({ type: 'success', title: 'Materials updated', message: `${toExclude.length + toInclude.length} lines updated.` });
+    } catch {
+      useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: 'Could not save material changes.' });
+    } finally {
+      setIsSavingExclusions(false);
+    }
+  }, [localExclusions, aggregatedBySku, refetchMaterials, onExclusionsChanged]);
+
+  const activeSkus = useMemo(() => {
+    if (!isServiceMO) return aggregatedBySku;
+    return aggregatedBySku.filter(agg => !getEffectiveExcluded(agg.catalog_item_id, !!agg.excluded));
+  }, [aggregatedBySku, isServiceMO, getEffectiveExcluded]);
+
   const allocStats = useMemo(() => {
-    return aggregatedBySku.reduce((acc, agg) => {
+    return activeSkus.reduce((acc, agg) => {
       const allocated = allocationMap.get(agg.catalog_item_id) ?? 0;
       const gap = Math.round((agg.totalQty - allocated) * 10000) / 10000;
       acc.totalRequired += agg.totalQty;
@@ -143,7 +215,7 @@ export default function MaterialsTab({
       else acc.shortage++;
       return acc;
     }, { totalRequired: 0, totalAllocated: 0, ok: 0, partial: 0, shortage: 0 });
-  }, [aggregatedBySku, allocationMap]);
+  }, [activeSkus, allocationMap]);
 
   const allocPct = useMemo(() => {
     return allocStats.totalRequired > 0
@@ -444,6 +516,27 @@ export default function MaterialsTab({
         </div>
       </div>
 
+      {isServiceMO && (
+        <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 mb-4 flex items-center justify-between gap-4">
+          <div className="text-sm text-gray-700">
+            <strong>Service MO:</strong> Uncheck materials not needed for this claim. Only checked items will generate demand and be issued to production.
+            <span className="text-gray-400 ml-1">
+              ({aggregatedBySku.filter(a => !getEffectiveExcluded(a.catalog_item_id, !!a.excluded)).length} of {aggregatedBySku.length} active)
+            </span>
+          </div>
+          {hasPendingExclusions && (
+            <button
+              type="button"
+              onClick={handleSaveExclusions}
+              disabled={isSavingExclusions}
+              className="flex-shrink-0 inline-flex items-center gap-1.5 px-4 py-1.5 rounded-md text-sm font-medium bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors"
+            >
+              {isSavingExclusions ? 'Saving…' : 'Save Changes'}
+            </button>
+          )}
+        </div>
+      )}
+
       {viewMode === 'sku' ? (
         /* ===== BY SKU VIEW (aggregated summary) ===== */
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
@@ -456,6 +549,9 @@ export default function MaterialsTab({
             <table className="w-full table-fixed">
               <thead className={TABLE_HEAD_STICKY}>
                 <tr>
+                  {isServiceMO && (
+                    <th className={`text-center text-gray-900 ${TABLE_HEAD_CELL} w-[60px]`}>Use</th>
+                  )}
                   <th className={`text-left text-gray-900 ${TABLE_HEAD_CELL} w-[160px]`}>SKU</th>
                   <th className={`text-left text-gray-900 ${TABLE_HEAD_CELL}`}>Description</th>
                   <th className={`text-left text-gray-900 ${TABLE_HEAD_CELL} w-[140px]`}>Role</th>
@@ -473,8 +569,21 @@ export default function MaterialsTab({
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {aggregatedBySku.map((agg) => (
-                  <tr key={agg.catalog_item_id} className="hover:bg-gray-50">
+                {aggregatedBySku.map((agg) => {
+                  const isExcluded = getEffectiveExcluded(agg.catalog_item_id, !!agg.excluded);
+                  return (
+                  <tr key={agg.catalog_item_id} className={`hover:bg-gray-50 ${isExcluded ? 'opacity-40' : ''}`}>
+                    {isServiceMO && (
+                      <td className={`${TABLE_BODY_CELL} text-center w-[60px]`}>
+                        <input
+                          type="checkbox"
+                          checked={!isExcluded}
+                          onChange={() => handleToggleExcluded(agg)}
+                          className="rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </td>
+                    )}
                     <td className={`${TABLE_BODY_CELL} text-gray-900 font-mono w-[160px]`}>{agg.sku}</td>
                     <td className={`${TABLE_BODY_CELL} text-gray-700 truncate`}>{agg.item_name}</td>
                     <td className={`${TABLE_BODY_CELL} text-gray-700 w-[140px]`}>{agg.part_role}</td>
@@ -502,7 +611,8 @@ export default function MaterialsTab({
                       </>
                     )}
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -541,6 +651,9 @@ export default function MaterialsTab({
                   <table className="w-full table-fixed">
                     <thead className={TABLE_HEAD_STICKY}>
                       <tr>
+                        {isServiceMO && (
+                          <th className={`text-center text-gray-900 ${TABLE_HEAD_CELL} w-[60px]`}>Use</th>
+                        )}
                         <th className={`text-left text-gray-900 ${TABLE_HEAD_CELL} w-[160px]`}>SKU</th>
                         <th className={`text-left text-gray-900 ${TABLE_HEAD_CELL}`}>Description</th>
                         <th className={`text-left text-gray-900 ${TABLE_HEAD_CELL} w-[140px]`}>Role</th>
@@ -558,8 +671,21 @@ export default function MaterialsTab({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
-                      {categoryMaterials.map((material) => (
-                        <tr key={material.catalog_item_id} className="hover:bg-gray-50">
+                      {categoryMaterials.map((material) => {
+                        const matExcluded = getEffectiveExcluded(material.catalog_item_id, !!material.excluded);
+                        return (
+                        <tr key={material.catalog_item_id} className={`hover:bg-gray-50 ${matExcluded ? 'opacity-40' : ''}`}>
+                          {isServiceMO && (
+                            <td className={`${TABLE_BODY_CELL} text-center w-[60px]`}>
+                              <input
+                                type="checkbox"
+                                checked={!matExcluded}
+                                onChange={() => handleToggleExcluded(material)}
+                                className="rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                            </td>
+                          )}
                           <td className={`${TABLE_BODY_CELL} text-gray-900 font-mono w-[160px]`}>{material.sku || 'N/A'}</td>
                           <td className={`${TABLE_BODY_CELL} text-gray-700 truncate`}>{material.item_name || 'N/A'}</td>
                           <td className={`${TABLE_BODY_CELL} text-gray-700 w-[140px]`}>{material.part_role || 'N/A'}</td>
@@ -587,7 +713,8 @@ export default function MaterialsTab({
                             </>
                           )}
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -651,7 +778,7 @@ export default function MaterialsTab({
       {/* ===== INVENTORY ALLOCATION ===== */}
       {materialSubTab === 'allocation' && materials.length > 0 && (() => {
         const searchLc = allocSearch.toLowerCase();
-        const filteredSkus = aggregatedBySku.filter(agg => {
+        const filteredSkus = activeSkus.filter(agg => {
           if (searchLc && !agg.sku.toLowerCase().includes(searchLc) && !agg.item_name.toLowerCase().includes(searchLc)) return false;
           if (allocFilter === 'all') return true;
           const allocated = allocationMap.get(agg.catalog_item_id) ?? 0;
@@ -697,7 +824,7 @@ export default function MaterialsTab({
             {/* Summary bar */}
             <div className="px-4 py-3 border-b bg-gray-50/50">
               <div className="flex items-center gap-4 mb-2">
-                <span className="text-xs font-medium text-gray-700">{aggregatedBySku.length} SKUs</span>
+                <span className="text-xs font-medium text-gray-700">{activeSkus.length} SKUs</span>
                 <span className="text-xs text-green-700 font-medium">{allocStats.ok} OK</span>
                 {allocStats.partial > 0 && (
                   <span className="text-xs text-amber-700 font-medium">{allocStats.partial} Partial</span>
@@ -736,7 +863,7 @@ export default function MaterialsTab({
                       allocFilter === f ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
                     }`}
                   >
-                    {f === 'all' ? `All (${aggregatedBySku.length})` : f === 'shortages' ? `Shortages (${allocStats.shortage + allocStats.partial})` : `OK (${allocStats.ok})`}
+                    {f === 'all' ? `All (${activeSkus.length})` : f === 'shortages' ? `Shortages (${allocStats.shortage + allocStats.partial})` : `OK (${allocStats.ok})`}
                   </button>
                 ))}
               </div>

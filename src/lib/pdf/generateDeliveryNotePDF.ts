@@ -24,6 +24,8 @@ export interface DeliveryNotePDFData {
   status: 'completed' | 'partial' | 'pending';
   mo_number: string | null;
   so_number: string | null;
+  claim_no: string | null;
+  claim_detail: string | null;
   delivered_by: string | null;
   received_by: string | null;
   notes: string | null;
@@ -154,8 +156,12 @@ export function generateDeliveryNotePDF(
     leftY += lineH + interlineMm;
   };
 
-  if (data.mo_number) drawLeftRow('MO:', data.mo_number);
-  if (data.so_number) drawLeftRow('Sales Order:', data.so_number);
+  if (data.claim_no) {
+    drawLeftRow('Order:', data.claim_no);
+    if (data.so_number) drawLeftRow('Original SO:', data.so_number);
+  } else if (data.so_number) {
+    drawLeftRow('Order:', data.so_number);
+  }
   drawLeftRow('Delivered by:', data.delivered_by ?? '—');
   drawLeftRow('Received by:', data.received_by ?? '—');
 
@@ -315,8 +321,26 @@ export function generateDeliveryNotePDF(
 
   yPos = (doc as any).lastAutoTable?.finalY ?? yPos + 40;
 
+  // ── Service claim note (before signature) ──
+  if (data.claim_detail) {
+    yPos += 6;
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(100, 100, 100);
+    doc.text('Note:', marginX, yPos);
+    doc.setFont('helvetica', 'normal');
+    const noteX = marginX + doc.getTextWidth('Note: ') + 1;
+    const wrappedLines = doc.splitTextToSize(data.claim_detail, usableWidth - (noteX - marginX));
+    wrappedLines.forEach((line: string) => {
+      doc.text(line, noteX, yPos);
+      yPos += 3.5;
+    });
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(9);
+  }
+
   // ── Signature section ──
-  const sigY = Math.max(yPos + 20, pageHeight - 60);
+  const sigY = Math.max(yPos + 14, pageHeight - 60);
 
   doc.setDrawColor(150, 150, 150);
   doc.setLineWidth(0.3);

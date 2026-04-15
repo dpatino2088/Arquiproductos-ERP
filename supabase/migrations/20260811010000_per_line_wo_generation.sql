@@ -40,6 +40,7 @@ DECLARE
   v_require_linear boolean;
   v_is_pick       boolean;
   v_routed_bils   uuid[] := ARRAY[]::uuid[];
+  v_assembly_lines int := 0;
 BEGIN
   SELECT mo.*, mo.organization_id AS org_id INTO v_mo
   FROM "ManufacturingOrders" mo
@@ -81,12 +82,11 @@ BEGIN
   LOOP
     v_rule := v_wc.routing_rule;
 
-    -- ASSEMBLY station
+    -- ASSEMBLY station: includes all active BOM lines as reference
     IF (v_rule->>'is_assembly')::boolean IS TRUE THEN
       INSERT INTO "WorkOrderTasks" (organization_id, manufacturing_order_id, work_center_id, sequence, status, sales_order_line_id)
       VALUES (v_org_id, p_mo_id, v_wc.id, v_wc.sequence, 'pending', p_sales_order_line_id)
       RETURNING id INTO v_assembly_id;
-      v_task_count := v_task_count + 1;
 
       INSERT INTO "WorkOrderTaskLines"
         (task_id, bom_instance_line_id, catalog_item_id, sku, item_name, component_role, qty, uom, cut_length_mm, cut_width_mm)
@@ -96,13 +96,21 @@ BEGIN
       LEFT JOIN "CatalogItems" ci ON ci.id = bil.resolved_part_id
       WHERE bi.manufacturing_order_id = p_mo_id
         AND bi.sales_order_line_id = p_sales_order_line_id
-        AND bil.deleted = false;
+        AND bil.deleted = false
+        AND COALESCE(bil.excluded, false) = false;
 
-      v_line_count := v_line_count + (SELECT count(*) FROM "WorkOrderTaskLines" WHERE task_id = v_assembly_id);
+      SELECT count(*) INTO v_assembly_lines FROM "WorkOrderTaskLines" WHERE task_id = v_assembly_id;
+
+      IF v_assembly_lines = 0 THEN
+        DELETE FROM "WorkOrderTasks" WHERE id = v_assembly_id;
+      ELSE
+        v_task_count := v_task_count + 1;
+        v_line_count := v_line_count + v_assembly_lines;
+      END IF;
       CONTINUE;
     END IF;
 
-    -- PICK station
+    -- PICK station: only active (non-excluded) BOM lines not routed to a cutting station
     v_is_pick := COALESCE((v_rule->>'is_pick')::boolean, false);
     IF v_is_pick THEN
       v_task_id := NULL;
@@ -115,6 +123,7 @@ BEGIN
         WHERE bi.manufacturing_order_id = p_mo_id
           AND bi.sales_order_line_id = p_sales_order_line_id
           AND bil.deleted = false
+          AND COALESCE(bil.excluded, false) = false
           AND bil.id <> ALL(v_routed_bils)
       LOOP
         IF v_task_id IS NULL THEN
@@ -158,6 +167,7 @@ BEGIN
       WHERE bi.manufacturing_order_id = p_mo_id
         AND bi.sales_order_line_id = p_sales_order_line_id
         AND bil.deleted = false
+        AND COALESCE(bil.excluded, false) = false
     LOOP
       v_matched := false;
 

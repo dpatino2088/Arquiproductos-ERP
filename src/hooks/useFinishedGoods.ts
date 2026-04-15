@@ -24,6 +24,7 @@ export interface FinishedGoodLine {
   catalog_item_name: string | null;
   catalog_item_sku: string | null;
   released_at: string | null;
+  claim_id: string | null;
 }
 
 export interface FinishedGoodsMOGroup {
@@ -45,6 +46,7 @@ export interface FinishedGoodsSOGroup {
   readyProductLines: number;
   totalAccessories: number;
   deliveredAccessories: number;
+  hasServiceMOOnly: boolean;
 }
 
 interface SalesOrderLookupRow {
@@ -90,7 +92,7 @@ export function useFinishedGoods() {
             id, manufacturing_order_id, delivery_status, quantity, delivered_qty, delivered_at,
             sales_order_line_id,
             ManufacturingOrders!inner (
-              id, organization_id, manufacturing_order_no, status, sales_order_id, released_at, deleted
+              id, organization_id, manufacturing_order_no, status, sales_order_id, released_at, deleted, claim_id
             ),
             SaleOrderLines (
               id, description, product_type, area, position, catalog_item_id
@@ -172,6 +174,7 @@ export function useFinishedGoods() {
             catalog_item_name: ci?.name ?? null,
             catalog_item_sku: ci?.sku ?? null,
             released_at: mo?.released_at ?? null,
+            claim_id: mo?.claim_id ?? null,
           };
         });
 
@@ -200,6 +203,7 @@ export function useFinishedGoods() {
             catalog_item_name: ci?.name ?? null,
             catalog_item_sku: ci?.sku ?? null,
             released_at: null,
+            claim_id: null,
           };
         });
 
@@ -239,6 +243,9 @@ export function useFinishedGoods() {
           moMap.get(moId)!.lines.push(pl);
         }
 
+        const allProductClaimIds = productLines.map(l => l.claim_id).filter(Boolean);
+        const hasServiceMOOnly = allProductClaimIds.length > 0 && allProductClaimIds.length === productLines.length;
+
         result.push({
           sales_order_id: soId,
           sales_order_no: firstProduct.sales_order_no ?? 'N/A',
@@ -251,6 +258,7 @@ export function useFinishedGoods() {
           readyProductLines: productLines.filter(l => l.delivery_status === 'ready').length,
           totalAccessories: accessoryLines.length,
           deliveredAccessories: accessoryLines.filter(l => l.delivery_status === 'delivered').length,
+          hasServiceMOOnly,
         });
       }
 

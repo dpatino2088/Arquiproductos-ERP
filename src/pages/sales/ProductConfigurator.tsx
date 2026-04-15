@@ -1029,7 +1029,16 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
           // Preparar config_snapshot con todos los datos necesarios
           // ✅ CRÍTICO: Todos los SKUs deben ser EXACTOS (trim, case-sensitive)
           // ✅ CRÍTICO: hardware_color debe ser EXACTO (normalizado)
-          const panelsList = Array.isArray(configAny.panels) ? configAny.panels : (configAny.panels ? [configAny.panels] : []);
+          let panelsList = Array.isArray(configAny.panels) ? [...configAny.panels] : (configAny.panels ? [configAny.panels] : []);
+
+          // Drapery center-opening → split into left + right stacks
+          const openingDir = configAny.openingDirection || configAny.opening_direction || null;
+          if (String(configAny.productType || '').toLowerCase() === 'drapery' && openingDir === 'center' && panelsList.length <= 1) {
+            const totalWidth = panelsList[0]?.width_mm || configAny.width_mm || 0;
+            const halfWidth = Math.round(totalWidth / 2);
+            panelsList = [{ width_mm: halfWidth }, { width_mm: halfWidth }];
+          }
+
           const panelCount = configAny.measurements?.panel_count ?? (panelsList.length || 1);
           const widthTotalMm = configAny.measurements?.width_total_mm ?? panelsList.reduce((s: number, p: any) => s + (p?.width_mm || 0), 0);
           const measurements = configAny.measurements ?? {
@@ -1491,7 +1500,7 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
                   disabled={!!(isSubmitting || !canProceed())}
                   className="px-6 py-2 bg-green-600 text-white rounded-lg transition-colors text-sm font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {isSubmitting ? 'Adding...' : 'Add to Quote'}
+                  {isSubmitting ? (isEditingMode ? 'Updating...' : 'Adding...') : (isEditingMode ? 'Update Line' : 'Add to Quote')}
                 </button>
               )}
             </div>

@@ -31,6 +31,9 @@ interface ManufacturingOrderItem {
   scheduledEndDate?: string | null;
   priority: string;
   createdAt: string;
+  moType?: string | null;
+  claimId?: string | null;
+  orderRef: string;
 }
 
 // ============================================================================
@@ -64,6 +67,7 @@ export default function ManufacturingOrders() {
   const [statusTab, setStatusTab] = useState('all');
   const [materialReadinessMap, setMaterialReadinessMap] = useState<Record<string, { status: string; has_shortage: boolean }>>({});
   const [moLineCountMap, setMoLineCountMap] = useState<Record<string, number>>({});
+  const [claimNoMap, setClaimNoMap] = useState<Record<string, string>>({});
 
   const nonArchivedOrders = useMemo(
     () => manufacturingOrders.filter((mo) => !mo.archived),
@@ -130,21 +134,28 @@ export default function ManufacturingOrders() {
     }
 
     return manufacturingOrders
-      .map(mo => ({
-        id: mo.id,
-        manufacturingOrderNo: mo.manufacturing_order_no,
-        status: mo.status,
-        salesOrderId: mo.sales_order_id ?? null,
-        saleOrderNo: mo.SalesOrders?.sales_order_no ?? 'N/A',
-        dealerName: mo.SalesOrders?.Dealers?.dealer_name ?? 'N/A',
-        customerName: mo.SalesOrders?.DirectoryCustomers?.customer_name ?? '',
-        archived: !!mo.archived,
-        scheduledStartDate: mo.planned_start_at ?? null,
-        scheduledEndDate: mo.planned_end_at ?? null,
-        priority: mo.priority ?? 'normal',
-        createdAt: mo.created_at,
-      }));
-  }, [manufacturingOrders]);
+      .map(mo => {
+        const isService = mo.mo_type === 'rework' || mo.mo_type === 'replacement';
+        const claimNo = mo.claim_id ? claimNoMap[mo.claim_id] : null;
+        return {
+          id: mo.id,
+          manufacturingOrderNo: mo.manufacturing_order_no,
+          status: mo.status,
+          salesOrderId: mo.sales_order_id ?? null,
+          saleOrderNo: mo.SalesOrders?.sales_order_no ?? 'N/A',
+          dealerName: mo.SalesOrders?.Dealers?.dealer_name ?? 'N/A',
+          customerName: mo.SalesOrders?.DirectoryCustomers?.customer_name ?? '',
+          archived: !!mo.archived,
+          scheduledStartDate: mo.planned_start_at ?? null,
+          scheduledEndDate: mo.planned_end_at ?? null,
+          priority: mo.priority ?? 'normal',
+          createdAt: mo.created_at,
+          moType: mo.mo_type ?? null,
+          claimId: mo.claim_id ?? null,
+          orderRef: isService && claimNo ? claimNo : (mo.SalesOrders?.sales_order_no ?? 'N/A'),
+        };
+      });
+  }, [manufacturingOrders, claimNoMap]);
 
   // Filter and sort
   const filteredAndSorted = useMemo(() => {
@@ -176,6 +187,7 @@ export default function ManufacturingOrders() {
       const searchLower = searchTerm.toLowerCase();
       filtered = filtered.filter(mo =>
         mo.manufacturingOrderNo.toLowerCase().includes(searchLower) ||
+        mo.orderRef.toLowerCase().includes(searchLower) ||
         mo.saleOrderNo.toLowerCase().includes(searchLower) ||
         mo.dealerName.toLowerCase().includes(searchLower)
       );
@@ -183,8 +195,8 @@ export default function ManufacturingOrders() {
 
     // Sort
     filtered = [...filtered].sort((a, b) => {
-      let aVal: any = sortBy === 'sale_order_no' ? a.saleOrderNo : sortBy === 'manufacturing_order_no' ? a.manufacturingOrderNo : (a as unknown as Record<string, unknown>)[sortBy];
-      let bVal: any = sortBy === 'sale_order_no' ? b.saleOrderNo : sortBy === 'manufacturing_order_no' ? b.manufacturingOrderNo : (b as unknown as Record<string, unknown>)[sortBy];
+      let aVal: any = sortBy === 'sale_order_no' ? a.orderRef : sortBy === 'manufacturing_order_no' ? a.manufacturingOrderNo : (a as unknown as Record<string, unknown>)[sortBy];
+      let bVal: any = sortBy === 'sale_order_no' ? b.orderRef : sortBy === 'manufacturing_order_no' ? b.manufacturingOrderNo : (b as unknown as Record<string, unknown>)[sortBy];
 
       if (sortBy === 'planned_start_at') {
         aVal = aVal ? new Date(aVal).getTime() : 0;
@@ -263,6 +275,22 @@ export default function ManufacturingOrders() {
         setMoLineCountMap(counts);
       });
   }, [activeOrganizationId, paginatedIds, paginated.length]);
+
+  useEffect(() => {
+    const claimIds = [...new Set(manufacturingOrders.map(mo => mo.claim_id).filter(Boolean))] as string[];
+    if (claimIds.length === 0) { setClaimNoMap({}); return; }
+    supabase
+      .from('ServiceClaims')
+      .select('id, claim_no')
+      .in('id', claimIds)
+      .then(({ data }) => {
+        const map: Record<string, string> = {};
+        for (const row of (data ?? []) as { id: string; claim_no: string }[]) {
+          map[row.id] = row.claim_no;
+        }
+        setClaimNoMap(map);
+      });
+  }, [manufacturingOrders]);
 
   // Handlers
   const handleView = (id: string) => {
@@ -464,7 +492,7 @@ export default function ManufacturingOrders() {
                   className="py-3 px-3 text-left text-xs font-medium text-gray-500 cursor-pointer select-none hover:text-gray-700"
                   onClick={() => handleSort('sale_order_no')}
                 >
-                  Sale Order {sortBy === 'sale_order_no' && (sortOrder === 'asc' ? '↑' : '↓')}
+                  Order {sortBy === 'sale_order_no' && (sortOrder === 'asc' ? '↑' : '↓')}
                 </th>
                 <th
                   className="py-3 px-3 text-left text-xs font-medium text-gray-500 cursor-pointer select-none hover:text-gray-700"
@@ -504,7 +532,9 @@ export default function ManufacturingOrders() {
                     onClick={() => handleView(mo.id)}
                   >
                     <td className="py-3 px-4 text-sm font-semibold text-gray-900">{mo.manufacturingOrderNo}</td>
-                    <td className="py-3 px-3 text-sm text-gray-600">{mo.saleOrderNo}</td>
+                    <td className="py-3 px-3 text-sm">
+                      <span className="text-gray-600">{mo.orderRef}</span>
+                    </td>
                     <td className="py-3 px-3">
                       <StatusBadge status={moStatus} type="manufacturing" size="sm" />
                     </td>

@@ -79,7 +79,7 @@ export function generateMeasurementFormPDF(
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
   doc.text(options.quote_no, pageW - mx, y, { align: 'right' });
-  y += 8;
+  y += 13;
 
   // ── Info row ──
   const infoY = y;
@@ -105,7 +105,7 @@ export function generateMeasurementFormPDF(
 
   if (options.address) {
     const addrOneLine = options.address.replace(/\n/g, ', ');
-    drawField('Address: ', addrOneLine, col2X, 0);
+    drawField('Project Address: ', addrOneLine, col2X, 0);
   }
   if (options.dealerName) {
     drawField('Dealer: ', options.dealerName, col2X, 1);
@@ -201,7 +201,7 @@ export function generateMeasurementFormPDF(
       4: { cellWidth: 40 },
       5: { cellWidth: 38, fontSize: 6.5 },
       6: { halign: 'center', cellWidth: 10 },
-      7: { halign: 'center', cellWidth: 30 },
+      7: { halign: 'left', cellWidth: 30, cellPadding: { top: 2.5, bottom: 2.5, left: 7, right: 1.5 } },
       8: { halign: 'center', cellWidth: 44 },
       9: { cellWidth: 'auto' },
     },

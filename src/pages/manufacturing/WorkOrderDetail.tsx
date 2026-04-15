@@ -22,6 +22,17 @@ interface MOInfo {
   dealer_name: string;
   so_number: string;
   due_date: string | null;
+  isServiceMO?: boolean;
+  claimNo?: string;
+  moType?: string;
+  productSpecs?: {
+    widthMm?: number;
+    heightMm?: number;
+    openingDirection?: string;
+    operatingSystem?: string;
+    productLine?: string;
+    panelCount?: number;
+  };
 }
 
 interface WorkOrderDetailProps {
@@ -127,7 +138,8 @@ function StationCard({ task, onToggleLine, onStatusChange, moMeta, siblingTasks 
           <div className="flex items-center gap-1.5 shrink-0">
             <button type="button" onClick={() => {
               const pdf = generateWorkOrderPDF({ moNumber: moMeta.mo_number, stationName, stationCode, customerName: moMeta.customer_name, productName: moMeta.product_name, salesOrderNo: moMeta.so_number, date: formatDate(new Date()),
-                lines: task.lines.map(l => ({ sku: l.sku ?? '', description: l.item_name ?? '', role: l.component_role ?? '', qty: l.qty, uom: l.uom, cutLength: l.cut_length_mm != null ? Number(l.cut_length_mm) : null, cutWidth: l.cut_width_mm != null ? Number(l.cut_width_mm) : null })) });
+                lines: task.lines.map(l => ({ sku: l.sku ?? '', description: l.item_name ?? '', role: l.component_role ?? '', qty: l.qty, uom: l.uom, cutLength: l.cut_length_mm != null ? Number(l.cut_length_mm) : null, cutWidth: l.cut_width_mm != null ? Number(l.cut_width_mm) : null })),
+                isServiceMO: moMeta.isServiceMO, claimNo: moMeta.claimNo, moType: moMeta.moType, productSpecs: moMeta.productSpecs });
               pdf.save(`WO-${moMeta.mo_number}-${stationCode}.pdf`);
             }} className="p-1.5 rounded hover:bg-gray-200 text-gray-500" title="Print work sheet"><Printer className="h-3.5 w-3.5" /></button>
             <button type="button" onClick={async () => {
@@ -321,7 +333,7 @@ export default function WorkOrderDetail({ moId }: WorkOrderDetailProps) {
   const fetchMOInfo = useCallback(async () => {
     setLoading(true);
     try {
-      const { data: mo } = await supabase.from('ManufacturingOrders').select('manufacturing_order_no, product_name, sales_order_id').eq('id', moId).single();
+      const { data: mo } = await supabase.from('ManufacturingOrders').select('manufacturing_order_no, product_name, sales_order_id, mo_type, claim_id').eq('id', moId).single();
       if (!mo) { setMoInfo(null); setLoading(false); return; }
 
       let customerName = '—';
@@ -345,7 +357,32 @@ export default function WorkOrderDetail({ moId }: WorkOrderDetailProps) {
         }
       }
 
-      setMoInfo({ mo_number: mo.manufacturing_order_no ?? '—', product_name: mo.product_name ?? '—', customer_name: customerName, dealer_name: dealerName, so_number: soNumber, due_date: dueDate });
+      let claimNoVal: string | undefined;
+      const isSvc = mo.mo_type === 'rework' || mo.mo_type === 'replacement';
+      if (isSvc && mo.claim_id) {
+        const { data: cl } = await supabase.from('ServiceClaims').select('claim_no').eq('id', mo.claim_id).single();
+        claimNoVal = cl?.claim_no ?? undefined;
+      }
+
+      let specs: MOInfo['productSpecs'];
+      const { data: moLines } = await supabase.from('ManufacturingOrderLines').select('configured_product_id').eq('manufacturing_order_id', moId).not('configured_product_id', 'is', null).limit(1);
+      const cpId = moLines?.[0]?.configured_product_id;
+      if (cpId) {
+        const { data: cp } = await supabase.from('ConfiguredProducts').select('config_snapshot').eq('id', cpId).single();
+        if (cp?.config_snapshot) {
+          const snap = cp.config_snapshot as any;
+          specs = {
+            widthMm: snap.width_mm ?? snap.widthMm,
+            heightMm: snap.height_mm ?? snap.heightMm,
+            openingDirection: snap.opening_direction ?? snap.openingDirection,
+            operatingSystem: snap.operating_system ?? snap.operatingSystem,
+            productLine: snap.product_line ?? snap.productLine,
+            panelCount: Array.isArray(snap.panels) ? snap.panels.length : undefined,
+          };
+        }
+      }
+
+      setMoInfo({ mo_number: mo.manufacturing_order_no ?? '—', product_name: mo.product_name ?? '—', customer_name: customerName, dealer_name: dealerName, so_number: soNumber, due_date: dueDate, isServiceMO: isSvc, claimNo: claimNoVal, moType: mo.mo_type ?? undefined, productSpecs: specs });
     } catch { setMoInfo(null); } finally { setLoading(false); }
   }, [moId]);
 

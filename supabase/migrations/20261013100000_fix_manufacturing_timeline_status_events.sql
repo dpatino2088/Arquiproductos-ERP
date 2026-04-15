@@ -246,7 +246,7 @@ BEGIN
 
   v_actor_id := auth.uid();
   v_actor_name := COALESCE(
-    (SELECT au.name FROM public."AppUsers" au WHERE au.auth_user_id = v_actor_id LIMIT 1),
+    (SELECT au.display_name FROM public."AppUsers" au WHERE au.auth_user_id = v_actor_id LIMIT 1),
     'System'
   );
 

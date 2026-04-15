@@ -212,7 +212,9 @@ function FinishedGoodsSOCard({
   const balanceDue = Number(financial?.balance_due ?? 0);
   const paymentComplete = balanceDue <= 0;
   const hasDeliveryOverride = Boolean(financial?.has_delivery_override);
-  const deliveryBlocked = !!financial && balanceDue > 0 && !hasDeliveryOverride;
+  const deliveryBlocked = group.hasServiceMOOnly
+    ? false
+    : !!financial && balanceDue > 0 && !hasDeliveryOverride;
   const paymentLabel = financial
     ? paymentComplete ? 'Paid'
     : financial.total_paid > 0 ? 'Partial Payment'

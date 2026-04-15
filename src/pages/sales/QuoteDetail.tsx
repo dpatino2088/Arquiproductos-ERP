@@ -16,6 +16,7 @@ import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { FileText, ShoppingBag, Edit, ArrowLeft, ShieldCheck, Unlock } from 'lucide-react';
 import { getAppUsersDisplayNames } from '../../lib/appUsersDisplayNames';
 import QuoteAttachmentsTab from '../../components/sales/QuoteAttachmentsTab';
+import DimensionsStackView from '../../components/DimensionsStackView';
 
 const SALES_SUBMODULES = [
   { id: 'quotes', label: 'Quotes', href: '/sales/quotes', icon: FileText },
@@ -69,6 +70,7 @@ interface QuoteLine {
   msrp: number | null;
   unit_dealer_price_snapshot?: number | null;
   dealer_price_total?: number | null;
+  config_snapshot?: Record<string, any> | null;
 }
 
 interface Proposal {
@@ -164,6 +166,18 @@ export default function QuoteDetail() {
   const loadedQuoteIdRef = useRef<string | null>(null);
 
   const { createSOFromQuote } = useSOActions();
+  const [priorityOpen, setPriorityOpen] = useState(false);
+
+  const handlePriorityChange = useCallback(async (newPriority: string) => {
+    if (!quote || newPriority === quote.priority) { setPriorityOpen(false); return; }
+    const { error: err } = await supabase
+      .from('Quotes')
+      .update({ priority: newPriority })
+      .eq('id', quote.id);
+    setPriorityOpen(false);
+    if (err) { addNotification({ type: 'error', message: 'Failed to update priority' }); return; }
+    setQuote((prev) => prev ? { ...prev, priority: newPriority } : prev);
+  }, [quote, addNotification]);
 
   const refetch = useCallback(async () => {
     if (!quoteId || !activeOrganizationId) {
@@ -194,7 +208,7 @@ export default function QuoteDetail() {
       const [linesRes, proposalsRes, soRes, timelineRes] = await Promise.all([
         supabase
           .from('QuoteLines')
-          .select('id, name, sku, product_type, width_m, height_m, quantity, unit_msrp, msrp, unit_dealer_price_snapshot, dealer_price_total')
+          .select('id, name, sku, product_type, width_m, height_m, quantity, unit_msrp, msrp, unit_dealer_price_snapshot, dealer_price_total, config_snapshot')
           .eq('quote_id', quoteId)
           .order('sort_order', { ascending: true })
           .order('created_at', { ascending: true }),
@@ -597,15 +611,16 @@ export default function QuoteDetail() {
     : (quote.total_amount ?? 0);
 
   const hasAnyPayment = (salesOrderFinancial?.total_paid ?? 0) > 0;
+  const hasSalesOrder = Boolean(salesOrder);
   const statusForDisplay =
     status === 'approved'
-      ? (hasAnyPayment ? 'approved_paid' : 'approved_unpaid')
+      ? (!hasSalesOrder ? 'approved' : hasAnyPayment ? 'released' : 'confirmed')
       : status;
   const keyStatusCaption =
     status === 'approved'
-      ? (hasAnyPayment ? 'Approved with payment' : 'Approved without payment')
+      ? (!hasSalesOrder ? 'Approved — pending order' : hasAnyPayment ? 'Released — paid' : 'Confirmed — order created')
       : status === 'cancelled' || status === 'canceled'
-        ? 'Cancelled by reason'
+        ? 'Cancelled'
         : 'Draft';
 
   const headerStatus = <StatusBadge status={statusForDisplay} type="quote" />;
@@ -686,12 +701,33 @@ export default function QuoteDetail() {
                 )}
                 <div className="flex justify-between items-center">
                   <dt className="text-gray-500">Priority</dt>
-                  <dd>
-                    {quote.priority ? (
-                      <div className="flex justify-end">
-                        <StatusBadge status={quote.priority} type="priority" size="sm" />
-                      </div>
-                    ) : '—'}
+                  <dd className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setPriorityOpen((p) => !p)}
+                      className="cursor-pointer hover:ring-1 hover:ring-gray-300 rounded-full"
+                    >
+                      {quote.priority
+                        ? <StatusBadge status={quote.priority} type="priority" size="sm" />
+                        : <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">Set priority</span>}
+                    </button>
+                    {priorityOpen && (
+                      <>
+                        <div className="fixed inset-0 z-30" onClick={() => setPriorityOpen(false)} />
+                        <div className="absolute right-0 top-7 z-40 bg-white border border-gray-200 rounded-lg shadow-lg py-1 min-w-[100px]">
+                          {(['low', 'normal', 'high', 'urgent'] as const).map((p) => (
+                            <button
+                              key={p}
+                              type="button"
+                              onClick={() => handlePriorityChange(p)}
+                              className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 flex items-center gap-2 ${quote.priority === p ? 'font-semibold' : ''}`}
+                            >
+                              <StatusBadge status={p} type="priority" size="sm" />
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
                   </dd>
                 </div>
                 {latestProposal && (
@@ -886,7 +922,7 @@ export default function QuoteDetail() {
                 <th className="px-4 py-3 text-left font-medium text-gray-700">#</th>
                 <th className="px-4 py-3 text-left font-medium text-gray-700">Name / SKU</th>
                 <th className="px-4 py-3 text-left font-medium text-gray-700">Product Type</th>
-                <th className="px-4 py-3 text-left font-medium text-gray-700">Width x Height (mm)</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">Measurements</th>
                 <th className="px-4 py-3 text-right font-medium text-gray-700">Qty</th>
                 <th className="px-4 py-3 text-right font-medium text-gray-700">Unit Price</th>
                 <th className="px-4 py-3 text-right font-medium text-gray-700">Total</th>
@@ -904,7 +940,18 @@ export default function QuoteDetail() {
                   const qty = Number(line.quantity) || 0;
                   const unitPrice = line.unit_dealer_price_snapshot ?? line.unit_msrp ?? (line.dealer_price_total != null && qty > 0 ? Number(line.dealer_price_total) / qty : (line.msrp != null && qty > 0 ? Number(line.msrp) / qty : null));
                   const lineTotal = line.dealer_price_total ?? line.msrp ?? (unitPrice != null ? unitPrice * qty : null);
-                  const dims = [line.width_m, line.height_m].filter((v) => v != null);
+                  const cs = line.config_snapshot;
+                  const dimSource = cs ? {
+                    width_m: line.width_m,
+                    height_m: line.height_m,
+                    width_mm: cs.width_mm,
+                    height_mm: cs.height_mm,
+                    measurements: cs.measurements,
+                    panels: cs.panels,
+                  } : {
+                    width_m: line.width_m,
+                    height_m: line.height_m,
+                  };
                   return (
                     <tr key={line.id} className="border-t hover:bg-gray-50">
                       <td className="px-4 py-4">{idx + 1}</td>
@@ -913,7 +960,7 @@ export default function QuoteDetail() {
                         {line.sku && <div className="text-xs text-gray-500">{line.sku}</div>}
                       </td>
                       <td className="px-4 py-4">{line.product_type ?? '—'}</td>
-                      <td className="px-4 py-4">{dims.length ? `${Math.round((line.width_m ?? 0) * 1000)} × ${Math.round((line.height_m ?? 0) * 1000)}` : '—'}</td>
+                      <td className="px-4 py-4"><DimensionsStackView source={dimSource} /></td>
                       <td className="px-4 py-4 text-right">{qty}</td>
                       <td className="px-4 py-4 text-right font-mono">{formatCurrencyDisplay(unitPrice)}</td>
                       <td className="px-4 py-4 text-right font-mono">{formatCurrencyDisplay(lineTotal)}</td>

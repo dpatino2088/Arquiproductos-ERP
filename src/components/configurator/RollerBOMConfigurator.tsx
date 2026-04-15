@@ -355,7 +355,7 @@ export default function RollerBOMConfigurator({
                     className="px-6 py-2 rounded-lg text-white transition-colors text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                     style={{ backgroundColor: 'var(--primary-brand-hex)' }}
                   >
-                    {isGenerating ? 'Generating...' : 'Add to Quote'}
+                    {isGenerating ? (editingLineId ? 'Updating...' : 'Generating...') : (editingLineId ? 'Update Line' : 'Add to Quote')}
                   </button>
                 ) : (
                   <button

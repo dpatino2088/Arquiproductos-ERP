@@ -15,6 +15,7 @@ export type ModuleKey =
   | "manufacturing"
   | "financials"
   | "partners"
+  | "service"
   | "settings";
 
 type AccessContextState = {
@@ -37,7 +38,7 @@ type AccessContextState = {
   isPortal: boolean;
 };
 
-const PORTAL_ALLOWED_MODULES: ModuleKey[] = ["dashboard", "directory", "sales", "financials"];
+const PORTAL_ALLOWED_MODULES: ModuleKey[] = ["dashboard", "directory", "sales", "financials", "service"];
 
 /** Map AppUser.role_code (dealer_manager, dealer_member) or DealerUsers.role to PortalRole */
 function roleCodeToPortalRole(v: any): PortalRole | null {
@@ -288,7 +289,7 @@ export function useAccessContext(): AccessContextState {
   const allowedModules = useMemo<ModuleKey[]>(() => {
     if (userType === "portal") return PORTAL_ALLOWED_MODULES;
     if (userType === "internal") {
-      return ["dashboard", "directory", "sales", "catalog", "inventory", "manufacturing", "financials", "partners", "settings"];
+      return ["dashboard", "directory", "sales", "catalog", "inventory", "manufacturing", "financials", "partners", "service", "settings"];
     }
     return ["dashboard"];
   }, [userType]);

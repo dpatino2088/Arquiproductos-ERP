@@ -14,7 +14,7 @@ import { useWarehouses } from '../../hooks/useWarehouses';
 import DetailPageLayout from '../../components/shared/DetailPageLayout';
 import StatusBadge from '../../components/shared/StatusBadge';
 import MaterialsTab from '../../components/manufacturing/tabs/MaterialsTab';
-import { CheckCircle, Circle, Clock } from 'lucide-react';
+import { CheckCircle, Circle, Clock, LifeBuoy } from 'lucide-react';
 import NotesTab from '../../components/manufacturing/tabs/NotesTab';
 import AttachmentsTab from '../../components/manufacturing/tabs/AttachmentsTab';
 import WorkOrdersTab from './WorkOrdersTab';
@@ -68,7 +68,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const { manufacturingOrder: mo, loading, error, refetch } = useManufacturingOrder(moId);
   const { materials } = useManufacturingMaterials(moId ?? '');
   const { allocations } = useMOAllocations(moId);
-  const { readiness: materialReadiness } = useMoMaterialReadiness(moId);
+  const { readiness: materialReadiness, refetch: refetchMaterialReadiness } = useMoMaterialReadiness(moId);
   const { transitionStatus, isTransitioning } = useTransitionMOStatus();
   const { issueMaterials } = useIssueMaterials();
   const { defaultWarehouse } = useWarehouses(mo?.organization_id ?? null);
@@ -97,6 +97,9 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const [taskProgress, setTaskProgress] = useState<{ total: number; completed: number; inProgress: number }>({ total: 0, completed: 0, inProgress: 0 });
   const [woLineIds, setWoLineIds] = useState<Set<string>>(new Set());
   const [siblingMOs, setSiblingMOs] = useState<{ id: string; manufacturing_order_no: string }[]>([]);
+  const [claimInfo, setClaimInfo] = useState<{ id: string; claim_no: string; chargeable: boolean } | null>(null);
+  const isServiceMO = mo?.mo_type === 'rework' || mo?.mo_type === 'replacement';
+  const [claimInvoicePaid, setClaimInvoicePaid] = useState(false);
   const [financialSummary, setFinancialSummary] = useState<{
     total_invoiced: number;
     total_paid: number;
@@ -434,6 +437,28 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       });
   }, [mo?.sales_order_id, moId]);
 
+  useEffect(() => {
+    if (!mo?.claim_id) { setClaimInfo(null); return; }
+    supabase
+      .from('ServiceClaims')
+      .select('id, claim_no, chargeable')
+      .eq('id', mo.claim_id)
+      .single()
+      .then(({ data }) => {
+        setClaimInfo(data ? { id: data.id, claim_no: data.claim_no, chargeable: !!data.chargeable } : null);
+      });
+    supabase
+      .from('DealerInvoices')
+      .select('id, status')
+      .eq('claim_id', mo.claim_id)
+      .eq('deleted', false)
+      .neq('status', 'void')
+      .limit(1)
+      .then(({ data }) => {
+        setClaimInvoicePaid(data != null && data.length > 0 && (data[0] as any).status === 'paid');
+      });
+  }, [mo?.claim_id]);
+
   const handleTransition = useCallback(async (newStatus: string) => {
     if (!moId || !user?.id) return;
     setActionsOpen(false);
@@ -520,9 +545,17 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     }
   }, [moId, user, transitionStatus, refetch, fetchTimeline, addNotification]);
 
+  const handleExclusionsChanged = useCallback(() => {
+    refetchMaterialReadiness();
+    fetchMOLines();
+  }, [refetchMaterialReadiness, fetchMOLines]);
+
   const LINE_STATUS_FLOW: Record<string, { next: string; label: string }> = {
-    draft:         { next: 'reviewed',  label: 'Review' },
-    in_production: { next: 'completed', label: 'Complete' },
+    draft:           { next: 'reviewed',        label: 'Review' },
+    reviewed:        { next: 'materials_ready', label: 'Mat. Ready' },
+    confirmed:       { next: 'materials_ready', label: 'Mat. Ready' },
+    materials_ready: { next: 'in_production',   label: 'Start Prod.' },
+    in_production:   { next: 'completed',       label: 'Complete' },
   };
 
   const handleAdvanceLine = useCallback(async (lineId: string, lineStatus: string) => {
@@ -597,7 +630,9 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     );
   }
 
+  const POST_PRODUCTION_STATUSES = ['quality_check', 'ready_for_pickup', 'delivered', 'completed'];
   const derivedStatusFromLines = (() => {
+    if (POST_PRODUCTION_STATUSES.includes(mo.status)) return null;
     if (moLines.length === 0) return null;
     const all = moLines.length;
     const completed = moLines.filter(l => l.status === 'completed').length;
@@ -625,7 +660,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     if (!materials || materials.length === 0) return false;
     const requiredByItem = new Map<string, number>();
     for (const m of materials) {
-      if (!m.catalog_item_id) continue;
+      if (!m.catalog_item_id || m.excluded) continue;
       requiredByItem.set(m.catalog_item_id, (requiredByItem.get(m.catalog_item_id) ?? 0) + Number(m.qty || 0));
     }
     if (requiredByItem.size === 0) return false;
@@ -645,7 +680,22 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const canViewMaterialDemand = materialDemandEnabledStatuses.includes(status as (typeof materialDemandEnabledStatuses)[number]);
   const paymentComplete = financialSummary ? financialSummary.balance_due <= 0 : false;
   const hasDeliveryOverride = financialSummary?.has_delivery_override === true;
-  const deliveryBlocked = !!financialSummary && financialSummary.balance_due > 0 && !hasDeliveryOverride;
+
+  const deliveryBlocked = (() => {
+    if (isServiceMO && claimInfo) {
+      if (!claimInfo.chargeable) return false;
+      return !claimInvoicePaid;
+    }
+    return !!financialSummary && financialSummary.balance_due > 0 && !hasDeliveryOverride;
+  })();
+
+  const deliveryBlockedMessage = (() => {
+    if (isServiceMO && claimInfo?.chargeable && !claimInvoicePaid) {
+      return 'Delivery blocked: claim invoice is not fully paid.';
+    }
+    return `Delivery blocked: balance due is $${financialSummary?.balance_due?.toFixed(2) ?? '0.00'}. Financials must settle to 0.00 or issue an override.`;
+  })();
+
   const paymentStatus: 'not_invoiced' | 'unpaid' | 'partial' | 'paid' =
     !financialSummary || financialSummary.invoice_status === 'none' ? 'not_invoiced' :
     financialSummary.total_paid <= 0 ? 'unpaid' :
@@ -653,6 +703,9 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
 
   const actionItems: { label: string; onClick: () => void; danger?: boolean; disabled?: boolean; title?: string }[] = [];
   if (isInternal && canWriteOverview && status !== 'cancelled' && status !== 'delivered') {
+    if (status === 'materials_ready') {
+      actionItems.push({ label: 'Start Production', onClick: () => handleTransition('in_production') });
+    }
     if (status === 'in_production' || status === 'completed') {
       actionItems.push({ label: 'Send to QC', onClick: () => handleTransition('quality_check') });
     }
@@ -667,7 +720,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
         label: 'Mark Delivered',
         onClick: () => handleTransition('delivered'),
         disabled: deliveryBlocked,
-        title: deliveryBlocked ? `Delivery blocked: balance due is $${financialSummary?.balance_due?.toFixed(2) ?? '?'} (must be 0.00) unless Financials issues an override.` : undefined,
+        title: deliveryBlocked ? deliveryBlockedMessage : undefined,
       });
     }
     if (['draft', 'confirmed', 'procurement', 'materials_ready'].includes(status)) {
@@ -826,23 +879,23 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       {status === 'ready_for_pickup' && deliveryBlocked && (
         <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-md bg-red-50 border border-red-200 w-full">
           <span className="inline-block w-2 h-2 rounded-full bg-red-500 flex-shrink-0" />
-          <span className="text-xs text-red-700 flex-1">
-            Delivery blocked: balance due is ${financialSummary?.balance_due?.toFixed(2) ?? '0.00'}. Financials must settle to 0.00 or issue an override.
-          </span>
+          <span className="text-xs text-red-700 flex-1">{deliveryBlockedMessage}</span>
         </div>
       )}
 
       {/* Overview tab */}
       {activeTab === 'overview' && (
         <div className="space-y-6">
+
+
         {/* Production Progress Bar */}
         {(() => {
           const STEPS = [
             { key: 'draft', label: 'Draft' },
-            { key: 'confirmed', label: 'Reviewed' },
-            { key: 'procurement', label: 'Planned' },
-            { key: 'materials_ready', label: 'Material Ready' },
-            { key: 'in_production', label: 'In Production' },
+            { key: 'confirmed', label: 'Confirmed' },
+            { key: 'procurement', label: 'Procure' },
+            { key: 'materials_ready', label: 'Mat. Ready' },
+            { key: 'in_production', label: 'Production' },
             { key: 'quality_check', label: 'QC' },
             { key: 'ready_for_pickup', label: 'Ready' },
             { key: 'delivered', label: 'Delivered' },
@@ -874,7 +927,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
                                isCurrent ? <Clock className="w-4 h-4" /> :
                                <Circle className="w-3 h-3" />}
                             </div>
-                            <span className={`text-[10px] mt-1 text-center truncate w-full ${
+                            <span className={`text-[9px] mt-1 text-center leading-tight whitespace-nowrap ${
                               isCurrent ? 'font-semibold text-blue-700' :
                               isCompleted ? 'text-green-700' :
                               'text-gray-400'
@@ -913,14 +966,38 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
           <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
             <h3 className="text-sm font-semibold text-gray-900 mb-3">Order Info</h3>
             <dl className="space-y-2 text-sm">
-              {so && (
-                <div className="flex justify-between">
-                  <dt className="text-gray-500">Sales Order</dt>
-                  <dd>
-                    <button type="button" onClick={() => router.navigate(withReturnTo(`/sales/orders/${so.id}`))}
-                      className="text-primary hover:underline font-medium">{so.sales_order_no}</button>
-                  </dd>
-                </div>
+              {isServiceMO && claimInfo ? (
+                <>
+                  <div className="flex justify-between">
+                    <dt className="text-gray-500">Order</dt>
+                    <dd>
+                      <button type="button" onClick={() => router.navigate(`/service/claims/${claimInfo.id}`)}
+                        className="inline-flex items-center gap-1 text-violet-700 hover:underline font-medium">
+                        <LifeBuoy className="w-3.5 h-3.5" />
+                        {claimInfo.claim_no}
+                      </button>
+                    </dd>
+                  </div>
+                  {so && (
+                    <div className="flex justify-between">
+                      <dt className="text-gray-500">Original SO</dt>
+                      <dd>
+                        <button type="button" onClick={() => router.navigate(withReturnTo(`/sales/orders/${so.id}`))}
+                          className="text-gray-500 hover:underline text-xs">{so.sales_order_no}</button>
+                      </dd>
+                    </div>
+                  )}
+                </>
+              ) : (
+                so && (
+                  <div className="flex justify-between">
+                    <dt className="text-gray-500">Sales Order</dt>
+                    <dd>
+                      <button type="button" onClick={() => router.navigate(withReturnTo(`/sales/orders/${so.id}`))}
+                        className="text-primary hover:underline font-medium">{so.sales_order_no}</button>
+                    </dd>
+                  </div>
+                )
               )}
               <div className="flex justify-between">
                 <dt className="text-gray-500">Customer</dt>
@@ -942,7 +1019,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
                 <dt className="text-gray-500">Quantity</dt>
                 <dd className="text-gray-900">{mo.quantity ?? '—'}</dd>
               </div>
-              {so?.total_amount != null && (
+              {!isServiceMO && so?.total_amount != null && (
                 <div className="flex justify-between border-t pt-2">
                   <dt className="text-gray-500">SO Total</dt>
                   <dd className="font-mono font-medium text-gray-900">{formatCurrency(so.total_amount, 'USD')}</dd>
@@ -1142,7 +1219,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
                             {advancingLineId === line.id ? '...' : LINE_STATUS_FLOW[lineStatus].label}
                           </button>
                         )}
-                        {lineStatus === 'reviewed' && !materialOk && (
+                        {(lineStatus === 'reviewed' || lineStatus === 'confirmed') && !materialOk && (
                           <span className="text-[10px] text-gray-400">Waiting material</span>
                         )}
                       </td>
@@ -1163,6 +1240,8 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
           moStatus={status}
           currency="USD"
           canViewCosts={canViewCosts}
+          isServiceMO={isServiceMO}
+          onExclusionsChanged={handleExclusionsChanged}
         />
       )}
 
@@ -1175,6 +1254,9 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
           productName={mo.product_name ?? ''}
           salesOrderNo={so?.sales_order_no}
           moStatus={status}
+          isServiceMO={isServiceMO}
+          claimNo={claimInfo?.claim_no}
+          moType={mo.mo_type ?? undefined}
         />
       )}
 

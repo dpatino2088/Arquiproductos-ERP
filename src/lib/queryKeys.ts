@@ -257,3 +257,13 @@ export function bottleneckKey(scopeKey: string): unknown[] {
 export function scheduleChangelogKey(taskId: string): unknown[] {
   return ['manufacturing', 'schedule-changelog', LIST_QUERY_VERSION, taskId];
 }
+
+/** Service Claims list */
+export function serviceClaimsListKey(scopeKey: string): unknown[] {
+  return ['service', 'claims', 'list', LIST_QUERY_VERSION, scopeKey];
+}
+
+/** Service Claim detail */
+export function serviceClaimDetailKey(scopeKey: string, claimId: string): unknown[] {
+  return ['service', 'claims', 'detail', DETAIL_QUERY_VERSION, scopeKey, claimId];
+}

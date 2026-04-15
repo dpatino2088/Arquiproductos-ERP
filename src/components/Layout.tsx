@@ -52,7 +52,8 @@ import {
   Wallet,
   FileText,
   RefreshCw,
-  Handshake
+  Handshake,
+  LifeBuoy
 } from 'lucide-react';
 import { useDirectoryLoadStore } from '../stores/directory-load-store';
 
@@ -141,6 +142,9 @@ const MODULE_TABS: Record<string, { label: string; href: string }[]> = {
     { label: 'Dealers', href: '/partners/dealers' },
     { label: 'Vendors', href: '/partners/vendors' },
     { label: 'Manufacturers', href: '/partners/manufacturers' },
+  ],
+  '/service/claims': [
+    { label: 'Claims', href: '/service/claims' },
   ],
 };
 
@@ -586,6 +590,7 @@ function Layout({ children }: LayoutProps) {
       dashboardItem ? { ...dashboardItem, module: 'dashboard' as const } : { name: 'Dashboard', href: '/dashboard', icon: Home, module: 'dashboard' as const },
       { name: 'Directory', href: '/directory', icon: BookOpen, module: 'directory' },
       { name: 'Sales', href: '/sales/quotes', icon: ShoppingBag, module: 'sales' },
+      { name: 'Service', href: '/service/claims', icon: LifeBuoy, module: 'service' },
       { name: 'My Financials', href: '/my-financials', icon: Wallet, module: 'financials' },
       { name: 'Catalog', href: '/catalog', icon: Book, module: 'catalog' },
       { name: 'Inventory', href: '/inventory', icon: Package, module: 'inventory' },
@@ -751,6 +756,7 @@ function Layout({ children }: LayoutProps) {
         manufacturing: "manufacturing",
         financials: "financials",
         partners: "partners",
+        service: "service",
         settings: "settings",
       };
       const moduleKey = map[first];
@@ -851,6 +857,7 @@ function Layout({ children }: LayoutProps) {
       financials: 'financials',
       'my-financials': 'financials',
       partners: 'partners',
+      service: 'service',
       settings: 'settings',
     };
     const moduleKey = map[first];

@@ -18,6 +18,7 @@ import { usePayments } from '../../hooks/usePayments';
 import { generateInvoicePDF } from '../../lib/pdf/generateInvoicePDF';
 import type { InvoicePDFData, InvoicePDFDealer, InvoicePDFLine, GenerateInvoicePDFOptions } from '../../lib/pdf/generateInvoicePDF';
 import SOAttachmentsTab from '../../components/sales/SOAttachmentsTab';
+import SOPerformanceTab from '../../components/sales/SOPerformanceTab';
 
 const SALES_SUBMODULES = [
   { id: 'quotes', label: 'Quotes', href: '/sales/quotes', icon: FileText },
@@ -193,6 +194,7 @@ export default function SalesOrderDetail() {
   const [lineMoMap, setLineMoMap] = useState<Map<string, { mo_id: string; mo_no: string; status: string }>>(new Map());
   const [moLineCounts, setMoLineCounts] = useState<Map<string, number>>(new Map());
   const [moDisplayStatusMap, setMoDisplayStatusMap] = useState<Map<string, string>>(new Map());
+  const [soClaims, setSOClaims] = useState<{ id: string; claim_no: string; status: string; claim_type: string; created_at: string }[]>([]);
 
   const { transitionSOStatus, createMO, isActing } = useSOActions();
   const { registerSubmodules } = useSubmoduleNav();
@@ -365,6 +367,16 @@ export default function SalesOrderDetail() {
         setLinkedInvoices((invoicesRes.data ?? []) as SOInvoice[]);
       }
       refetchPayments();
+      // Fetch service claims linked to this SO
+      if (salesOrderId) {
+        const { data: claimsData } = await supabase
+          .from('ServiceClaims')
+          .select('id, claim_no, status, claim_type, created_at')
+          .eq('sales_order_id', salesOrderId)
+          .eq('deleted', false)
+          .order('created_at', { ascending: false });
+        setSOClaims((claimsData ?? []) as any[]);
+      }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to load sales order';
       setError(msg);
@@ -773,6 +785,7 @@ export default function SalesOrderDetail() {
     { id: 'lines', label: 'Lines' },
     { id: 'manufacturing', label: 'Manufacturing' },
     { id: 'payments', label: 'Payments' },
+    ...(isInternal ? [{ id: 'performance', label: 'Performance' }] : []),
     { id: 'attachments', label: 'Attachments' },
     { id: 'timeline', label: 'Timeline' },
   ];
@@ -1033,7 +1046,29 @@ export default function SalesOrderDetail() {
             </div>
           )}
 
-          {/* Row 4: Manufacturing Status Timeline */}
+          {/* Row 4: Service Claims */}
+          {soClaims.length > 0 && (
+            <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+              <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                Service Claims
+                <span className="inline-flex items-center justify-center w-5 h-5 text-xs font-bold bg-orange-100 text-orange-700 rounded-full">{soClaims.length}</span>
+              </h3>
+              <div className="space-y-2">
+                {soClaims.map((cl) => (
+                  <button
+                    key={cl.id}
+                    onClick={() => router.navigate(withReturnTo(`/service/claims/${cl.id}`))}
+                    className="w-full flex items-center justify-between py-2 px-3 rounded-lg border border-gray-100 hover:bg-gray-50 text-sm transition-colors"
+                  >
+                    <span className="font-medium text-primary">{cl.claim_no}</span>
+                    <StatusBadge status={cl.status} type="claim" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Row 5: Manufacturing Status Timeline */}
           {manufacturingProgressCard}
         </div>
       )}
@@ -1546,6 +1581,14 @@ export default function SalesOrderDetail() {
           </div>
 
         </div>
+      )}
+
+      {activeTab === 'performance' && isInternal && (
+        <SOPerformanceTab
+          salesOrderId={so.id}
+          organizationId={so.organization_id}
+          currency="USD"
+        />
       )}
 
       {activeTab === 'attachments' && (

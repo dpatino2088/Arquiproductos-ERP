@@ -37,6 +37,7 @@ export interface ManufacturingOrder {
   quantity?: number | null;
   dealer_id?: string | null;
   parent_mo_id?: string | null;
+  claim_id?: string | null;
   notes?: string | null;
   internal_notes?: string | null;
   released_at?: string | null;
@@ -89,6 +90,7 @@ export interface ManufacturingMaterial {
   calc_notes?: string | null;
   product_width_mm?: number | null;
   product_height_mm?: number | null;
+  excluded?: boolean;
 }
 
 export interface CutJob {
@@ -461,7 +463,8 @@ export function useManufacturingMaterials(manufacturingOrderId: string): UseManu
             cut_length_mm,
             cut_width_mm,
             cut_height_mm,
-            organization_id
+            organization_id,
+            excluded
           `)
           .in('bom_instance_id', bomInstanceIds)
           .eq('organization_id', activeOrganizationId)
@@ -547,6 +550,7 @@ export function useManufacturingMaterials(manufacturingOrderId: string): UseManu
             calc_notes: null,
             product_width_mm: dims?.width_mm ?? null,
             product_height_mm: dims?.height_mm ?? null,
+            excluded: !!line.excluded,
           };
         }) || [];
 
