@@ -96,7 +96,8 @@ export default function Quotes() {
   const getStatusForDisplay = useCallback((quote: EnrichedQuote) => {
     const raw = (quote.status || '').toLowerCase();
     if (raw === 'approved') {
-      return quote.has_payment ? 'approved_paid' : 'approved_unpaid';
+      if (!quote.sale_order_id) return 'approved';
+      return quote.has_payment ? 'released' : 'ordered';
     }
     return raw;
   }, []);
@@ -687,20 +688,12 @@ export default function Quotes() {
                     <td className="py-4 px-4 text-sm text-center">
                       {soNumberMap[quote.id]
                         ? (
-                          <div className="flex flex-col items-center gap-1">
-                            <button
-                              onClick={(e) => { e.stopPropagation(); router.navigate(withReturnTo(`/sales/orders/${soNumberMap[quote.id].id}`)); }}
-                              className="text-primary hover:underline font-medium leading-none whitespace-nowrap"
-                            >
-                              {soNumberMap[quote.id].no}
-                            </button>
-                            <span
-                              className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-gray-100 text-gray-700 border border-gray-200 leading-none whitespace-nowrap"
-                              title={`Sales Order status: ${soNumberMap[quote.id].status}`}
-                            >
-                              {getSOStatusLabel(soNumberMap[quote.id].status)}
-                            </span>
-                          </div>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); router.navigate(withReturnTo(`/sales/orders/${soNumberMap[quote.id].id}`)); }}
+                            className="text-primary hover:underline font-medium text-sm whitespace-nowrap"
+                          >
+                            {soNumberMap[quote.id].no}
+                          </button>
                         )
                         : <span className="text-gray-400">—</span>}
                     </td>

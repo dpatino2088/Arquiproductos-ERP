@@ -536,7 +536,7 @@ export function useQuoteLines(quoteId: string | null) {
         if (catalogItemIdsFromLines.length > 0) {
           const { data: catalogItemsData } = await supabase
             .from('CatalogItems')
-            .select('id, name, sku, collection_name, variant_name, unit_of_measure, cost_exw, measure_basis, item_role')
+            .select('id, name, sku, collection_name, variant_name, unit_of_measure, cost_exw, measure_basis, item_role, manufacturer, Manufacturers(name)')
             .in('id', catalogItemIdsFromLines)
             .or(`organization_id.eq.${activeOrganizationId},organization_id.is.null`)
             .eq('is_active', true);

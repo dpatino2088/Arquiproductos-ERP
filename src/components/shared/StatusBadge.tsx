@@ -2,7 +2,7 @@ import { cn } from '../../lib/utils';
 
 export interface StatusBadgeProps {
   status: string;
-  type: 'quote' | 'proposal' | 'salesOrder' | 'payment' | 'invoice' | 'manufacturing' | 'moType' | 'moLineStatus' | 'priority' | 'workOrder' | 'bill' | 'vendorPayment' | 'purchaseOrder';
+  type: 'quote' | 'proposal' | 'salesOrder' | 'payment' | 'invoice' | 'manufacturing' | 'moType' | 'moLineStatus' | 'priority' | 'workOrder' | 'bill' | 'vendorPayment' | 'purchaseOrder' | 'claim';
   size?: 'sm' | 'md';
 }
 
@@ -37,6 +37,9 @@ const STATUS_MAPS: Record<StatusBadgeProps['type'], Record<string, string>> = {
     draft: 'gray',
     sent: 'blue',
     approved: 'amber',
+    ordered: 'blue',
+    confirmed: 'blue',
+    released: 'green',
     approved_unpaid: 'amber',
     approved_paid: 'green',
     converted: 'green',
@@ -164,12 +167,23 @@ const STATUS_MAPS: Record<StatusBadgeProps['type'], Record<string, string>> = {
     in_progress: 'indigo',
     completed: 'green',
   },
+  claim: {
+    draft: 'gray',
+    under_review: 'blue',
+    approved: 'emerald',
+    in_progress: 'indigo',
+    resolved: 'green',
+    closed: 'slate',
+    rejected: 'red',
+  },
 };
 
 const STATUS_LABEL_OVERRIDES: Partial<Record<StatusBadgeProps['type'], Record<string, string>>> = {
   quote: {
     approved_unpaid: 'Approved',
     approved_paid: 'Approved',
+    confirmed: 'Confirmed',
+    released: 'Released',
   },
   salesOrder: {
     confirmed: 'Open',
@@ -204,6 +218,10 @@ const STATUS_LABEL_OVERRIDES: Partial<Record<StatusBadgeProps['type'], Record<st
     fully_invoiced: 'Fully Invoiced',
     partial: 'Partially Paid',
     paid: 'Paid',
+  },
+  claim: {
+    under_review: 'Under Review',
+    in_progress: 'In Progress',
   },
   payment: {
     pending: 'Unpaid',

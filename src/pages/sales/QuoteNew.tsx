@@ -16,7 +16,7 @@ import { useAccessContext } from '../../hooks/useAccessContext';
 import { useDirectoryCustomers } from '../../hooks/useDirectoryCustomers';
 import { useCreateQuote, useUpdateQuote, useQuoteLines, approveQuote, normalizeStatus } from '../../hooks/useQuotes';
 import { QuoteStatus } from '../../types/catalog';
-import { Plus, Edit, Trash2, X, Download, GripVertical, Eye, Copy, FileText, Printer, ChevronDown, Settings2, ArrowLeft, Ruler } from 'lucide-react';
+import { Plus, Edit, Trash2, X, Download, GripVertical, Eye, Copy, FileText, Printer, ChevronDown, Settings2, ArrowLeft, Ruler, ShoppingBag, Ban } from 'lucide-react';
 import { useProposalsByQuote, createProposalFromQuote } from '../../hooks/useProposals';
 import { useActiveDealer } from '../../hooks/useActiveDealer';
 import ProductConfigurator from './ProductConfigurator';
@@ -26,8 +26,10 @@ import Input from '../../components/ui/Input';
 import Label from '../../components/ui/Label';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
+import StatusBadge from '../../components/shared/StatusBadge';
 import { generateQuotePDF, type PDFVariant } from '../../lib/pdf/generateQuotePDF';
 import { generateMeasurementFormPDF, type MeasurementFormLine } from '../../lib/pdf/generateMeasurementFormPDF';
+import { getLogoPathFromUrl } from '../../lib/dealerLogo';
 import { useCostSettings } from '../../hooks/useCosts';
 import { useDealerTiers } from '../../hooks/useDealerTiers';
 import { calculateQuoteLinePrice, getDealerTierDiscountPct } from '../../lib/pricing';
@@ -443,13 +445,6 @@ const formatCurrency = (amount: number, currency: string = 'USD') => {
   }).format(amount);
 };
 
-// Quote status options
-const QUOTE_STATUS_OPTIONS = [
-  { value: 'draft', label: 'Draft' },
-  { value: 'approved', label: 'Approved' },
-  { value: 'canceled', label: 'Cancelled' },
-] as const;
-
 // Currency options
 const CURRENCY_OPTIONS = [
   { value: 'USD', label: 'USD - US Dollar' },
@@ -466,6 +461,7 @@ const quoteSchema = z.object({
   status: z.enum(['draft', 'approved', 'canceled']),
   currency: z.string().min(1, 'Currency is required'),
   description: z.string().optional(),
+  project_address: z.string().optional(),
   notes: z.string().optional(),
   po_number: z.string().optional(),
   exempt_tax: z.boolean().optional(),
@@ -516,22 +512,29 @@ interface QuoteLineWithRelations {
   CatalogItems?: { id: string; item_name: string; sku: string; uom: string } | null;
 }
 
-function CreateProposalButton({ quoteId, quoteLineCount = 0 }: { quoteId: string; quoteLineCount?: number }) {
-  const { proposals, loading, refetch } = useProposalsByQuote(quoteId);
+function QuoteActionsDropdown({ quoteId, quoteLineCount = 0, quoteStatus, onCreateOrder }: { quoteId: string; quoteLineCount?: number; quoteStatus: string; onCreateOrder: () => void }) {
+  const { proposals, loading } = useProposalsByQuote(quoteId);
   const { activeDealerId } = useActiveDealer();
   const [creating, setCreating] = useState(false);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
   const hasQuoteLines = quoteLineCount > 0;
 
-  const handleCreate = async () => {
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  const handleCreateProposal = async () => {
     if (!hasQuoteLines) {
-      useUIStore.getState().addNotification({
-        type: 'error',
-        title: 'Missing quote lines',
-        message: 'Add at least one quote line before creating a proposal.',
-      });
+      useUIStore.getState().addNotification({ type: 'error', title: 'Missing quote lines', message: 'Add at least one quote line before creating a proposal.' });
       return;
     }
     setCreating(true);
+    setOpen(false);
     try {
       const result = await createProposalFromQuote(quoteId, { actingDealerId: activeDealerId ?? null });
       if ('error' in result) {
@@ -546,17 +549,39 @@ function CreateProposalButton({ quoteId, quoteLineCount = 0 }: { quoteId: string
   };
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="relative" ref={ref}>
       <button
         type="button"
-        onClick={handleCreate}
+        onClick={() => setOpen((v) => !v)}
         disabled={creating || loading}
         className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50 disabled:opacity-50"
-        title={!hasQuoteLines ? 'Add at least one quote line first' : undefined}
       >
-        <FileText className="w-4 h-4" />
-        Create Proposal
+        Actions
+        <ChevronDown className="w-4 h-4 text-gray-500" />
       </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-50 min-w-[180px] rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+          <button
+            type="button"
+            className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+            onClick={handleCreateProposal}
+            disabled={!hasQuoteLines}
+          >
+            <FileText className="w-4 h-4 shrink-0 text-gray-500" />
+            Create Proposal
+          </button>
+          <button
+            type="button"
+            className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 ${quoteStatus === 'approved' ? 'text-gray-700 hover:bg-gray-50' : 'text-gray-400 cursor-not-allowed'}`}
+            disabled={!hasQuoteLines || quoteStatus !== 'approved'}
+            title={quoteStatus !== 'approved' ? 'Approve the quote first' : undefined}
+            onClick={() => { setOpen(false); onCreateOrder(); }}
+          >
+            <ShoppingBag className="w-4 h-4 shrink-0" />
+            Create Order
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -722,10 +747,6 @@ export default function QuoteNew() {
   const [approveConfirmOpen, setApproveConfirmOpen] = useState(false);
   const [deleteLineConfirmId, setDeleteLineConfirmId] = useState<string | null>(null);
   const [isDeletingLine, setIsDeletingLine] = useState(false);
-  const [pendingApproveSubmission, setPendingApproveSubmission] = useState<{
-    data: QuoteFormValues;
-    shouldNavigate: boolean;
-  } | null>(null);
   const [initialLineConfig, setInitialLineConfig] = useState<ProductConfig | undefined>(undefined);
   const [dealerInfo, setDealerInfo] = useState<{ id: string; name: string; number: string | null; dealer_tier_id: string | null } | null>(null);
   const configuratorDraftKey = quoteId ? `productConfiguratorDraft:${quoteId}` : null;
@@ -745,12 +766,14 @@ export default function QuoteNew() {
     formState: { errors },
     setValue,
     watch,
+    getValues,
   } = useForm<QuoteFormValues>({
     resolver: zodResolver(quoteSchema),
     defaultValues: {
       status: 'draft',
       currency: 'USD',
       description: '',
+      project_address: '',
       notes: '',
       po_number: '',
       exempt_tax: false,
@@ -945,7 +968,16 @@ export default function QuoteNew() {
         if (error) throw error;
 
         if (data) {
-          setQuoteData(data);
+          let hasSalesOrder = false;
+          if (data.status === 'approved') {
+            const { count } = await supabase
+              .from('SalesOrders')
+              .select('id', { count: 'exact', head: true })
+              .eq('quote_id', quoteId)
+              .eq('deleted', false);
+            hasSalesOrder = (count ?? 0) > 0;
+          }
+          setQuoteData({ ...data, _has_sales_order: hasSalesOrder });
           // Set all values, ensuring quote_no is set first and won't be overwritten
           const quoteNo = (data as any).quote_no || '';
           setValue('quote_no', quoteNo, { shouldValidate: true });
@@ -956,6 +988,7 @@ export default function QuoteNew() {
           setValue('status', (formStatus === 'canceled' ? 'draft' : formStatus) || 'draft');
           setValue('currency', 'USD'); // Default for UI formatting (not stored in DB)
           setValue('description', (data as any).description ?? '');
+          setValue('project_address', (data as any).project_address ?? '');
           setValue('notes', (data as any).notes ?? '');
           setValue('po_number', (data as any).po_number ?? '');
           setValue('exempt_tax', (data as any).exempt_tax ?? false);
@@ -1305,8 +1338,8 @@ export default function QuoteNew() {
           return;
         }
 
-        const totalMsrp = unitMsrp * qty;
-        const { error: insertError } = await supabase.from('QuoteLines').insert({
+        // Insert QuoteLine (minimal), then use RPC to set correct pricing from CatalogItemsMSRP
+        const { data: insertedLine, error: insertError } = await supabase.from('QuoteLines').insert({
           organization_id: activeOrganizationId,
           quote_id: quoteId,
           dealer_id: quoteRow?.dealer_id ?? null,
@@ -1317,21 +1350,31 @@ export default function QuoteNew() {
           quantity: qty,
           name: itemName,
           sku: itemSku,
-          msrp: totalMsrp,
-          unit_msrp: unitMsrp,
           position: cfg.position != null ? String(cfg.position) : null,
           area: cfg.area ?? null,
-        });
+        }).select('id').single();
 
-        if (insertError) {
+        if (insertError || !insertedLine?.id) {
           console.error('[QuoteNew] Catalog line insert failed', insertError);
           useUIStore.getState().addNotification({
             type: 'error',
             title: 'Error',
-            message: insertError.message || 'Failed to add catalog line.',
+            message: insertError?.message || 'Failed to add catalog line.',
           });
           return;
         }
+
+        // Set pricing from CatalogItemsMSRP via RPC (bypasses trigger guard)
+        await supabase.rpc('update_catalog_quote_line_pricing', {
+          p_quote_line_id: insertedLine.id,
+          p_catalog_item_id: catalogItemId,
+          p_name: itemName,
+          p_sku: itemSku,
+          p_qty: qty,
+          p_area: cfg.area ?? null,
+          p_position: cfg.position != null ? String(cfg.position) : null,
+          p_configured_product_id: cpResult.configured_product_id,
+        });
 
         useUIStore.getState().addNotification({
           type: 'success',
@@ -1339,6 +1382,76 @@ export default function QuoteNew() {
           message: 'Catalog item added successfully.',
         });
         refetchLines();
+        return;
+      }
+
+      // ═══════════════════════════════════════════════════════════════════
+      // EDIT SAVE — CATALOG ITEM (simple: update qty/area/position + re-create CP)
+      // ═══════════════════════════════════════════════════════════════════
+      if (editingLineId && isCatalogItem) {
+        const cfg = productConfig as any;
+        const catalogItemId: string = cfg.catalog_item_id;
+        const itemName: string = cfg.name ?? '';
+        const itemSku: string = cfg.sku ?? '';
+        const unitMsrp: number = Number(cfg.unit_price) || 0;
+        const qty: number = Math.max(1, Number(cfg.qty) || 1);
+        const totalMsrp = unitMsrp * qty;
+
+        if (!catalogItemId) {
+          useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: 'Please select a catalog item.' });
+          return;
+        }
+
+        const { data: catalogPT } = await supabase
+          .from('ProductTypes')
+          .select('id')
+          .eq('organization_id', activeOrganizationId)
+          .eq('code', 'catalog')
+          .maybeSingle();
+
+        if (!catalogPT?.id) {
+          useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: 'Catalog product type not found.' });
+          return;
+        }
+
+        const { data: cpResult, error: cpError } = await supabase.rpc('create_catalog_configured_product', {
+          p_org_id: activeOrganizationId,
+          p_product_type_id: catalogPT.id,
+          p_quote_id: quoteId,
+          p_catalog_item_id: catalogItemId,
+          p_qty: qty,
+          p_unit_msrp: unitMsrp,
+        });
+
+        if (cpError || !cpResult?.configured_product_id) {
+          console.error('[QuoteNew EDIT CATALOG] create_catalog_configured_product failed', cpError);
+          useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: cpError?.message || 'Failed to update catalog item.' });
+          return;
+        }
+
+        const { error: updateErr } = await supabase.rpc('update_catalog_quote_line_pricing', {
+          p_quote_line_id: editingLineId,
+          p_catalog_item_id: catalogItemId,
+          p_name: itemName,
+          p_sku: itemSku,
+          p_qty: qty,
+          p_area: cfg.area ?? null,
+          p_position: cfg.position != null ? String(cfg.position) : null,
+          p_configured_product_id: cpResult.configured_product_id,
+        });
+
+        if (updateErr) {
+          console.error('[QuoteNew EDIT CATALOG] update_catalog_quote_line_pricing failed', updateErr);
+          useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: updateErr.message || 'Failed to update pricing.' });
+          return;
+        }
+
+        useUIStore.getState().addNotification({ type: 'success', title: 'Success', message: 'Catalog item updated successfully.' });
+        await refetchLines();
+        setShowConfigurator(false);
+        setEditingLineId(null);
+        setInitialLineConfig(undefined);
+        clearConfiguratorDraft();
         return;
       }
 
@@ -3675,47 +3788,74 @@ export default function QuoteNew() {
       return;
     }
     try {
-      const tryLogo = async (path: string): Promise<string | undefined> => {
-        try {
-          const res = await fetch(path, { cache: 'no-store' });
-          if (!res.ok) return undefined;
-          const blob = await res.blob();
-          return new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result as string);
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-          });
-        } catch { return undefined; }
-      };
       let logoPngBase64: string | undefined;
-      for (const p of ['/images/Arquiproductos.png', '/images/arquiproductos.png', '/images/Arquiproductos.jpg']) {
-        logoPngBase64 = await tryLogo(p);
-        if (logoPngBase64) break;
-      }
       let logoWidthPx = 100;
       let logoHeightPx = 100;
-      if (logoPngBase64) {
+
+      const dealerId = quoteData.dealer_id ?? null;
+      let dealerLogoUrl: string | null = null;
+      if (dealerId) {
+        const { data: dealerData } = await supabase.from('Dealers').select('logo_url').eq('id', dealerId).maybeSingle();
+        dealerLogoUrl = (dealerData as { logo_url?: string } | null)?.logo_url?.trim() || null;
+      }
+      const logoPath = getLogoPathFromUrl(dealerLogoUrl);
+      const cleanPath = logoPath ? logoPath.replace(/^\/+/, '') : null;
+      const logoUrlToLoad = cleanPath
+        ? supabase.storage.from('catalog-images').getPublicUrl(cleanPath).data.publicUrl
+        : /^https?:\/\//i.test(dealerLogoUrl ?? '') ? dealerLogoUrl! : null;
+
+      if (logoUrlToLoad) {
         try {
-          const dims = await new Promise<{ w: number; h: number }>((resolve) => {
-            const img = new Image();
-            img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
-            img.onerror = () => resolve({ w: 100, h: 100 });
-            img.src = logoPngBase64!;
-          });
-          logoWidthPx = dims.w;
-          logoHeightPx = dims.h;
-        } catch { /* keep defaults */ }
+          const res = await fetch(logoUrlToLoad, { mode: 'cors', credentials: 'omit' });
+          if (res.ok) {
+            const blob = await res.blob();
+            if (blob.type.startsWith('image/')) {
+              logoPngBase64 = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result as string);
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+              });
+            }
+          }
+          if (!logoPngBase64) {
+            const fromCanvas = await new Promise<string | null>((resolve) => {
+              const img = new Image();
+              img.crossOrigin = 'anonymous';
+              img.onload = () => {
+                try {
+                  const c = document.createElement('canvas');
+                  c.width = img.naturalWidth; c.height = img.naturalHeight;
+                  const ctx = c.getContext('2d');
+                  if (ctx) { ctx.drawImage(img, 0, 0); resolve(c.toDataURL('image/png')); }
+                  else resolve(null);
+                } catch { resolve(null); }
+              };
+              img.onerror = () => resolve(null);
+              img.src = logoUrlToLoad;
+            });
+            if (fromCanvas) logoPngBase64 = fromCanvas;
+          }
+          if (logoPngBase64) {
+            const dims = await new Promise<{ w: number; h: number } | null>((resolve) => {
+              const img2 = new Image();
+              img2.onload = () => resolve({ w: img2.naturalWidth, h: img2.naturalHeight });
+              img2.onerror = () => resolve(null);
+              img2.src = logoPngBase64!;
+            });
+            if (dims) { logoWidthPx = dims.w; logoHeightPx = dims.h; }
+          }
+        } catch { /* logo unavailable — PDF will render without it */ }
       }
 
       let dealerName: string | undefined;
-      const dealerId = quoteData.dealer_id ?? null;
       if (dealerId) {
         const { data: dealer } = await supabase.from('Dealers').select('dealer_name').eq('id', dealerId).maybeSingle();
         dealerName = dealer?.dealer_name ?? undefined;
       }
 
-      const address = selectedCustomer
+      const projectAddr = (quoteData as any).project_address?.trim() || watch('project_address')?.trim() || null;
+      const customerAddr = selectedCustomer
         ? [
             (selectedCustomer as any).street_address_line_1,
             (selectedCustomer as any).street_address_line_2,
@@ -3723,6 +3863,7 @@ export default function QuoteNew() {
             (selectedCustomer as any).country,
           ].filter(Boolean).join(', ') || null
         : null;
+      const address = projectAddr || customerAddr;
 
       const formLines: MeasurementFormLine[] = quoteLines.map((line: any) => {
         const snap = line.config_snapshot;
@@ -3778,7 +3919,6 @@ export default function QuoteNew() {
   const onSubmit = async (
     data: QuoteFormValues,
     shouldNavigate: boolean = false,
-    skipApproveConfirm: boolean = false
   ) => {
     if (!activeOrganizationId) {
       useUIStore.getState().addNotification({
@@ -3805,54 +3945,29 @@ export default function QuoteNew() {
     try {
       // id, organization_id, quote_no, status, tracking_status, customer_id, contact_id,
       // created_by_user_id, deleted, created_at, updated_at, dealer_id, currency, ...
+      const nextStatus = data.status || 'draft';
       const quoteDataPayload: any = {
         quote_no: data.quote_no,
         customer_id: data.customer_id || null,
         contact_id: selectedContactId || null,
-        status: data.status,
+        status: nextStatus,
+        tracking_status: nextStatus === 'approved' ? 'pending_confirmation' : null,
         organization_id: activeOrganizationId,
         dealer_id: effectiveDealerId,
         description: data.description?.trim() || null,
+        project_address: data.project_address?.trim() || null,
         notes: data.notes?.trim() || null,
         po_number: data.po_number?.trim() || null,
         exempt_tax: data.exempt_tax ?? false,
       };
 
-      const persistedStatus = normalizeStatus((quoteData as any)?.status);
-      const nextStatus = normalizeStatus(quoteDataPayload.status);
-      const isTransitioningToApproved = nextStatus === 'approved' && (!quoteId || persistedStatus !== 'approved');
-      if (isTransitioningToApproved && !skipApproveConfirm) {
-        setPendingApproveSubmission({ data, shouldNavigate });
-        setApproveConfirmOpen(true);
-        return;
-      }
-
       if (quoteId) {
-        // Update existing quote
-        // Check if status is changing to 'approved' - use approveQuote function
-        const isApproving = isTransitioningToApproved;
-        
-        // If approving, update other fields FIRST, then approve (safer transaction order)
-        if (isApproving) {
-          console.log('🔔 QuoteNew: Status changed to approved, using approveQuote function');
-          
-          // Step 1: Update other fields first (without status)
-          const { status, ...safeData } = quoteDataPayload;
-          if (Object.keys(safeData).length > 0) {
-            await updateQuote(quoteId, safeData);
-          }
-          
-          // Step 2: Approve quote (this triggers the DB trigger)
-          await approveQuote(quoteId, activeOrganizationId);
-        } else {
-          // For non-approval updates, use regular updateQuote
-          await updateQuote(quoteId, quoteDataPayload);
-        }
-        
+        await updateQuote(quoteId, quoteDataPayload);
+
         useUIStore.getState().addNotification({
           type: 'success',
           title: 'Success',
-          message: isApproving ? 'Quote approved successfully' : 'Quote updated successfully',
+          message: 'Quote updated successfully',
         });
         
           // Only navigate if shouldNavigate is true
@@ -3973,20 +4088,62 @@ export default function QuoteNew() {
   const handleCloseApproveConfirm = () => {
     if (isSaving || isUpdating) return;
     setApproveConfirmOpen(false);
-    setPendingApproveSubmission(null);
   };
   const handleConfirmApprove = async () => {
-    if (!pendingApproveSubmission) return;
-    const pending = pendingApproveSubmission;
     setApproveConfirmOpen(false);
-    setPendingApproveSubmission(null);
-    await onSubmit(pending.data, pending.shouldNavigate, true);
+    if (!quoteId || !activeOrganizationId) return;
+    setIsSaving(true);
+    try {
+      const formData = getValues();
+      const effectiveDealerId = dealerInfo?.id ?? selectedCustomerDealerId ?? quoteData?.dealer_id ?? filterDealerId ?? null;
+      const safePayload: any = {
+        quote_no: formData.quote_no,
+        customer_id: formData.customer_id || null,
+        contact_id: selectedContactId || null,
+        organization_id: activeOrganizationId,
+        dealer_id: effectiveDealerId,
+        description: formData.description?.trim() || null,
+        project_address: formData.project_address?.trim() || null,
+        notes: formData.notes?.trim() || null,
+        po_number: formData.po_number?.trim() || null,
+        exempt_tax: formData.exempt_tax ?? false,
+      };
+      await updateQuote(quoteId, safePayload);
+      await approveQuote(quoteId, activeOrganizationId);
+      useUIStore.getState().addNotification({ type: 'success', title: 'Order Created', message: 'Quote approved and Sales Order created.' });
+      router.navigate('/sales/quotes');
+    } catch (err: any) {
+      useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: err?.message || 'Failed to create order' });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+  const handleCancelQuote = async () => {
+    if (!quoteId) return;
+    setIsSaving(true);
+    try {
+      await updateQuote(quoteId, { status: 'cancelled' });
+      useUIStore.getState().addNotification({ type: 'success', title: 'Cancelled', message: 'Quote has been cancelled.' });
+      setCancelConfirmOpen(false);
+      router.navigate('/sales/quotes');
+    } catch (err: any) {
+      useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: err?.message || 'Failed to cancel quote' });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // Get selected contact (selectedCustomer already defined above for contacts loading)
   const selectedContact = contacts.find(c => c.id === selectedContactId);
-  const persistedStatus = normalizeStatus((quoteData as any)?.status);
-  const isStatusLocked = Boolean(quoteId && persistedStatus === 'approved');
+  const rawPersistedStatus = normalizeStatus((quoteData as any)?.status);
+  const hasSalesOrder = Boolean((quoteData as any)?._has_sales_order);
+  const persistedStatus = rawPersistedStatus === 'approved'
+    ? (hasSalesOrder ? 'ordered' : 'approved')
+    : rawPersistedStatus;
+  const isStatusLocked = Boolean(quoteId && rawPersistedStatus === 'approved');
+  const isOrdered = persistedStatus === 'ordered';
 
   return (
     <div className="py-6 px-6 min-w-0 max-w-full">
@@ -4057,6 +4214,20 @@ export default function QuoteNew() {
                     <Ruler className="w-4 h-4 shrink-0 text-gray-500" />
                     Measurement Form
                   </button>
+                  {quoteId && persistedStatus === 'draft' && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                      onClick={() => {
+                        setPrintDropdownOpen(false);
+                        setCancelConfirmOpen(true);
+                      }}
+                    >
+                      <Ban className="w-4 h-4 shrink-0" />
+                      Cancel Quote
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -4077,7 +4248,6 @@ export default function QuoteNew() {
           >
             {isSaving || isCreating || isUpdating ? 'Saving...' : 'Save and Close'}
           </button>
-          {quoteId && !dealerInfo && <CreateProposalButton quoteId={quoteId} quoteLineCount={quoteLines.length} />}
         </div>
       </div>
 
@@ -4153,6 +4323,17 @@ export default function QuoteNew() {
             </div>
 
             <div>
+              <Label htmlFor="project_address">Dirección del Proyecto</Label>
+              <textarea
+                id="project_address"
+                {...register('project_address')}
+                rows={1}
+                className="w-full h-9 min-h-9 resize-none px-2.5 py-1.5 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                placeholder="Dirección donde se instalará el proyecto..."
+              />
+            </div>
+
+            <div>
               <Label htmlFor="notes">Notas</Label>
               <textarea
                 id="notes"
@@ -4187,7 +4368,7 @@ export default function QuoteNew() {
                 </div>
                 {quoteId && (
                   <div className="flex-shrink-0">
-                    <CreateProposalButton quoteId={quoteId} quoteLineCount={quoteLines.length} />
+                    <QuoteActionsDropdown quoteId={quoteId} quoteLineCount={quoteLines.length} quoteStatus={persistedStatus || 'draft'} onCreateOrder={() => setApproveConfirmOpen(true)} />
                   </div>
                 )}
               </div>
@@ -4214,30 +4395,29 @@ export default function QuoteNew() {
               <div>
                 <Label htmlFor="status">Status *</Label>
                 <SelectShadcn
-                  value={watch('status') || 'draft'}
+                  value={isOrdered ? 'ordered' : (watch('status') || 'draft')}
                   disabled={isStatusLocked}
                   onValueChange={(value) => {
                     if (isStatusLocked) return;
-                    const validStatus = value as 'draft' | 'approved' | 'canceled';
-                    setValue('status', validStatus);
+                    setValue('status', value as 'draft' | 'approved' | 'canceled');
                   }}
                 >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {QUOTE_STATUS_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
+                    {isOrdered ? (
+                      <SelectItem value="ordered">Ordered</SelectItem>
+                    ) : rawPersistedStatus === 'approved' ? (
+                      <SelectItem value="approved">Approved</SelectItem>
+                    ) : (
+                      <>
+                        <SelectItem value="draft">Draft</SelectItem>
+                        <SelectItem value="approved">Approved</SelectItem>
+                      </>
+                    )}
                   </SelectContent>
                 </SelectShadcn>
-                {isStatusLocked && (
-                  <p className="mt-1 text-xs text-gray-500">
-                    Status is locked because this quote is approved.
-                  </p>
-                )}
               </div>
               <div>
                 <Label htmlFor="currency">Currency *</Label>
@@ -4307,6 +4487,7 @@ export default function QuoteNew() {
                 <p className="text-sm text-gray-500 mt-1">{quoteLines.length} {quoteLines.length === 1 ? 'line' : 'lines'}</p>
               </div>
               <div className="flex items-center gap-2">
+                {!isOrdered && (
                 <button
                   type="button"
                   onClick={() => {
@@ -4319,6 +4500,7 @@ export default function QuoteNew() {
                   <Plus className="w-4 h-4" />
                   Add Line
                 </button>
+                )}
               </div>
             </div>
           </div>
@@ -4380,24 +4562,27 @@ export default function QuoteNew() {
                     const driveLabel = line.drive_system_label
                       ? line.drive_system_label
                       : (driveType === 'motor' ? 'Motorized' : driveType === 'manual' ? 'Manual' : 'N/A');
-                    const driveDisplay = isCatalogLine ? '—' : driveLabel;
+                    const catalogMfr = isCatalogLine
+                      ? ((line.CatalogItems?.Manufacturers as any)?.name || line.CatalogItems?.manufacturer || null)
+                      : null;
+                    const driveDisplay = isCatalogLine ? (catalogMfr || '—') : driveLabel;
 
                     const isDragging = draggedLineId === line.id;
                     const isDragOver = dragOverLineId === line.id;
                     return (
                       <tr
                         key={line.id}
-                        draggable
-                        onDragStart={(e) => handleDragStart(e, line.id)}
-                        onDragOver={(e) => handleDragOver(e, line.id)}
-                        onDragLeave={handleDragLeave}
-                        onDrop={(e) => handleDrop(e, line.id)}
+                        draggable={!isOrdered}
+                        onDragStart={!isOrdered ? (e) => handleDragStart(e, line.id) : undefined}
+                        onDragOver={!isOrdered ? (e) => handleDragOver(e, line.id) : undefined}
+                        onDragLeave={!isOrdered ? handleDragLeave : undefined}
+                        onDrop={!isOrdered ? (e) => handleDrop(e, line.id) : undefined}
                         className={`border-b border-gray-100 transition-colors ${
-                          isDragging ? 'opacity-50 cursor-grabbing' : 'cursor-grab hover:bg-gray-50'
+                          isOrdered ? 'hover:bg-gray-50' : (isDragging ? 'opacity-50 cursor-grabbing' : 'cursor-grab hover:bg-gray-50')
                         } ${isDragOver ? 'ring-1 ring-inset ring-gray-900' : ''}`}
                       >
-                        <td className="py-4 px-2 text-gray-400 w-10" title="Drag to reorder" onClick={(e) => e.stopPropagation()}>
-                          <GripVertical className="w-4 h-4" />
+                        <td className="py-4 px-2 text-gray-400 w-10" title={isOrdered ? undefined : "Drag to reorder"} onClick={(e) => e.stopPropagation()}>
+                          {!isOrdered && <GripVertical className="w-4 h-4" />}
                         </td>
                         <td className="py-4 px-1 text-center text-gray-500 text-sm tabular-nums w-[28px] min-w-[28px] h-[57px] min-h-[57px] align-middle">
                           {index + 1}
@@ -4408,7 +4593,7 @@ export default function QuoteNew() {
                         <td className="py-4 px-2 text-gray-700 text-sm text-center whitespace-nowrap overflow-hidden text-ellipsis">
                           {position != null && String(position).trim() !== '' ? String(position).trim() : '—'}
                         </td>
-                        <td className="py-4 pl-4 pr-2 text-gray-900 text-sm font-medium whitespace-nowrap text-center overflow-hidden text-ellipsis">
+                        <td className="py-4 pl-4 pr-2 text-gray-900 text-sm font-medium text-center break-words leading-tight">
                           {productTypeName}
                         </td>
                         <td className="py-4 px-2 text-gray-700 text-sm text-center break-words leading-tight" title={collectionDisplay}>
@@ -4416,7 +4601,7 @@ export default function QuoteNew() {
                         </td>
                         <td className="py-4 px-2 text-gray-700 text-sm text-center leading-tight" title={driveDisplay}>
                           {(() => {
-                            if (isCatalogLine) return '—';
+                            if (isCatalogLine) return driveDisplay;
                             const parts = driveDisplay.split('|').map((s: string) => s.trim());
                             if (parts.length >= 2) {
                               return <>{parts[0]}<br />{parts.slice(1).join(' ')}</>;
@@ -4487,34 +4672,38 @@ export default function QuoteNew() {
                             >
                               <Eye className="w-4 h-4" />
                             </button>
-                            <button
-                              onClick={() => openCommercialAdjustment(line)}
-                              className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
-                              title="Commercial adjustment"
-                            >
-                              <Settings2 className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => handleDuplicateLine(line.id)}
-                              className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
-                              title="Duplicar línea"
-                            >
-                              <Copy className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => handleEditLine(line.id)}
-                              className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
-                              title="Edit line"
-                            >
-                              <Edit className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteLine(line.id)}
-                              className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
-                              title="Delete line"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            {!isOrdered && (
+                              <>
+                                <button
+                                  onClick={() => openCommercialAdjustment(line)}
+                                  className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                                  title="Commercial adjustment"
+                                >
+                                  <Settings2 className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => handleDuplicateLine(line.id)}
+                                  className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                                  title="Duplicar línea"
+                                >
+                                  <Copy className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => handleEditLine(line.id)}
+                                  className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                                  title="Edit line"
+                                >
+                                  <Edit className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteLine(line.id)}
+                                  className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                                  title="Delete line"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -4717,8 +4906,10 @@ export default function QuoteNew() {
         const accessoriesLabel = accessoryCount === 0 ? '0 items' : `${accessoryCount} item${accessoryCount !== 1 ? 's' : ''}`;
         const hardwareColor = config.hardwareColor ?? config.hardware_color ?? null;
         const hardwareColorDisplay = hardwareColor ? String(hardwareColor).charAt(0).toUpperCase() + String(hardwareColor).slice(1) : 'Not selected';
-        const hasCassette = config.headbox_item_id != null || config.cassette === true;
-        const hasSideChannel = config.side_channel_item_id != null || config.side_channel === true;
+        const isRealItemId = (v: unknown): boolean =>
+          typeof v === 'string' && v.trim().length > 10 && v.toUpperCase() !== 'NONE';
+        const hasCassette = isRealItemId(config.headbox_item_id);
+        const hasSideChannel = isRealItemId(config.side_channel_item_id);
         const mountingParts = [config.installationType ?? line.installation_type, config.installationLocation ?? line.installation_location].filter(Boolean);
         const mountingDisplay = mountingParts.length ? mountingParts.join(' / ') : 'Not selected';
         const qty = line.quantity ?? line.qty ?? 1;
@@ -4776,15 +4967,14 @@ export default function QuoteNew() {
                   <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-3">Product specifications</h3>
                   <div className="grid grid-cols-2 gap-x-8 gap-y-0 text-sm">
                     <div className="space-y-0">
-                      {spec('Position', line.position != null && String(line.position).trim() !== '' ? String(line.position).trim() : 'Not selected')}
+                      {spec('Product Type', productTypeSlug)}
+                      {spec('Position', line.position != null && String(line.position).trim() !== '' ? String(line.position).trim() : '—')}
                       {spec('Mounting', mountingDisplay)}
-                      {spec('Film Type', 'Not selected')}
-                      {spec('Fixing', 'Not selected')}
                       {spec('Drive Type', driveDisplay)}
-                      {spec('Side Channel', hasSideChannel ? 'Yes' : 'No')}
+                      {spec('Fabric Drop', (() => { const fd = config.fabricDrop ?? config.fabric_drop; return fd ? String(fd).charAt(0).toUpperCase() + String(fd).slice(1) : '—'; })())}
+                      {spec('Hardware Color', hardwareColorDisplay)}
                     </div>
                     <div className="space-y-0">
-                      {spec('Product Type', productTypeSlug)}
                       {spec('Dimensions', (
                         <span className="block pb-2 min-h-[1.5rem]">
                           <DimensionsStackView source={dimensionsSource} />
@@ -4792,8 +4982,8 @@ export default function QuoteNew() {
                       ))}
                       {fabricM2 != null && spec('Total tela', `${fabricM2.toFixed(2)} m²`)}
                       {spec('Accessories', accessoriesLabel)}
-                      {spec('Hardware Color', hardwareColorDisplay)}
                       {spec('Cassette', hasCassette ? 'Yes' : 'No')}
+                      {spec('Side Channel', hasSideChannel ? 'Yes' : 'No')}
                     </div>
                   </div>
                 </div>
@@ -4813,12 +5003,23 @@ export default function QuoteNew() {
         onConfirm={() => {
           void handleConfirmApprove();
         }}
-        title="Approve quote"
-        message="Approving this quote will lock status changes. Continue?"
-        confirmText="Approve"
+        title="Create Order"
+        message="This will approve the quote and create a Sales Order. This action cannot be undone. Continue?"
+        confirmText="Create Order"
         cancelText="Cancel"
         variant="warning"
         isLoading={isSaving || isUpdating}
+      />
+      <ConfirmDialog
+        isOpen={cancelConfirmOpen}
+        onClose={() => setCancelConfirmOpen(false)}
+        onConfirm={() => { void handleCancelQuote(); }}
+        title="Cancel Quote"
+        message="Are you sure you want to cancel this quote? This action cannot be undone."
+        confirmText="Cancel Quote"
+        cancelText="Go Back"
+        variant="danger"
+        isLoading={isSaving}
       />
       <ConfirmDialog
         isOpen={deleteConfirmOpen}
