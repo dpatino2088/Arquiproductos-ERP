@@ -158,6 +158,23 @@ export async function getConfigFromQuoteLine(
     config.qty = line.quantity || 1;
   }
 
+  if (productTypeUI === 'window-film') {
+    config.catalog_item_id = line.catalog_item_id;
+    config.name = line.name || '';
+    config.sku = line.sku || '';
+    config.unit_price = Number(line.unit_msrp) || 0;
+    config.qty = line.quantity || 1;
+    const snap = typeof line.config_snapshot === 'object' ? line.config_snapshot : {};
+    (config as any).sell_mode = snap.sell_mode ?? 'roll';
+    (config as any).film_model = snap.film_model ?? '';
+    (config as any).roll_width_inches = snap.roll_width_inches ?? 0;
+    (config as any).roll_width_m = snap.roll_width_m ?? 0;
+    (config as any).roll_length_m = snap.roll_length_m ?? 0;
+    (config as any).roll_area_m2 = snap.roll_area_m2 ?? 0;
+    (config as any).linear_length_m = snap.linear_length_m ?? 0;
+    (config as any).area_m2 = snap.area_m2 ?? 0;
+  }
+
   if (forEdit) {
     config.quote_line_id = lineId;
   }
@@ -308,14 +325,12 @@ export async function getConfigFromQuoteLine(
         }
 
         // ── Default optional hardware selections to 'NONE' when editing ──
-        // If bottom_bar is set (hardware section was visible) but headbox/side/bottom
-        // are still null/undefined, the user chose "Not Included" (or the snapshot
-        // predates the 'NONE' persistence fix). Default to 'NONE' so the button
-        // shows as selected on Edit/Duplicate.
+        // Headbox applies to all product types; side/bottom channel only to Roller.
         if (config.bottom_bar_item_id) {
           if (config.headbox_item_id == null) config.headbox_item_id = 'NONE';
-          if (config.side_channel_item_id == null) config.side_channel_item_id = 'NONE';
-          if (config.bottom_channel_item_id == null) config.bottom_channel_item_id = 'NONE';
+          const isRoller = productTypeUI === 'roller-shade';
+          if (isRoller && config.side_channel_item_id == null) config.side_channel_item_id = 'NONE';
+          if (isRoller && config.bottom_channel_item_id == null) config.bottom_channel_item_id = 'NONE';
         }
 
         // ── Accessories: prefer QuoteLineComponents, fallback to snapshot ──
@@ -360,20 +375,32 @@ export async function getConfigFromQuoteLine(
     }
   }
 
-  // ── 6b. Recover drapery fields from BOM template when snapshot is incomplete ──
+  // ── 6b. Recover fields from BOM template when snapshot is incomplete ──
   const isDrapery = config.productType === 'drapery';
   const bomTemplateId = config.bom_template_id || line.bom_template_id;
+
+  // Recover manufacturer from BOMTemplate for ALL product types
+  if (bomTemplateId && !config.manufacturer) {
+    const { data: bt } = await supabase
+      .from('BOMTemplates')
+      .select('manufacturer')
+      .eq('id', bomTemplateId)
+      .maybeSingle();
+    if (bt?.manufacturer) {
+      config.manufacturer = bt.manufacturer;
+    }
+  }
+
   const needsDraperyRecovery = isDrapery && bomTemplateId && (
     (!config.productLine && !config.product_line) ||
     (!config.systemSize && !config.system_size) ||
     (!config.openingDirection && !config.opening_direction) ||
-    (!config.driveSide && !config.drive_side) ||
-    !config.manufacturer
+    (!config.driveSide && !config.drive_side)
   );
   if (needsDraperyRecovery) {
     const { data: bt } = await supabase
       .from('BOMTemplates')
-      .select('product_line, system_size, manufacturer, opening_direction, drive_side, hardware_color')
+      .select('product_line, system_size, opening_direction, drive_side, hardware_color')
       .eq('id', bomTemplateId)
       .maybeSingle();
     if (bt) {
@@ -384,9 +411,6 @@ export async function getConfigFromQuoteLine(
       if (bt.system_size && !config.systemSize && !config.system_size) {
         config.system_size = bt.system_size;
         config.systemSize = bt.system_size;
-      }
-      if (bt.manufacturer && !config.manufacturer) {
-        config.manufacturer = bt.manufacturer;
       }
       if (bt.opening_direction && !config.openingDirection && !config.opening_direction) {
         config.opening_direction = bt.opening_direction;

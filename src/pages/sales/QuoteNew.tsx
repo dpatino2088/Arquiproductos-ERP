@@ -1240,9 +1240,10 @@ export default function QuoteNew() {
       const configuredProductTotalsFromConfig = (productConfig as any).configured_product_totals;
       const draftQuoteLineId = (productConfig as any).quote_line_id;
       const isCatalogItem = productConfig.productType === 'catalog';
+      const isWindowFilm = productConfig.productType === 'window-film';
 
-      // EDIT: no ConfiguredProduct required (we create CP_NEW on save). Catalog lines create their own CP via RPC.
-      if (!editingLineId && !configuredProductId && !isCatalogItem) {
+      // EDIT: no ConfiguredProduct required (we create CP_NEW on save). Catalog/Film lines create their own CP via RPC.
+      if (!editingLineId && !configuredProductId && !isCatalogItem && !isWindowFilm) {
         useUIStore.getState().addNotification({
           type: 'error',
           title: 'Configuration Error',
@@ -1386,6 +1387,224 @@ export default function QuoteNew() {
       }
 
       // ═══════════════════════════════════════════════════════════════════
+      // WINDOW FILM — NEW LINE (same as catalog but uses window_film ProductType)
+      // ═══════════════════════════════════════════════════════════════════
+      if (isWindowFilm && !editingLineId && quoteId) {
+        const cfg = productConfig as any;
+        const catalogItemId: string = cfg.catalog_item_id;
+        const itemName: string = cfg.name ?? '';
+        const itemSku: string = cfg.sku ?? '';
+        const sellMode: string = cfg.sell_mode ?? 'roll';
+        const rollWidthM: number = Number(cfg.roll_width_m) || 0;
+        const rollLengthM: number = Number(cfg.roll_length_m) || 0;
+        const rollAreaM2: number = Number(cfg.roll_area_m2) || 0;
+        const linearLengthM: number = Number(cfg.linear_length_m) || 0;
+        const areaM2: number = Number(cfg.area_m2) || 0;
+        const qty: number = sellMode === 'roll' ? Math.max(1, Number(cfg.qty) || 1) : 1;
+        const unitMsrp: number = Number(cfg.unit_price) || 0;
+
+        if (!catalogItemId) {
+          useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: 'Please select a window film.' });
+          return;
+        }
+
+        const { data: filmPT } = await supabase
+          .from('ProductTypes')
+          .select('id')
+          .eq('organization_id', activeOrganizationId)
+          .eq('code', 'window_film')
+          .maybeSingle();
+
+        if (!filmPT?.id) {
+          useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: 'Window Film product type not found.' });
+          return;
+        }
+
+        const { data: quoteRow } = await supabase
+          .from('Quotes')
+          .select('dealer_id')
+          .eq('id', quoteId)
+          .eq('organization_id', activeOrganizationId)
+          .maybeSingle();
+
+        const effectiveQty = sellMode === 'roll' ? qty : 1;
+        const effectiveUnitMsrp = sellMode === 'roll'
+          ? unitMsrp
+          : unitMsrp * areaM2;
+
+        const { data: cpResult, error: cpError } = await supabase.rpc('create_catalog_configured_product', {
+          p_org_id: activeOrganizationId,
+          p_product_type_id: filmPT.id,
+          p_quote_id: quoteId,
+          p_catalog_item_id: catalogItemId,
+          p_qty: effectiveQty,
+          p_unit_msrp: effectiveUnitMsrp,
+        });
+
+        if (cpError || !cpResult?.configured_product_id) {
+          console.error('[QuoteNew] Window Film create_catalog_configured_product failed', cpError);
+          useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: cpError?.message || 'Failed to create film product.' });
+          return;
+        }
+
+        const configSnapshot = {
+          sell_mode: sellMode,
+          film_model: cfg.film_model ?? '',
+          film_collection: cfg.film_collection ?? '',
+          film_variant: cfg.film_variant ?? '',
+          film_width: cfg.film_width ?? cfg.roll_width_inches ?? 0,
+          manufacturer: cfg.manufacturer ?? '',
+          roll_width_inches: cfg.roll_width_inches ?? cfg.film_width ?? 0,
+          roll_width_m: rollWidthM,
+          roll_length_m: rollLengthM,
+          roll_area_m2: rollAreaM2,
+          linear_length_m: linearLengthM,
+          area_m2: areaM2,
+        };
+
+        const displayName = sellMode === 'roll'
+          ? `${itemName} × ${qty} roll${qty > 1 ? 's' : ''}`
+          : `${itemName} — ${linearLengthM.toFixed(2)} m linear`;
+
+        const unitAreaM2 = sellMode === 'roll' ? rollAreaM2 : areaM2;
+
+        const { data: insertedLine, error: insertError } = await supabase.from('QuoteLines').insert({
+          organization_id: activeOrganizationId,
+          quote_id: quoteId,
+          dealer_id: quoteRow?.dealer_id ?? null,
+          product_type: 'window_film',
+          product_type_id: filmPT.id,
+          catalog_item_id: catalogItemId,
+          configured_product_id: cpResult.configured_product_id,
+          quantity: effectiveQty,
+          name: displayName,
+          sku: itemSku,
+          position: cfg.position != null ? String(cfg.position) : null,
+          area: cfg.area ?? null,
+          config_snapshot: configSnapshot,
+        }).select('id').single();
+
+        if (insertError || !insertedLine?.id) {
+          console.error('[QuoteNew] Window Film line insert failed', insertError);
+          useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: insertError?.message || 'Failed to add film line.' });
+          return;
+        }
+
+        await supabase.rpc('update_window_film_quote_line_pricing', {
+          p_quote_line_id: insertedLine.id,
+          p_catalog_item_id: catalogItemId,
+          p_name: displayName,
+          p_sku: itemSku,
+          p_qty: effectiveQty,
+          p_area_m2: unitAreaM2,
+          p_area: cfg.area ?? null,
+          p_position: cfg.position != null ? String(cfg.position) : null,
+          p_configured_product_id: cpResult.configured_product_id,
+          p_config_snapshot: configSnapshot,
+        });
+
+        useUIStore.getState().addNotification({ type: 'success', title: 'Success', message: 'Window Film added successfully.' });
+        refetchLines();
+        return;
+      }
+
+      // ═══════════════════════════════════════════════════════════════════
+      // EDIT SAVE — WINDOW FILM
+      // ═══════════════════════════════════════════════════════════════════
+      if (editingLineId && isWindowFilm) {
+        const cfg = productConfig as any;
+        const catalogItemId: string = cfg.catalog_item_id;
+        const itemName: string = cfg.name ?? '';
+        const itemSku: string = cfg.sku ?? '';
+        const sellMode: string = cfg.sell_mode ?? 'roll';
+        const rollWidthM: number = Number(cfg.roll_width_m) || 0;
+        const rollLengthM: number = Number(cfg.roll_length_m) || 0;
+        const rollAreaM2: number = Number(cfg.roll_area_m2) || 0;
+        const linearLengthM: number = Number(cfg.linear_length_m) || 0;
+        const areaM2: number = Number(cfg.area_m2) || 0;
+        const qty: number = sellMode === 'roll' ? Math.max(1, Number(cfg.qty) || 1) : 1;
+        const unitMsrp: number = Number(cfg.unit_price) || 0;
+
+        if (!catalogItemId) {
+          useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: 'Please select a window film.' });
+          return;
+        }
+
+        const { data: filmPT } = await supabase
+          .from('ProductTypes')
+          .select('id')
+          .eq('organization_id', activeOrganizationId)
+          .eq('code', 'window_film')
+          .maybeSingle();
+
+        if (!filmPT?.id) {
+          useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: 'Window Film product type not found.' });
+          return;
+        }
+
+        const effectiveQty = sellMode === 'roll' ? qty : 1;
+        const effectiveUnitMsrp = sellMode === 'roll'
+          ? unitMsrp
+          : unitMsrp * areaM2;
+
+        const { data: cpResult, error: cpError } = await supabase.rpc('create_catalog_configured_product', {
+          p_org_id: activeOrganizationId,
+          p_product_type_id: filmPT.id,
+          p_quote_id: quoteId,
+          p_catalog_item_id: catalogItemId,
+          p_qty: effectiveQty,
+          p_unit_msrp: effectiveUnitMsrp,
+        });
+
+        if (cpError || !cpResult?.configured_product_id) {
+          useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: cpError?.message || 'Failed to update film product.' });
+          return;
+        }
+
+        const configSnapshot = {
+          sell_mode: sellMode,
+          film_model: cfg.film_model ?? '',
+          film_collection: cfg.film_collection ?? '',
+          film_variant: cfg.film_variant ?? '',
+          film_width: cfg.film_width ?? cfg.roll_width_inches ?? 0,
+          manufacturer: cfg.manufacturer ?? '',
+          roll_width_inches: cfg.roll_width_inches ?? cfg.film_width ?? 0,
+          roll_width_m: rollWidthM,
+          roll_length_m: rollLengthM,
+          roll_area_m2: rollAreaM2,
+          linear_length_m: linearLengthM,
+          area_m2: areaM2,
+        };
+
+        const displayName = sellMode === 'roll'
+          ? `${itemName} × ${qty} roll${qty > 1 ? 's' : ''}`
+          : `${itemName} — ${linearLengthM.toFixed(2)} m linear`;
+
+        const unitAreaM2 = sellMode === 'roll' ? rollAreaM2 : areaM2;
+
+        await supabase.rpc('update_window_film_quote_line_pricing', {
+          p_quote_line_id: editingLineId,
+          p_catalog_item_id: catalogItemId,
+          p_name: displayName,
+          p_sku: itemSku,
+          p_qty: effectiveQty,
+          p_area_m2: unitAreaM2,
+          p_area: cfg.area ?? null,
+          p_position: cfg.position != null ? String(cfg.position) : null,
+          p_configured_product_id: cpResult.configured_product_id,
+          p_config_snapshot: configSnapshot,
+        });
+
+        useUIStore.getState().addNotification({ type: 'success', title: 'Success', message: 'Window Film updated successfully.' });
+        await refetchLines();
+        setShowConfigurator(false);
+        setEditingLineId(null);
+        setInitialLineConfig(undefined);
+        clearConfiguratorDraft();
+        return;
+      }
+
+      // ═══════════════════════════════════════════════════════════════════
       // EDIT SAVE — CATALOG ITEM (simple: update qty/area/position + re-create CP)
       // ═══════════════════════════════════════════════════════════════════
       if (editingLineId && isCatalogItem) {
@@ -1463,18 +1682,6 @@ export default function QuoteNew() {
         // EDIT SAVE — Backend is source of truth for EVERYTHING.
         // 1. Build snapshot → 2. Backend creates CP_NEW → 3. Read CP_NEW → 4. Copy to QuoteLine → 5. Backend prices it
         // ═══════════════════════════════════════════════════════
-
-        // 0. Guardar unit_msrp y quantity actuales por si solo cambia cantidad (mantener precio unitario)
-        const { data: lineBeforeEdit } = await supabase
-          .from('QuoteLines')
-          .select('quantity, unit_msrp, width_m, height_m')
-          .eq('id', editingLineId)
-          .eq('organization_id', activeOrganizationId)
-          .maybeSingle();
-        const prevQuantity = lineBeforeEdit?.quantity ?? 1;
-        const prevUnitMsrp = lineBeforeEdit?.unit_msrp != null ? Number(lineBeforeEdit.unit_msrp) : null;
-        const prevWidth = lineBeforeEdit?.width_m;
-        const prevHeight = lineBeforeEdit?.height_m;
 
         // 1. Resolve product type
         const productTypeId = productConfig.productTypeId
@@ -1576,45 +1783,22 @@ export default function QuoteNew() {
           }
         } catch (e) { if (import.meta.env.DEV) console.warn('Accessories sync error:', e); }
 
-        // 6. Sync pricing from CP_NEW (same source as ADD: commit_configured_product_to_quote_line)
+        // 6. Sync pricing from CP — always use the RPC so dealer_price_total,
+        //    total_cost, and all snapshots stay in sync with the current quantity.
         try {
           const newQty = Math.max(1, productConfig.quantity ?? 1);
-          const onlyQuantityChanged =
-            prevUnitMsrp != null &&
-            prevUnitMsrp > 0 &&
-            newQty !== prevQuantity &&
-            prevWidth != null &&
-            prevHeight != null &&
-            Math.abs((width_m ?? 0) - prevWidth) < 1e-6 &&
-            Math.abs((height_m ?? 0) - prevHeight) < 1e-6;
-
-          if (onlyQuantityChanged) {
-            // Mantener precio unitario: total = unit_msrp × qty (no recalcular desde BOM)
-            const newMsrp = prevUnitMsrp * newQty;
-            const { error: overrideErr } = await supabase
-              .from('QuoteLines')
-              .update({ msrp: newMsrp, unit_msrp: prevUnitMsrp, net_price: newMsrp })
-              .eq('id', editingLineId)
-              .eq('organization_id', activeOrganizationId);
-            if (overrideErr && import.meta.env.DEV) {
-              console.warn('[QuoteNew EDIT] Override msrp by unit_msrp×qty failed', overrideErr);
-            }
-          } else {
-            // Unlock pricing so the sync RPC can update snapshots
-            await supabase.from('QuoteLines').update({ pricing_locked: false }).eq('id', editingLineId).eq('organization_id', activeOrganizationId);
-            const { error: syncErr } = await supabase.rpc('sync_quote_line_pricing_from_configured_product', {
-              p_quote_line_id: editingLineId,
-            });
-            if (syncErr) {
-              console.error('[QuoteNew EDIT] sync_quote_line_pricing_from_configured_product failed', syncErr);
-              throw syncErr;
-            }
-            // Persistir unit_msrp tras el sync para que la UI lo use
-            const { data: afterSync } = await supabase.from('QuoteLines').select('msrp').eq('id', editingLineId).eq('organization_id', activeOrganizationId).maybeSingle();
-            const totalAfter = afterSync?.msrp != null ? Number(afterSync.msrp) : null;
-            if (totalAfter != null && totalAfter > 0 && newQty > 0) {
-              await supabase.from('QuoteLines').update({ unit_msrp: totalAfter / newQty }).eq('id', editingLineId).eq('organization_id', activeOrganizationId);
-            }
+          await supabase.from('QuoteLines').update({ pricing_locked: false }).eq('id', editingLineId).eq('organization_id', activeOrganizationId);
+          const { error: syncErr } = await supabase.rpc('sync_quote_line_pricing_from_configured_product', {
+            p_quote_line_id: editingLineId,
+          });
+          if (syncErr) {
+            console.error('[QuoteNew EDIT] sync_quote_line_pricing_from_configured_product failed', syncErr);
+            throw syncErr;
+          }
+          const { data: afterSync } = await supabase.from('QuoteLines').select('msrp').eq('id', editingLineId).eq('organization_id', activeOrganizationId).maybeSingle();
+          const totalAfter = afterSync?.msrp != null ? Number(afterSync.msrp) : null;
+          if (totalAfter != null && totalAfter > 0 && newQty > 0) {
+            await supabase.from('QuoteLines').update({ unit_msrp: totalAfter / newQty }).eq('id', editingLineId).eq('organization_id', activeOrganizationId);
           }
         } catch (e) {
           if (import.meta.env.DEV) console.warn('Sync pricing RPC error (non-fatal):', e);
@@ -4543,12 +4727,14 @@ export default function QuoteNew() {
                     const position = line.position ?? null;
 
                     const isCatalogLine = line.product_type === 'catalog';
+                    const isFilmLine = line.product_type === 'window_film';
                     const productTypeName = isCatalogLine
                       ? (line.CatalogItems?.item_role
                           ? String(line.CatalogItems.item_role).replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())
                           : 'Catalog')
+                      : isFilmLine ? 'Window Film'
                       : (line.ProductType?.name || line.product_type || 'N/A');
-                    const collectionDisplay = isCatalogLine
+                    const collectionDisplay = (isCatalogLine || isFilmLine)
                       ? (() => {
                           const itemName = line.CatalogItems?.name || line.name || '';
                           const itemSku = line.CatalogItems?.sku || line.sku || '';
@@ -4562,10 +4748,10 @@ export default function QuoteNew() {
                     const driveLabel = line.drive_system_label
                       ? line.drive_system_label
                       : (driveType === 'motor' ? 'Motorized' : driveType === 'manual' ? 'Manual' : 'N/A');
-                    const catalogMfr = isCatalogLine
+                    const catalogMfr = (isCatalogLine || isFilmLine)
                       ? ((line.CatalogItems?.Manufacturers as any)?.name || line.CatalogItems?.manufacturer || null)
                       : null;
-                    const driveDisplay = isCatalogLine ? (catalogMfr || '—') : driveLabel;
+                    const driveDisplay = (isCatalogLine || isFilmLine) ? (catalogMfr || '—') : driveLabel;
 
                     const isDragging = draggedLineId === line.id;
                     const isDragOver = dragOverLineId === line.id;
@@ -4612,7 +4798,23 @@ export default function QuoteNew() {
                         <td className="py-4 px-2 text-gray-700 text-sm text-center align-middle">
                           {isCatalogLine ? (
                             <span className="text-gray-400">—</span>
-                          ) : (
+                          ) : isFilmLine ? (() => {
+                            const snap = line.config_snapshot ?? {};
+                            const ci = line.CatalogItems ?? {};
+                            const widthM = Number(snap.roll_width_m) || Number(ci.roll_width_m) || 0;
+                            const isRoll = snap.sell_mode === 'roll';
+                            const lengthM = isRoll
+                              ? (Number(snap.roll_length_m) || Number(ci.roll_length_m) || 0)
+                              : (Number(snap.linear_length_m) || 0);
+                            const widthMm = Math.round(widthM * 1000);
+                            const lengthMm = Math.round(lengthM * 1000);
+                            if (!widthMm && !lengthMm) return <span className="text-gray-400">—</span>;
+                            return (
+                              <div className="text-xs leading-tight font-medium">
+                                {widthMm} × {lengthMm}
+                              </div>
+                            );
+                          })() : (
                           <div className="inline-block">
                             <DimensionsStackView
                               source={{

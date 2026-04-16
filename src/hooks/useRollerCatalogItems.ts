@@ -28,13 +28,14 @@ export interface UseRollerCatalogItemsParams {
   color?: string | null;
   enabled?: boolean;
   measureBasis?: string | null;
+  manufacturer?: string | null;
 }
 
 // ✅ OPTIMIZATION: In-memory cache (2 min TTL for catalog items)
 const catalogItemsCache = new Map<string, { data: CatalogItemOption[]; timestamp: number }>();
 const CACHE_TTL = 2 * 60 * 1000; // 2 minutes
 
-export function useRollerCatalogItems({ organizationId, productTypeId, role, color, enabled = true, measureBasis }: UseRollerCatalogItemsParams) {
+export function useRollerCatalogItems({ organizationId, productTypeId, role, color, enabled = true, measureBasis, manufacturer }: UseRollerCatalogItemsParams) {
   const [items, setItems] = useState<CatalogItemOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,7 +55,7 @@ export function useRollerCatalogItems({ organizationId, productTypeId, role, col
     let isMounted = true;
     const normalizedRole = normalizeRole(role) || role;
     const normalizedColor = color?.trim() || null;
-    const cacheKey = `catalogItems:${organizationId}:${productTypeId}:${normalizedRole}:${normalizedColor || 'any'}:${measureBasis || 'any'}`;
+    const cacheKey = `catalogItems:${organizationId}:${productTypeId}:${normalizedRole}:${normalizedColor || 'any'}:${measureBasis || 'any'}:${manufacturer || 'any'}`;
     
     // ✅ Check cache first
     const cached = catalogItemsCache.get(cacheKey);
@@ -90,19 +91,17 @@ export function useRollerCatalogItems({ organizationId, productTypeId, role, col
           });
         }
 
-        // Fetch from CatalogItems joined with CatalogItemProductTypes (product type filter FIRST)
-        // IMPORTANT: Filter by is_fabric=false for hardware items (they have color in CatalogItem.color)
         let query = supabase
           .from('CatalogItems')
-          .select('id, sku, name, color, cost_exw, image_url, item_role, CatalogItemProductTypes!inner(product_type_id)')
+          .select('id, sku, name, color, cost_exw, image_url, item_role, manufacturer, CatalogItemProductTypes!inner(product_type_id)')
           .eq('organization_id', organizationId)
-          .eq('is_fabric', false) // ✅ REQUIRED: Only non-fabric items have color in CatalogItem.color
           .ilike('item_role', normalizedRole)
-          .eq('is_active', true) // ✅ Solo items activos
+          .eq('is_active', true)
           .eq('CatalogItemProductTypes.product_type_id', productTypeId);
-        console.log(`🔍 [useRollerCatalogItems] Applying is_fabric=false filter (hardware items only)`);
-        console.log(`🔍 [useRollerCatalogItems] Applying ProductType filter: ${productTypeId}`);
-        console.log(`🔍 [useRollerCatalogItems] Applying role filter (case-insensitive): ${normalizedRole}`);
+
+        if (manufacturer) {
+          query = query.ilike('manufacturer', manufacturer);
+        }
 
         // Apply color filter
         // IMPORTANT: Motor and Tube items often have NULL color, so skip color filter
@@ -197,7 +196,7 @@ export function useRollerCatalogItems({ organizationId, productTypeId, role, col
     return () => {
       isMounted = false;
     };
-  }, [organizationId, productTypeId, role, color, enabled, measureBasis]);
+  }, [organizationId, productTypeId, role, color, enabled, measureBasis, manufacturer]);
 
   return { items, loading, error };
 }

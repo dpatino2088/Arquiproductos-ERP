@@ -110,6 +110,7 @@ export default function OperatingSystemStep({
 
   // ✅ Manufacturer filter (from ManufacturerStep) — used as fallback constraint
   const mfrFilteredTemplates = (config as any)._manufacturer_filtered_templates as string[] | undefined;
+  const configManufacturer: string | undefined = (config as any).manufacturer;
   
   // ✅ Templates BASE del Hardware step (persistidos en config para sobrevivir al volver/desmontar)
   // Si no hay selección de operación, _hardware_filtered_templates ES la base.
@@ -232,10 +233,10 @@ export default function OperatingSystemStep({
           .eq('is_active', true)
           .eq('archived', false);
 
-        // Apply manufacturer filter if available so that motors/drives are
-        // constrained to the selected manufacturer even before color is chosen.
         if (mfrFilteredTemplates && mfrFilteredTemplates.length > 0) {
           query = query.in('id', mfrFilteredTemplates);
+        } else if (configManufacturer) {
+          query = query.ilike('manufacturer', configManufacturer);
         }
 
         const { data, error } = await query;
@@ -264,7 +265,7 @@ export default function OperatingSystemStep({
     return () => {
       cancelled = true;
     };
-  }, [canLoadOptions, activeOrganizationId, productTypeId, hardwareFilteredTemplates, mfrFilteredTemplates?.join(',')]);
+  }, [canLoadOptions, activeOrganizationId, productTypeId, hardwareFilteredTemplates, mfrFilteredTemplates?.join(','), configManufacturer]);
 
   // ✅ effectiveBaseTemplates: usa baseTemplatesForOptions o loadedFallbackTemplates como fallback
   const effectiveBaseTemplates = useMemo(() => baseTemplatesForOptions || loadedFallbackTemplates || null, [baseTemplatesForOptions, loadedFallbackTemplates]);

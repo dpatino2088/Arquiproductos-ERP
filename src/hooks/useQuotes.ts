@@ -536,7 +536,7 @@ export function useQuoteLines(quoteId: string | null) {
         if (catalogItemIdsFromLines.length > 0) {
           const { data: catalogItemsData } = await supabase
             .from('CatalogItems')
-            .select('id, name, sku, collection_name, variant_name, unit_of_measure, cost_exw, measure_basis, item_role, manufacturer, Manufacturers(name)')
+            .select('id, name, sku, collection_name, variant_name, unit_of_measure, cost_exw, measure_basis, item_role, manufacturer, roll_width_m, roll_length_m, Manufacturers(name)')
             .in('id', catalogItemIdsFromLines)
             .or(`organization_id.eq.${activeOrganizationId},organization_id.is.null`)
             .eq('is_active', true);
@@ -762,7 +762,10 @@ export function useQuoteLines(quoteId: string | null) {
             Accessories: components.accessories,
             CatalogItems: line.catalog_item_id ? catalogItemsMap.get(line.catalog_item_id) || null : null,
             ConfiguredProduct: configuredProduct || null,
-            config_snapshot: configuredProduct?.config_snapshot || null,
+            config_snapshot: {
+              ...(configuredProduct?.config_snapshot || {}),
+              ...(line.config_snapshot || {}),
+            },
             bom_preview_snapshot: snapshot || null,
             // Created by = del Quote (QuoteLines no tiene created_by_user_id)
             quote_created_at: quoteCreatedAt,

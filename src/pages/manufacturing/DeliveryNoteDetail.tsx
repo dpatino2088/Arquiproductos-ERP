@@ -209,6 +209,17 @@ export default function DeliveryNoteDetail() {
           checked: l.checked,
         };
       }
+      if (l.line_type === 'supply') {
+        return {
+          product_name: l.supply_line?.catalog_item_name ?? l.supply_line?.description ?? 'Supply Item',
+          area: null,
+          position: null,
+          measurements: l.supply_line?.catalog_item_sku ? `SKU: ${l.supply_line.catalog_item_sku}` : null,
+          product_type: l.supply_line?.product_type ?? 'Supply',
+          qty: l.quantity_delivered,
+          checked: l.checked,
+        };
+      }
       const sol = l.mo_line?.SaleOrderLine;
       const descParts: string[] = [];
       const collVar = sol?.collection_name && sol?.variant_name
@@ -241,24 +252,27 @@ export default function DeliveryNoteDetail() {
   const uploadPdfToAttachments = useCallback(async (pdfBlob: Blob, fileName: string) => {
     if (!deliveryNote || !activeOrganizationId || !user) return;
     const moId = deliveryNote.manufacturing_order_id;
-    const filePath = `${activeOrganizationId}/mo/${moId}/${Date.now()}-${fileName}`;
+    const subPath = moId ? `mo/${moId}` : `so/${deliveryNote.sales_order_id ?? 'orphan'}`;
+    const filePath = `${activeOrganizationId}/${subPath}/${Date.now()}-${fileName}`;
     try {
       const { error: uploadErr } = await supabase.storage
         .from(STORAGE_BUCKET)
         .upload(filePath, pdfBlob, { cacheControl: '3600', upsert: false, contentType: 'application/pdf' });
       if (uploadErr) throw uploadErr;
-      const { error: insertErr } = await supabase
-        .from('manufacturing_order_attachments')
-        .insert({
-          manufacturing_order_id: moId,
-          organization_id: activeOrganizationId,
-          file_name: fileName,
-          file_path: filePath,
-          file_size: pdfBlob.size,
-          content_type: 'application/pdf',
-          uploaded_by: user.id,
-        });
-      if (insertErr) throw insertErr;
+      if (moId) {
+        const { error: insertErr } = await supabase
+          .from('manufacturing_order_attachments')
+          .insert({
+            manufacturing_order_id: moId,
+            organization_id: activeOrganizationId,
+            file_name: fileName,
+            file_path: filePath,
+            file_size: pdfBlob.size,
+            content_type: 'application/pdf',
+            uploaded_by: user.id,
+          });
+        if (insertErr) throw insertErr;
+      }
     } catch (err: unknown) {
       console.error('Failed to upload delivery PDF:', err);
     }
@@ -395,6 +409,7 @@ export default function DeliveryNoteDetail() {
               ) : (
                 lines.map((line) => {
                   const isAccessory = line.line_type === 'accessory';
+                  const isSupply = line.line_type === 'supply';
                   const sol = line.mo_line?.SaleOrderLine;
 
                   let descParts: string[] = [];
@@ -402,6 +417,12 @@ export default function DeliveryNoteDetail() {
                     descParts = [line.accessory?.catalog_item_name ?? 'Accessory'];
                     if (line.accessory?.catalog_item_sku) {
                       descParts[0] += ` (${line.accessory.catalog_item_sku})`;
+                    }
+                  } else if (isSupply) {
+                    const name = line.supply_line?.catalog_item_name ?? line.supply_line?.description ?? 'Supply Item';
+                    descParts = [name];
+                    if (line.supply_line?.catalog_item_sku) {
+                      descParts.push(line.supply_line.catalog_item_sku);
                     }
                   } else {
                     const collVar = sol?.collection_name && sol?.variant_name
@@ -417,10 +438,18 @@ export default function DeliveryNoteDetail() {
                     }
                   }
 
+                  const rowBg = line.checked
+                    ? 'bg-green-50/50'
+                    : isAccessory
+                      ? 'bg-amber-50/30'
+                      : isSupply
+                        ? 'bg-blue-50/30'
+                        : '';
+
                   return (
                     <tr
                       key={line.id}
-                      className={`border-t hover:bg-gray-50 ${line.checked ? 'bg-green-50/50' : ''} ${isAccessory ? 'bg-amber-50/30' : ''}`}
+                      className={`border-t hover:bg-gray-50 ${rowBg}`}
                     >
                       <td className="px-3 py-3 text-center">
                         <button
@@ -448,28 +477,30 @@ export default function DeliveryNoteDetail() {
                       <td className="px-3 py-3 text-gray-700">
                         {isAccessory ? (
                           <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700">ACC</span>
+                        ) : isSupply ? (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-blue-700">SUPPLY</span>
                         ) : (
                           sol?.area ?? '—'
                         )}
                       </td>
                       <td className="px-3 py-3 text-center text-gray-700">
-                        {isAccessory ? '—' : (sol?.position ?? '—')}
+                        {(isAccessory || isSupply) ? '—' : (sol?.position ?? '—')}
                       </td>
                       <td className="px-3 py-3">
                         {descParts.map((part, i) => (
                           <div key={i} className={i === 0 ? 'font-medium text-gray-900' : 'text-xs text-gray-500'}>{part}</div>
                         ))}
-                        {!isAccessory && line.manufacturing_order_no && (
+                        {!isAccessory && !isSupply && line.manufacturing_order_no && (
                           <div className="text-[10px] text-gray-400 mt-0.5">{line.manufacturing_order_no}</div>
                         )}
                       </td>
                       <td className="px-3 py-3 text-gray-600 text-sm tabular-nums">
-                        {!isAccessory && sol?.width_m && sol?.height_m
+                        {!isAccessory && !isSupply && sol?.width_m && sol?.height_m
                           ? `${Math.round(Number(sol.width_m) * 1000)} x ${Math.round(Number(sol.height_m) * 1000)}`
                           : '—'}
                       </td>
                       <td className="px-3 py-3 text-center text-gray-600 text-xs">
-                        {isAccessory ? 'Accessory' : (sol?.product_type ?? '—')}
+                        {isAccessory ? 'Accessory' : isSupply ? (line.supply_line?.product_type ?? 'Supply') : (sol?.product_type ?? '—')}
                       </td>
                       <td className="px-3 py-3 text-right tabular-nums">{line.quantity_delivered}</td>
                       <td className="px-3 py-3 text-center">

@@ -7,8 +7,9 @@ export interface DeliveryNoteLine {
   id: string;
   delivery_note_id: string;
   mo_line_id: string | null;
+  sale_order_line_id: string | null;
   so_accessory_id: string | null;
-  line_type: 'product' | 'accessory';
+  line_type: 'product' | 'supply' | 'accessory';
   quantity_delivered: number;
   checked: boolean;
   checked_at: string | null;
@@ -30,6 +31,13 @@ export interface DeliveryNoteLine {
       CatalogItems?: { name: string; sku: string } | null;
     } | null;
   };
+  supply_line?: {
+    description: string | null;
+    product_type: string | null;
+    quantity: number;
+    catalog_item_name: string | null;
+    catalog_item_sku: string | null;
+  } | null;
   accessory?: {
     catalog_item_name: string | null;
     catalog_item_sku: string | null;
@@ -100,6 +108,7 @@ export function useCreateDeliveryNote() {
       const dnLines: any[] = [];
 
       if (salesOrderId) {
+        // MO-backed lines (manufactured products)
         const { data: mos } = await supabase
           .from('ManufacturingOrders')
           .select('id')
@@ -123,7 +132,41 @@ export function useCreateDeliveryNote() {
                 mo_line_id: ml.id,
                 quantity_delivered: ml.quantity,
                 checked: false,
+                line_type: 'product',
               });
+            }
+          }
+        }
+
+        // Supply-only lines (catalog / window film)
+        const { data: ptRows } = await supabase
+          .from('ProductTypes')
+          .select('code, fulfillment_type')
+          .eq('organization_id', activeOrganizationId);
+        const supplyOnlyCodes = new Set<string>();
+        (ptRows ?? []).forEach((pt: any) => {
+          if (pt.fulfillment_type === 'supply_only') supplyOnlyCodes.add(pt.code);
+        });
+
+        if (supplyOnlyCodes.size > 0) {
+          const { data: supplyLines } = await supabase
+            .from('SaleOrderLines')
+            .select('id, quantity, product_type')
+            .eq('sales_order_id', salesOrderId)
+            .eq('deleted', false)
+            .in('delivery_status', ['pending', 'ready']);
+
+          if (supplyLines) {
+            for (const sl of supplyLines) {
+              if (supplyOnlyCodes.has(sl.product_type ?? '')) {
+                dnLines.push({
+                  delivery_note_id: dn.id,
+                  sale_order_line_id: sl.id,
+                  quantity_delivered: sl.quantity,
+                  checked: false,
+                  line_type: 'supply',
+                });
+              }
             }
           }
         }
@@ -190,6 +233,7 @@ export function useDeliveryNote(deliveryNoteId: string | null) {
 
       if (dnLines && dnLines.length > 0) {
         const productLines = dnLines.filter((l: any) => l.mo_line_id);
+        const supplyLines = dnLines.filter((l: any) => l.line_type === 'supply' && l.sale_order_line_id);
         const accessoryLineIds = dnLines.filter((l: any) => l.so_accessory_id).map((l: any) => l.so_accessory_id);
 
         // Resolve product lines (MOLines → SOLines → CatalogItems)
@@ -283,6 +327,40 @@ export function useDeliveryNote(deliveryNoteId: string | null) {
           }
         }
 
+        // Resolve supply lines (SaleOrderLines → CatalogItems)
+        let supplyMap = new Map<string, any>();
+        if (supplyLines.length > 0) {
+          const supplySolIds = supplyLines.map((l: any) => l.sale_order_line_id);
+          const { data: sols } = await supabase
+            .from('SaleOrderLines')
+            .select('id, description, product_type, quantity, catalog_item_id')
+            .in('id', supplySolIds);
+
+          if (sols) {
+            const supplyCatIds = [...new Set(sols.map((s: any) => s.catalog_item_id).filter(Boolean))];
+            let supplyCatMap = new Map<string, any>();
+            if (supplyCatIds.length > 0) {
+              const { data: cats } = await supabase.from('CatalogItems').select('id, name, sku').in('id', supplyCatIds);
+              if (cats) supplyCatMap = new Map(cats.map((c: any) => [c.id, c]));
+            }
+
+            const ptCodes = [...new Set(sols.map((s: any) => s.product_type).filter(Boolean))];
+            let ptNameMap = new Map<string, string>();
+            if (ptCodes.length > 0) {
+              const { data: pts } = await supabase.from('ProductTypes').select('code, name').in('code', ptCodes);
+              if (pts) ptNameMap = new Map(pts.map((p: any) => [p.code, p.name]));
+            }
+
+            supplyMap = new Map(sols.map((s: any) => [s.id, {
+              description: s.description,
+              product_type: ptNameMap.get(s.product_type) ?? s.product_type ?? null,
+              quantity: s.quantity,
+              catalog_item_name: supplyCatMap.get(s.catalog_item_id)?.name ?? null,
+              catalog_item_sku: supplyCatMap.get(s.catalog_item_id)?.sku ?? null,
+            }]));
+          }
+        }
+
         setLines(dnLines.map((l: any) => {
           const molData = l.mo_line_id ? molMap.get(l.mo_line_id) : null;
           return {
@@ -290,6 +368,7 @@ export function useDeliveryNote(deliveryNoteId: string | null) {
             line_type: l.line_type ?? (l.so_accessory_id ? 'accessory' : 'product'),
             manufacturing_order_no: molData?.manufacturing_order_no ?? null,
             mo_line: molData ? { ...molData } : null,
+            supply_line: l.sale_order_line_id ? supplyMap.get(l.sale_order_line_id) ?? null : null,
             accessory: l.so_accessory_id ? accMap.get(l.so_accessory_id) ?? null : null,
           };
         }));

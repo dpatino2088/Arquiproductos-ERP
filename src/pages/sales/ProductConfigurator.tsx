@@ -880,11 +880,15 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
     
     // ✅ NO inicializar hardware_color automáticamente - usuario debe seleccionar
 
-    // Catalog Item: only needs catalog_item_id, no measurements/fabric/hardware
+    // Catalog Item or Window Film: only needs catalog_item_id, no measurements/fabric/hardware
     const isCatalogItem = productType === 'catalog' || configAny.productType === 'catalog';
-    if (isCatalogItem) {
+    const isWindowFilm = productType === 'window-film' || configAny.productType === 'window-film';
+    if (isCatalogItem || isWindowFilm) {
       if (!configAny.catalog_item_id) {
-        errors.push('Please select a catalog item');
+        errors.push(isWindowFilm ? 'Please select a window film' : 'Please select a catalog item');
+      }
+      if (isWindowFilm && !configAny.sell_mode) {
+        errors.push('Please select sell mode (Roll or Linear Meter)');
       }
     } else {
     // Core validations (full products). product_type_id puede venir de config como productTypeId (paso PRODUCT)
@@ -1014,6 +1018,37 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
         return;
       }
 
+      // Window Film: pass config to QuoteNew — same RPC as catalog but with film-specific fields
+      if (isWindowFilm) {
+        const filmPayload = {
+          productType: 'window-film' as const,
+          catalog_item_id: configAny.catalog_item_id,
+          name: configAny.name ?? '',
+          sku: configAny.sku ?? '',
+          unit_price: configAny.unit_price ?? 0,
+          qty: configAny.sell_mode === 'roll' ? (configAny.qty ?? 1) : 1,
+          sell_mode: configAny.sell_mode,
+          film_model: configAny.film_model ?? '',
+          film_collection: configAny.film_collection ?? '',
+          film_variant: configAny.film_variant ?? '',
+          film_width: configAny.film_width ?? 0,
+          roll_width_inches: configAny.roll_width_inches ?? configAny.film_width ?? 0,
+          roll_width_m: configAny.roll_width_m ?? 0,
+          roll_length_m: configAny.roll_length_m ?? 0,
+          roll_area_m2: configAny.roll_area_m2 ?? 0,
+          linear_length_m: configAny.linear_length_m ?? 0,
+          area_m2: configAny.area_m2 ?? 0,
+          min_length_m: configAny.min_length_m ?? 0,
+          area: configAny.area ?? null,
+          position: configAny.position ?? null,
+          manufacturer: configAny.manufacturer ?? null,
+        } as ProductConfig;
+        await onComplete(filmPayload);
+        clearDraft();
+        onClose();
+        return;
+      }
+
       // Helpers
       const pickSku = (cfg: any, keys: string[]): string | null => {
         for (const k of keys) {
@@ -1067,12 +1102,11 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
             // ✅ SKUs: asegurar que estén trim y no sean null/undefined
             bottom_bar_item_id: configAny.bottom_bar_item_id || null,
             bottom_bar_sku: pickSku(configAny, ['bottom_bar_sku', 'bottomBarSku', 'bottom_bar']) || null,
-            // ✅ Persist 'NONE' as-is so Edit can distinguish between UNSET (null) and "Not Included" ('NONE')
             headbox_item_id: configAny.headbox_item_id === 'NONE' ? 'NONE' : (configAny.headbox_item_id || null),
             headbox_sku: configAny.headbox_item_id === 'NONE' ? null : (configAny.headbox_sku ? String(configAny.headbox_sku).trim() : null),
-            side_channel_item_id: configAny.side_channel_item_id === 'NONE' ? 'NONE' : (configAny.side_channel_item_id || null),
+            side_channel_item_id: configAny.side_channel_item_id === 'NONE' ? null : (configAny.side_channel_item_id || null),
             side_channel_sku: configAny.side_channel_item_id === 'NONE' ? null : (configAny.side_channel_sku ? String(configAny.side_channel_sku).trim() : null),
-            bottom_channel_item_id: configAny.bottom_channel_item_id === 'NONE' ? 'NONE' : (configAny.bottom_channel_item_id || null),
+            bottom_channel_item_id: configAny.bottom_channel_item_id === 'NONE' ? null : (configAny.bottom_channel_item_id || null),
             bottom_channel_sku: configAny.bottom_channel_item_id === 'NONE' ? null : (configAny.bottom_channel_sku ? String(configAny.bottom_channel_sku).trim() : null),
             motor_item_id: configAny.motor_item_id || null,
             motor_sku: configAny.motor_sku ? String(configAny.motor_sku).trim() : null,

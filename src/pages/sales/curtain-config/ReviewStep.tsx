@@ -972,12 +972,56 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
                 </div>
 
                 {/* ── Window Film only ── */}
-                {isWindowFilm && (
-                  <div className={specRow}>
-                    <span className="font-medium text-gray-700">Film Type:</span>
-                    <span className="ml-2 text-gray-900">{(config as any).filmType || 'Not selected'}</span>
-                  </div>
-                )}
+                {isWindowFilm && (() => {
+                  const c = config as any;
+                  const sellMode = c.sell_mode || 'roll';
+                  const filmCollection = c.film_collection || '';
+                  const filmVariant = c.film_variant || '';
+                  const filmModel = filmCollection && filmVariant ? `${filmCollection} ${filmVariant}` : (c.film_model || c.name || 'Not selected');
+                  const rollWidthIn = c.roll_width_inches || c.film_width || 0;
+                  const rollWidthM = c.roll_width_m || 0;
+                  const linearLen = c.linear_length_m || 0;
+                  const qty = c.qty || 1;
+                  return (
+                    <>
+                      <div className={specRow}>
+                        <span className="font-medium text-gray-700">Collection:</span>
+                        <span className="ml-2 text-gray-900">{filmCollection || '—'}</span>
+                      </div>
+                      <div className={specRow}>
+                        <span className="font-medium text-gray-700">Film:</span>
+                        <span className="ml-2 text-gray-900">{filmModel}</span>
+                      </div>
+                      <div className={specRow}>
+                        <span className="font-medium text-gray-700">SKU:</span>
+                        <span className="ml-2 text-gray-900">{c.sku || '—'}</span>
+                      </div>
+                      <div className={specRow}>
+                        <span className="font-medium text-gray-700">Roll Width:</span>
+                        <span className="ml-2 text-gray-900">{rollWidthIn}" ({rollWidthM.toFixed(2)}m)</span>
+                      </div>
+                      <div className={specRow}>
+                        <span className="font-medium text-gray-700">Sell Mode:</span>
+                        <span className="ml-2 text-gray-900">{sellMode === 'roll' ? 'Full Roll' : 'Linear Meter'}</span>
+                      </div>
+                      {sellMode === 'roll' ? (
+                        <div className={specRow}>
+                          <span className="font-medium text-gray-700">Quantity:</span>
+                          <span className="ml-2 text-gray-900">{qty} roll{qty > 1 ? 's' : ''}</span>
+                        </div>
+                      ) : (
+                        <div className={specRow}>
+                          <span className="font-medium text-gray-700">Length:</span>
+                          <span className="ml-2 text-gray-900">{linearLen.toFixed(2)} m</span>
+                        </div>
+                      )}
+                      <div className={specRow}>
+                        <span className="font-medium text-gray-700">Manufacturer:</span>
+                        <span className="ml-2 text-gray-900">{c.manufacturer || '—'}</span>
+                      </div>
+                    </>
+                  );
+                })()}
 
                 {/* ── Drapery-specific ── */}
                 {isDrapery && (() => {

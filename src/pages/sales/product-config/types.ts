@@ -251,21 +251,20 @@ export interface AwningConfig extends BaseProductConfig {
 // Window Film Configuration
 export interface WindowFilmConfig extends BaseProductConfig {
   productType: 'window-film';
-  // Film Type
-  filmType?: 'static' | 'adhesive' | 'decorative';
-  filmCategory?: string;
-  // Opacity/Properties
-  opacity?: number; // 0-100
-  uvProtection?: boolean;
-  heatRejection?: boolean;
-  privacy?: boolean;
-  // Glass Measurements
-  width_mm?: number;
-  height_mm?: number;
-  // Installation Type
-  installationType?: 'inside' | 'outside';
-  // Accessories
-  accessories?: Array<{ id: string; name: string; qty: number; price: number }>;
+  catalog_item_id?: string;
+  name?: string;
+  sku?: string;
+  film_model?: string;
+  roll_width_inches?: number;
+  roll_width_m?: number;
+  roll_length_m?: number;
+  roll_area_m2?: number;
+  sell_mode?: 'roll' | 'linear';
+  linear_length_m?: number;
+  area_m2?: number;
+  unit_price?: number;
+  qty?: number;
+  min_length_m?: number;
 }
 
 // Catalog Item configuration — one SKU × quantity, creates a ConfiguredProduct

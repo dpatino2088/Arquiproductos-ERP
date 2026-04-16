@@ -11,7 +11,7 @@ import { router } from '../../lib/router';
 import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
 import { formatCurrency, formatDate } from '../../lib/utils';
 import { useSOActions } from '../../hooks/useSOActions';
-import { ChevronDown, FileText, ShoppingBag, CreditCard, Factory, Package, CheckCircle2, AlertTriangle, XCircle, ArrowLeft, Eye, Loader2 } from 'lucide-react';
+import { ChevronDown, FileText, ShoppingBag, CreditCard, Factory, Package, CheckCircle2, AlertTriangle, XCircle, ArrowLeft, Eye, Loader2, Truck } from 'lucide-react';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useSOFulfillmentSummary } from '../../hooks/useInventoryAllocations';
 import { usePayments } from '../../hooks/usePayments';
@@ -195,6 +195,7 @@ export default function SalesOrderDetail() {
   const [moLineCounts, setMoLineCounts] = useState<Map<string, number>>(new Map());
   const [moDisplayStatusMap, setMoDisplayStatusMap] = useState<Map<string, string>>(new Map());
   const [soClaims, setSOClaims] = useState<{ id: string; claim_no: string; status: string; claim_type: string; created_at: string }[]>([]);
+  const [supplyOnlyCodes, setSupplyOnlyCodes] = useState<Set<string>>(new Set());
 
   const { transitionSOStatus, createMO, isActing } = useSOActions();
   const { registerSubmodules } = useSubmoduleNav();
@@ -366,6 +367,19 @@ export default function SalesOrderDetail() {
       } else {
         setLinkedInvoices((invoicesRes.data ?? []) as SOInvoice[]);
       }
+      // Fetch fulfillment_type for product types in this SO
+      {
+        const { data: ptRows } = await supabase
+          .from('ProductTypes')
+          .select('code, fulfillment_type')
+          .eq('organization_id', activeOrganizationId);
+        const codes = new Set<string>();
+        (ptRows ?? []).forEach((pt: { code: string; fulfillment_type: string }) => {
+          if (pt.fulfillment_type === 'supply_only') codes.add(pt.code);
+        });
+        setSupplyOnlyCodes(codes);
+      }
+
       refetchPayments();
       // Fetch service claims linked to this SO
       if (salesOrderId) {
@@ -443,6 +457,13 @@ export default function SalesOrderDetail() {
   }, [salesOrderId, user, mos, createMO, addNotification, refetch]);
 
 
+  const isSupplyOnlyOrder = lines.length > 0 && lines.every(
+    (l) => supplyOnlyCodes.has(l.product_type ?? '')
+  );
+  const hasManufactureLines = lines.some(
+    (l) => !supplyOnlyCodes.has(l.product_type ?? '')
+  );
+
   const actionButtons = useMemo(() => {
     if (!so) return [];
     const status = (so.status || 'draft').toLowerCase();
@@ -457,6 +478,12 @@ export default function SalesOrderDetail() {
     if (status === 'delivered') {
       btns.push({ label: 'Close Order', onClick: () => handleTransition('closed'), status: 'closed' });
     }
+    if (isInternal && isSupplyOnlyOrder && ['confirmed', 'draft', 'on_hold'].includes(status)) {
+      btns.push({
+        label: 'Create Delivery Note',
+        onClick: () => router.navigate(`/manufacturing/delivery-notes/new?so_id=${so.id}`),
+      });
+    }
     if (isInternal) {
       if (['draft', 'confirmed', 'on_hold'].includes(status)) {
         btns.push({ label: 'Cancel', onClick: () => handleTransition('cancelled'), status: 'cancelled' });
@@ -469,7 +496,7 @@ export default function SalesOrderDetail() {
       }
     }
     return btns;
-  }, [so, isInternal, handleTransition, handleCreateMO]);
+  }, [so, isInternal, handleTransition, handleCreateMO, isSupplyOnlyOrder]);
 
   const currentMfgStepIndex = useMemo(() => {
     if (mos.length === 0) return -1;
@@ -793,6 +820,7 @@ export default function SalesOrderDetail() {
   const soStatus = (so.status || 'draft').toLowerCase();
   const MIN_PAYMENT_PCT = 0.15;
   const hasPaidAmount = isZeroValueOrder || totalPaid >= orderTotal * MIN_PAYMENT_PCT;
+
   const manufacturingProgressCard = (
     <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
       <h3 className="text-sm font-medium text-gray-500 mb-4">Manufacturing Status</h3>
@@ -892,7 +920,14 @@ export default function SalesOrderDetail() {
           {/* Row 1: Order Details + Financial Summary */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">Order Details</h3>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-gray-900">Order Details</h3>
+                {isSupplyOnlyOrder && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
+                    <Package className="w-3 h-3" /> Supply Only
+                  </span>
+                )}
+              </div>
               <dl className="space-y-2 text-sm">
                 <div className="flex justify-between">
                   <dt className="text-gray-500">Quote</dt>
@@ -1077,7 +1112,9 @@ export default function SalesOrderDetail() {
         <div className="space-y-3">
           {isInternal && ['confirmed', 'draft', 'on_hold'].includes(soStatus) && (
             <p className="text-xs text-gray-500">
-              Sales Order creates one Manufacturing Order by default. If needed, split production later from Manufacturing.
+              {isSupplyOnlyOrder
+                ? 'All lines are supply-only. No manufacturing required — create a Delivery Note directly.'
+                : 'Sales Order creates one Manufacturing Order by default. If needed, split production later from Manufacturing.'}
             </p>
           )}
           <div className="rounded-lg border border-gray-200 overflow-hidden bg-white">
@@ -1126,7 +1163,11 @@ export default function SalesOrderDetail() {
                         <td className="px-4 py-4 text-right font-mono text-gray-900">{formatCurrency(line.unit_price ?? 0, currency)}</td>
                         <td className="px-4 py-4 text-right font-mono font-medium text-gray-900">{formatCurrency(line.line_total ?? 0, currency)}</td>
                         <td className="px-4 py-4 text-center">
-                          {linkedMo ? (
+                          {supplyOnlyCodes.has(line.product_type ?? '') ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
+                              <Package className="w-3 h-3" /> Supply
+                            </span>
+                          ) : linkedMo ? (
                             <button
                               type="button"
                               onClick={() => router.navigate(withReturnTo(`/manufacturing/manufacturing-orders/${linkedMo.mo_id}`))}
@@ -1211,6 +1252,24 @@ export default function SalesOrderDetail() {
                 )}
               </dl>
               {isInternal && ['confirmed', 'draft', 'on_hold'].includes(soStatus) && (() => {
+                if (isSupplyOnlyOrder) {
+                  return (
+                    <div className="mt-4 pt-3 border-t border-gray-100 space-y-3">
+                      <p className="text-xs text-gray-500 flex items-center gap-1.5">
+                        <Package className="w-3.5 h-3.5" />
+                        Supply only — no manufacturing required.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => router.navigate(`/manufacturing/delivery-notes/new?so_id=${so.id}`)}
+                        className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+                      >
+                        <Truck className="w-4 h-4" />
+                        Create Delivery Note
+                      </button>
+                    </div>
+                  );
+                }
                 const activeMo = mos.find((m) => (m.status || '').toLowerCase() !== 'cancelled');
                 return (
                   <div className="mt-4 pt-3 border-t border-gray-100">

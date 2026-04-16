@@ -22,7 +22,7 @@
  * (Avoids losing headbox/side_channel/bottom_channel selection on Edit open.)
  */
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { CurtainConfiguration } from '../CurtainConfigurator';
 import { ProductConfig } from '../product-config/types';
 import Label from '../../../components/ui/Label';
@@ -69,6 +69,49 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
   const mfrFilteredTemplates: string[] | null = Array.isArray((config as any)._manufacturer_filtered_templates)
     ? (config as any)._manufacturer_filtered_templates
     : null;
+  const configManufacturer: string | undefined = (config as any).manufacturer;
+
+  const applyMfrConstraint = (q: any) => {
+    if (mfrFilteredTemplates && mfrFilteredTemplates.length > 0) return q.in('id', mfrFilteredTemplates);
+    if (configManufacturer) return q.ilike('manufacturer', configManufacturer);
+    return q;
+  };
+
+  // When the prop filteredTemplateIds is missing (edit/duplicate) but manufacturer
+  // is known, derive template IDs so every downstream hook is manufacturer-scoped.
+  const [mfrDerivedTemplateIds, setMfrDerivedTemplateIds] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    if (filteredTemplateIds && filteredTemplateIds.length > 0) {
+      setMfrDerivedTemplateIds(null);
+      return;
+    }
+    if (!configManufacturer || !activeOrganizationId || !productTypeId) {
+      setMfrDerivedTemplateIds(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from('BOMTemplates')
+        .select('id')
+        .eq('organization_id', activeOrganizationId)
+        .eq('product_type_id', productTypeId)
+        .ilike('manufacturer', configManufacturer)
+        .eq('is_active', true)
+        .eq('archived', false);
+      if (!cancelled && !error) {
+        const ids = (data || []).map((t: { id: string }) => t.id);
+        setMfrDerivedTemplateIds(ids.length > 0 ? ids : null);
+        if (import.meta.env.DEV) {
+          console.debug('[HardwareStep] Derived mfr templates:', { manufacturer: configManufacturer, count: ids.length });
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [filteredTemplateIds, configManufacturer, activeOrganizationId, productTypeId]);
+
+  const effectiveFilteredTemplateIds = filteredTemplateIds ?? mfrDerivedTemplateIds ?? undefined;
 
   const loadTemplatesForColor = async (color: string): Promise<string[]> => {
     if (!activeOrganizationId || !productTypeId) return [];
@@ -84,7 +127,7 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
       .eq('is_active', true)
       .eq('archived', false);
 
-    if (mfrFilteredTemplates && mfrFilteredTemplates.length > 0) query = query.in('id', mfrFilteredTemplates);
+    query = applyMfrConstraint(query);
     
     const { data: templates, error } = await query;
     
@@ -103,7 +146,7 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
         .eq('is_active', true)
         .eq('archived', false);
 
-      if (mfrFilteredTemplates && mfrFilteredTemplates.length > 0) fallbackQuery = fallbackQuery.in('id', mfrFilteredTemplates);
+      fallbackQuery = applyMfrConstraint(fallbackQuery);
 
       const { data: nullTemplates } = await fallbackQuery;
       return (nullTemplates || []).map((t: { id: string }) => t.id);
@@ -261,7 +304,7 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
     productTypeId,
     currentHardwareColor,
     'bottom_bar',
-    filteredTemplateIds,
+    effectiveFilteredTemplateIds,
     panelCount
   );
   
@@ -330,16 +373,14 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
 
   const templatesAfterBottomBar = useMemo(() => {
     if (!selectedBottomBar || !selectedBottomBar.templateIds) {
-      // Si no hay selección, usar todos los templates disponibles
-      return filteredTemplateIds || null;
+      return effectiveFilteredTemplateIds || null;
     }
-    if (filteredTemplateIds) {
-      // Intersectar con templates existentes
+    if (effectiveFilteredTemplateIds) {
       const set = new Set(selectedBottomBar.templateIds);
-      return filteredTemplateIds.filter(tid => set.has(tid));
+      return effectiveFilteredTemplateIds.filter(tid => set.has(tid));
     }
     return selectedBottomBar.templateIds;
-  }, [selectedBottomBar, filteredTemplateIds]);
+  }, [selectedBottomBar, effectiveFilteredTemplateIds]);
   
   // ✅ Headbox: desde templates filtrados por Bottom Bar
   const { options: headboxOptions, loading: loadingHeadbox, roleRequired: headboxIsRequired } = useBOMTemplateOptionsSimple(
@@ -530,7 +571,7 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
     const updates: any = {};
     if ((config as any)._headboxPolicy !== headboxPolicy) updates._headboxPolicy = headboxPolicy;
     const scPolicy: 'required' | 'optional' | 'none' =
-      !showSideChannel ? 'none' : sideChannelIsRequired ? 'required' : 'optional';
+      (!isRollerShade || !showSideChannel) ? 'none' : sideChannelIsRequired ? 'required' : 'optional';
     if ((config as any)._sideChannelPolicy !== scPolicy) updates._sideChannelPolicy = scPolicy;
     if (Object.keys(updates).length > 0) onUpdate(updates);
   }, [headboxPolicy, showSideChannel, sideChannelIsRequired, loadingHeadbox, loadingSideChannel]);
@@ -960,8 +1001,8 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
           </div>
         )}
 
-        {/* Side Channel Items */}
-        {showSideChannel && currentHardwareColor && (config as any).bottom_bar_item_id && (
+        {/* Side Channel Items — Roller Shade only (optional) */}
+        {isRollerShade && showSideChannel && currentHardwareColor && (config as any).bottom_bar_item_id && (
           <div>
             <div className="flex items-center gap-3 mb-5">
               <Label className="text-sm font-medium block min-w-[12rem]">SIDE CHANNEL ITEMS</Label>

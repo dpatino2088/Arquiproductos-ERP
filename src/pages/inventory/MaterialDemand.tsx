@@ -48,6 +48,7 @@ interface DemandRow {
   roll_length_uom: string | null;
   unit_of_measure: string | null;
   measure_basis: string;
+  source: 'manufacturing' | 'supply';
 }
 
 interface CreatedPO {
@@ -105,13 +106,35 @@ export default function MaterialDemand() {
     queryKey: ['material-demand', activeOrganizationId],
     queryFn: async (): Promise<DemandRow[]> => {
       if (!activeOrganizationId) return [];
-      const { data: demand, error } = await supabase
-        .from('manufacturing_order_material_demand')
-        .select('*')
-        .eq('organization_id', activeOrganizationId)
-        .in('mo_status', ['confirmed', 'procurement']);
-      if (error) throw error;
-      if (!demand?.length) return [];
+      const [mfgResult, supplyResult] = await Promise.all([
+        supabase
+          .from('manufacturing_order_material_demand')
+          .select('*')
+          .eq('organization_id', activeOrganizationId)
+          .in('mo_status', ['confirmed', 'procurement']),
+        supabase
+          .from('supply_order_material_demand')
+          .select('*')
+          .eq('organization_id', activeOrganizationId)
+          .in('so_status', ['confirmed', 'draft']),
+      ]);
+      if (mfgResult.error) throw mfgResult.error;
+
+      const mfgDemand = (mfgResult.data ?? []).map((d: any) => ({ ...d, source: 'manufacturing' as const }));
+      const supplyDemand = (supplyResult.data ?? []).map((d: any) => ({
+        manufacturing_order_id: d.sales_order_id,
+        organization_id: d.organization_id,
+        catalog_item_id: d.catalog_item_id,
+        sku: d.sku,
+        item_name: d.item_name,
+        required_qty: d.required_qty,
+        uom: d.uom,
+        manufacturing_order_no: d.sales_order_no,
+        mo_status: d.so_status,
+        source: 'supply' as const,
+      }));
+      const demand = [...mfgDemand, ...supplyDemand];
+      if (!demand.length) return [];
 
       const catalogIds = [...new Set(demand.map((d: any) => d.catalog_item_id).filter(Boolean))];
       const demandMoIds = new Set(demand.map((d: any) => d.manufacturing_order_id as string));
@@ -331,6 +354,7 @@ export default function MaterialDemand() {
           unit_of_measure: v?.unit_of_measure ?? null,
           measure_basis: (v?.measure_basis ?? 'unit') as string,
           need_to_buy: itemNeedToBuyMap.get(d.catalog_item_id) ?? 0,
+          source: d.source ?? 'manufacturing',
         };
       });
     },
@@ -703,7 +727,7 @@ export default function MaterialDemand() {
         <div>
           <h1 className="text-xl font-semibold text-foreground mb-1">Material Demand</h1>
           <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-            Materials required by Reviewed &amp; Procurement Manufacturing Orders
+            Materials required by Manufacturing Orders &amp; Supply Orders
           </p>
         </div>
         {selectedRows.size > 0 && (
@@ -735,7 +759,7 @@ export default function MaterialDemand() {
               <span className="flex items-center gap-1.5">
                 <Filter className="w-3.5 h-3.5 text-gray-400" />
                 <span className={filterMoId ? 'text-gray-900' : 'text-gray-400'}>
-                  {selectedMOLabel ?? 'All MOs'}
+                  {selectedMOLabel ?? 'All Orders'}
                 </span>
               </span>
               {filterMoId ? (
@@ -751,7 +775,7 @@ export default function MaterialDemand() {
                 <div className="p-2 border-b">
                   <input
                     type="text"
-                    placeholder="Search MO#..."
+                    placeholder="Search MO# / SO#..."
                     value={moFilterSearch}
                     onChange={e => setMoFilterSearch(e.target.value)}
                     className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
@@ -764,10 +788,10 @@ export default function MaterialDemand() {
                     onClick={() => { setFilterMoId(null); setShowMODropdown(false); setMoFilterSearch(''); }}
                     className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 ${!filterMoId ? 'bg-primary/5 font-medium' : ''}`}
                   >
-                    All MOs
+                    All Orders
                   </button>
                   {filteredMoOptions.length === 0 ? (
-                    <div className="px-3 py-4 text-sm text-gray-500 text-center">No MOs found</div>
+                    <div className="px-3 py-4 text-sm text-gray-500 text-center">No orders found</div>
                   ) : filteredMoOptions.map(mo => (
                     <button
                       key={mo.id}
@@ -866,7 +890,7 @@ export default function MaterialDemand() {
                     className="rounded border-gray-300 text-primary focus:ring-primary/20"
                   />
                 </th>
-                <th className="px-4 py-3 text-left font-medium text-gray-700 w-36">MO #</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700 w-36">Order #</th>
                 <th className="px-4 py-3 text-left font-medium text-gray-700 w-32">Status</th>
                 <th className="px-4 py-3 text-left font-medium text-gray-700 cursor-pointer w-36" onClick={() => handleSort('sku')}>
                   SKU <SortIcon col="sku" />
@@ -928,7 +952,14 @@ export default function MaterialDemand() {
                         className="rounded border-gray-300 text-primary focus:ring-primary/20 disabled:opacity-30 disabled:cursor-not-allowed"
                       />
                     </td>
-                    <td className="px-4 py-3 font-medium text-gray-900">{r.manufacturing_order_no}</td>
+                    <td className="px-4 py-3 font-medium text-gray-900">
+                      <div className="flex items-center gap-1.5">
+                        {r.source === 'supply' && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-blue-700">SO</span>
+                        )}
+                        {r.manufacturing_order_no}
+                      </div>
+                    </td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                         r.mo_status === 'confirmed' ? 'bg-indigo-50 text-indigo-700' :
