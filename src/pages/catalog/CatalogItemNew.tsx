@@ -1228,6 +1228,12 @@ export default function CatalogItemNew() {
         } else {
           payload = fullPayload;
         }
+        // Roll item names are derived from collection + variant.
+        // Always persist the normalized name on update so stale suffixes
+        // like "(Copy)" are removed even when those fields were not marked dirty.
+        if (values.is_roll) {
+          payload.name = fullPayload.name;
+        }
         await updateItem(effectiveItemId, payload);
         finalItemId = effectiveItemId;
         const updatedItem =

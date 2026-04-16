@@ -4803,15 +4803,20 @@ export default function QuoteNew() {
                             const ci = line.CatalogItems ?? {};
                             const widthM = Number(snap.roll_width_m) || Number(ci.roll_width_m) || 0;
                             const isRoll = snap.sell_mode === 'roll';
+                            const rawLinearLenM = Number(snap.linear_length_m) || 0;
+                            const normalizedLinearLenM = rawLinearLenM > 100 ? rawLinearLenM / 1000 : rawLinearLenM;
                             const lengthM = isRoll
                               ? (Number(snap.roll_length_m) || Number(ci.roll_length_m) || 0)
-                              : (Number(snap.linear_length_m) || 0);
+                              : normalizedLinearLenM;
                             const widthMm = Math.round(widthM * 1000);
                             const lengthMm = Math.round(lengthM * 1000);
                             if (!widthMm && !lengthMm) return <span className="text-gray-400">—</span>;
                             return (
                               <div className="text-xs leading-tight font-medium">
-                                {widthMm} × {lengthMm}
+                                <div>{widthMm} × {lengthMm}</div>
+                                <div className="text-[11px] text-gray-500 mt-0.5">
+                                  {lengthM.toFixed(2)} m
+                                </div>
                               </div>
                             );
                           })() : (
@@ -5119,6 +5124,17 @@ export default function QuoteNew() {
         const qty = line.quantity ?? line.qty ?? 1;
         const unitPrice = line.unit_msrp != null ? Number(line.unit_msrp) : (line.msrp != null && qty > 0 ? Number(line.msrp) / qty : 0);
         const lineTotal = line.msrp != null ? Number(line.msrp) : unitPrice * qty;
+        const isFilmPreview = line.product_type === 'window_film';
+        const filmSnap = line.config_snapshot ?? {};
+        const rawLinearLenM = Number(filmSnap.linear_length_m) || 0;
+        const normalizedLinearLenM = rawLinearLenM > 100 ? rawLinearLenM / 1000 : rawLinearLenM;
+        const filmSellMode = filmSnap.sell_mode === 'linear' ? 'Linear Meter' : 'Full Roll';
+        const filmWidthM = Number(filmSnap.roll_width_m) || Number(line.CatalogItems?.roll_width_m) || 0;
+        const filmWidthIn = Number(filmSnap.roll_width_inches) || Number(filmSnap.film_width) || Math.round(filmWidthM * 39.3701);
+        const filmLengthM =
+          filmSnap.sell_mode === 'roll'
+            ? (Number(filmSnap.roll_length_m) || Number(line.CatalogItems?.roll_length_m) || 0)
+            : normalizedLinearLenM;
 
         const spec = (label: string, value: string | number | React.ReactNode) => (
           <div key={label} className="flex justify-between gap-4 py-1 text-sm">
@@ -5174,20 +5190,31 @@ export default function QuoteNew() {
                       {spec('Product Type', productTypeSlug)}
                       {spec('Position', line.position != null && String(line.position).trim() !== '' ? String(line.position).trim() : '—')}
                       {spec('Mounting', mountingDisplay)}
-                      {spec('Drive Type', driveDisplay)}
-                      {spec('Fabric Drop', (() => { const fd = config.fabricDrop ?? config.fabric_drop; return fd ? String(fd).charAt(0).toUpperCase() + String(fd).slice(1) : '—'; })())}
-                      {spec('Hardware Color', hardwareColorDisplay)}
+                      {!isFilmPreview && spec('Drive Type', driveDisplay)}
+                      {!isFilmPreview && spec('Fabric Drop', (() => { const fd = config.fabricDrop ?? config.fabric_drop; return fd ? String(fd).charAt(0).toUpperCase() + String(fd).slice(1) : '—'; })())}
+                      {!isFilmPreview && spec('Hardware Color', hardwareColorDisplay)}
                     </div>
                     <div className="space-y-0">
-                      {spec('Dimensions', (
-                        <span className="block pb-2 min-h-[1.5rem]">
-                          <DimensionsStackView source={dimensionsSource} />
-                        </span>
-                      ))}
-                      {fabricM2 != null && spec('Total tela', `${fabricM2.toFixed(2)} m²`)}
-                      {spec('Accessories', accessoriesLabel)}
-                      {spec('Cassette', hasCassette ? 'Yes' : 'No')}
-                      {spec('Side Channel', hasSideChannel ? 'Yes' : 'No')}
+                      {isFilmPreview ? (
+                        <>
+                          {spec('Roll Width', `${filmWidthIn}" (${filmWidthM.toFixed(2)} m)`)}
+                          {spec('Sell Mode', filmSellMode)}
+                          {spec('Length', `${filmLengthM.toFixed(2)} m`)}
+                          {spec('Qty', line.quantity ?? 1)}
+                        </>
+                      ) : (
+                        <>
+                          {spec('Dimensions', (
+                            <span className="block pb-2 min-h-[1.5rem]">
+                              <DimensionsStackView source={dimensionsSource} />
+                            </span>
+                          ))}
+                          {fabricM2 != null && spec('Total tela', `${fabricM2.toFixed(2)} m²`)}
+                          {spec('Accessories', accessoriesLabel)}
+                          {spec('Cassette', hasCassette ? 'Yes' : 'No')}
+                          {spec('Side Channel', hasSideChannel ? 'Yes' : 'No')}
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>

@@ -12,6 +12,13 @@ interface FilmSellModeStepProps {
 
 const MIN_LINEAR_M = 0.3048;
 const INCHES_TO_M = 0.0254;
+const normalizeLinearLengthMeters = (value: unknown): number => {
+  const raw = Number(value);
+  if (!Number.isFinite(raw) || raw <= 0) return MIN_LINEAR_M;
+  // Backward compatibility: some old snapshots stored this as millimeters.
+  const meters = raw > 100 ? raw / 1000 : raw;
+  return Math.max(MIN_LINEAR_M, meters);
+};
 
 export default function FilmSellModeStep({ config, onUpdate }: FilmSellModeStepProps) {
   const { activeOrganizationId } = useOrganizationContext();
@@ -21,7 +28,7 @@ export default function FilmSellModeStep({ config, onUpdate }: FilmSellModeStepP
   const manufacturer: string | null = config.manufacturer ?? null;
   const selectedWidth: number | null = config.film_width ?? null;
   const sellMode: 'roll' | 'linear' = config.sell_mode ?? 'roll';
-  const linearLength: number = config.linear_length_m ?? MIN_LINEAR_M;
+  const linearLength: number = normalizeLinearLengthMeters(config.linear_length_m);
   const qty: number = config.qty ?? 1;
   const currentArea: string = config.area ?? '';
   const currentPosition: string = config.position ?? '';
@@ -187,10 +194,10 @@ export default function FilmSellModeStep({ config, onUpdate }: FilmSellModeStepP
             </div>
           ) : (
             <div className="max-w-xs">
-              <Label className="text-xs mb-1 block">Linear Meters</Label>
+              <Label className="text-xs mb-1 block">Length (meters)</Label>
               <Input type="number" min={MIN_LINEAR_M} step={0.01} value={linearLength}
                 onChange={(e) => onUpdate({ linear_length_m: Math.max(MIN_LINEAR_M, parseFloat(e.target.value) || MIN_LINEAR_M) })} />
-              <p className="text-xs text-gray-400 mt-1">Full roll width, cut to this length.</p>
+              <p className="text-xs text-gray-400 mt-1">Enter length in meters (m). Full roll width, cut to this length.</p>
             </div>
           )}
         </div>

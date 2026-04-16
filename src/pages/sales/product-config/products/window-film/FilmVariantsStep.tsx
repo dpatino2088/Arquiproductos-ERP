@@ -28,6 +28,14 @@ interface MsrpInfo {
 }
 
 const INCHES_TO_M = 0.0254;
+const MIN_LINEAR_M = 0.3048;
+const normalizeLinearLengthMeters = (value: unknown): number => {
+  const raw = Number(value);
+  if (!Number.isFinite(raw) || raw <= 0) return MIN_LINEAR_M;
+  // Backward compatibility: old snapshots may carry mm instead of m.
+  const meters = raw > 100 ? raw / 1000 : raw;
+  return Math.max(MIN_LINEAR_M, meters);
+};
 
 export default function FilmVariantsStep({ config, onUpdate }: FilmVariantsStepProps) {
   const { activeOrganizationId } = useOrganizationContext();
@@ -46,7 +54,7 @@ export default function FilmVariantsStep({ config, onUpdate }: FilmVariantsStepP
   const selectedVariant: string | null = config.film_variant ?? null;
   const sellMode: string = config.sell_mode ?? 'roll';
   const qty: number = config.qty ?? 1;
-  const linearLength: number = config.linear_length_m ?? 0.3048;
+  const linearLength: number = normalizeLinearLengthMeters(config.linear_length_m);
 
   useEffect(() => {
     if (selectedCollection && !collectionSearch) {

@@ -1223,7 +1223,10 @@ export default function Items() {
 
       const { id, created_at, updated_at, ...rest } = original;
       const newSku = `${original.sku}-Copy`;
-      const newName = original.name ? `${original.name} (Copy)` : newSku;
+      const derivedRollName = `${original.collection_name || ''} ${original.variant_name || ''}`.trim();
+      const newName = original.is_roll
+        ? (derivedRollName || original.name || newSku)
+        : (original.name ? `${original.name} (Copy)` : newSku);
 
       const { data: inserted, error: insertErr } = await supabase
         .from('CatalogItems')

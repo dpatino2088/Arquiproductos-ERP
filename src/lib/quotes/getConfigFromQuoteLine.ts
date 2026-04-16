@@ -171,7 +171,8 @@ export async function getConfigFromQuoteLine(
     (config as any).roll_width_m = snap.roll_width_m ?? 0;
     (config as any).roll_length_m = snap.roll_length_m ?? 0;
     (config as any).roll_area_m2 = snap.roll_area_m2 ?? 0;
-    (config as any).linear_length_m = snap.linear_length_m ?? 0;
+    const rawLinearLength = Number(snap.linear_length_m ?? 0);
+    (config as any).linear_length_m = rawLinearLength > 100 ? rawLinearLength / 1000 : rawLinearLength;
     (config as any).area_m2 = snap.area_m2 ?? 0;
   }
 

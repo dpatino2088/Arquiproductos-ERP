@@ -980,7 +980,9 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
                   const filmModel = filmCollection && filmVariant ? `${filmCollection} ${filmVariant}` : (c.film_model || c.name || 'Not selected');
                   const rollWidthIn = c.roll_width_inches || c.film_width || 0;
                   const rollWidthM = c.roll_width_m || 0;
-                  const linearLen = c.linear_length_m || 0;
+                  const rawLinearLen = Number(c.linear_length_m) || 0;
+                  // Backward compatibility: old snapshots may store mm instead of m.
+                  const linearLen = rawLinearLen > 100 ? rawLinearLen / 1000 : rawLinearLen;
                   const qty = c.qty || 1;
                   return (
                     <>
