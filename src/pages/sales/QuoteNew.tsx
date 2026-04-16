@@ -1400,7 +1400,7 @@ export default function QuoteNew() {
         const rollAreaM2: number = Number(cfg.roll_area_m2) || 0;
         const linearLengthM: number = Number(cfg.linear_length_m) || 0;
         const areaM2: number = Number(cfg.area_m2) || 0;
-        const qty: number = sellMode === 'roll' ? Math.max(1, Number(cfg.qty) || 1) : 1;
+        const qty: number = Math.max(1, Number(cfg.qty) || 1);
         const unitMsrp: number = Number(cfg.unit_price) || 0;
 
         if (!catalogItemId) {
@@ -1427,10 +1427,8 @@ export default function QuoteNew() {
           .eq('organization_id', activeOrganizationId)
           .maybeSingle();
 
-        const effectiveQty = sellMode === 'roll' ? qty : 1;
-        const effectiveUnitMsrp = sellMode === 'roll'
-          ? unitMsrp
-          : unitMsrp * areaM2;
+        const effectiveQty = qty;
+        const effectiveUnitMsrp = unitMsrp;
 
         const { data: cpResult, error: cpError } = await supabase.rpc('create_catalog_configured_product', {
           p_org_id: activeOrganizationId,
@@ -1458,13 +1456,16 @@ export default function QuoteNew() {
           roll_width_m: rollWidthM,
           roll_length_m: rollLengthM,
           roll_area_m2: rollAreaM2,
+          dealer_per_m2: Number(cfg.dealer_per_m2) || 0,
+          dealer_per_linear_m: Number(cfg.dealer_per_linear_m) || 0,
+          roll_dealer_total: Number(cfg.roll_dealer_total) || 0,
           linear_length_m: linearLengthM,
           area_m2: areaM2,
         };
 
         const displayName = sellMode === 'roll'
           ? `${itemName} × ${qty} roll${qty > 1 ? 's' : ''}`
-          : `${itemName} — ${linearLengthM.toFixed(2)} m linear`;
+          : `${itemName} — ${qty} × ${linearLengthM.toFixed(2)} m linear`;
 
         const unitAreaM2 = sellMode === 'roll' ? rollAreaM2 : areaM2;
 
@@ -1522,7 +1523,7 @@ export default function QuoteNew() {
         const rollAreaM2: number = Number(cfg.roll_area_m2) || 0;
         const linearLengthM: number = Number(cfg.linear_length_m) || 0;
         const areaM2: number = Number(cfg.area_m2) || 0;
-        const qty: number = sellMode === 'roll' ? Math.max(1, Number(cfg.qty) || 1) : 1;
+        const qty: number = Math.max(1, Number(cfg.qty) || 1);
         const unitMsrp: number = Number(cfg.unit_price) || 0;
 
         if (!catalogItemId) {
@@ -1542,10 +1543,8 @@ export default function QuoteNew() {
           return;
         }
 
-        const effectiveQty = sellMode === 'roll' ? qty : 1;
-        const effectiveUnitMsrp = sellMode === 'roll'
-          ? unitMsrp
-          : unitMsrp * areaM2;
+        const effectiveQty = qty;
+        const effectiveUnitMsrp = unitMsrp;
 
         const { data: cpResult, error: cpError } = await supabase.rpc('create_catalog_configured_product', {
           p_org_id: activeOrganizationId,
@@ -1572,13 +1571,16 @@ export default function QuoteNew() {
           roll_width_m: rollWidthM,
           roll_length_m: rollLengthM,
           roll_area_m2: rollAreaM2,
+          dealer_per_m2: Number(cfg.dealer_per_m2) || 0,
+          dealer_per_linear_m: Number(cfg.dealer_per_linear_m) || 0,
+          roll_dealer_total: Number(cfg.roll_dealer_total) || 0,
           linear_length_m: linearLengthM,
           area_m2: areaM2,
         };
 
         const displayName = sellMode === 'roll'
           ? `${itemName} × ${qty} roll${qty > 1 ? 's' : ''}`
-          : `${itemName} — ${linearLengthM.toFixed(2)} m linear`;
+          : `${itemName} — ${qty} × ${linearLengthM.toFixed(2)} m linear`;
 
         const unitAreaM2 = sellMode === 'roll' ? rollAreaM2 : areaM2;
 

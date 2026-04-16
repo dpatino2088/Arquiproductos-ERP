@@ -75,10 +75,23 @@ export default function FilmSellModeStep({ config, onUpdate }: FilmSellModeStepP
   };
 
   const handleSellModeChange = (mode: 'roll' | 'linear') => {
+    const nextQty = Math.max(1, qty || 1);
+    const nextLinearLength = linearLength || MIN_LINEAR_M;
+    const rollWidthM = Number(config.roll_width_m) || 0;
+    const dealerPerLinearM = Number(config.dealer_per_linear_m) || 0;
+    const rollDealerTotal = Number(config.roll_dealer_total) || 0;
+    const unitPrice = mode === 'linear'
+      ? dealerPerLinearM * nextLinearLength
+      : rollDealerTotal;
+    const areaM2 = mode === 'linear'
+      ? rollWidthM * nextLinearLength
+      : (Number(config.roll_area_m2) || 0);
     onUpdate({
       sell_mode: mode,
-      qty: mode === 'roll' ? (qty || 1) : 1,
-      linear_length_m: mode === 'linear' ? (linearLength || MIN_LINEAR_M) : linearLength,
+      qty: nextQty,
+      linear_length_m: mode === 'linear' ? nextLinearLength : linearLength,
+      unit_price: unitPrice > 0 ? unitPrice : config.unit_price,
+      area_m2: areaM2 > 0 ? areaM2 : config.area_m2,
     });
   };
 
@@ -183,9 +196,7 @@ export default function FilmSellModeStep({ config, onUpdate }: FilmSellModeStepP
 
         {/* Quantity / Length */}
         <div>
-          <h3 className="text-base font-semibold text-gray-900 mb-4">
-            {sellMode === 'roll' ? 'Quantity' : 'Length'}
-          </h3>
+          <h3 className="text-base font-semibold text-gray-900 mb-4">Quantity / Length</h3>
           {sellMode === 'roll' ? (
             <div className="max-w-xs">
               <Label className="text-xs mb-1 block">Number of Rolls</Label>
@@ -193,11 +204,41 @@ export default function FilmSellModeStep({ config, onUpdate }: FilmSellModeStepP
                 onChange={(e) => onUpdate({ qty: Math.max(1, parseInt(e.target.value, 10) || 1) })} />
             </div>
           ) : (
-            <div className="max-w-xs">
-              <Label className="text-xs mb-1 block">Length (meters)</Label>
-              <Input type="number" min={MIN_LINEAR_M} step={0.01} value={linearLength}
-                onChange={(e) => onUpdate({ linear_length_m: Math.max(MIN_LINEAR_M, parseFloat(e.target.value) || MIN_LINEAR_M) })} />
-              <p className="text-xs text-gray-400 mt-1">Enter length in meters (m). Full roll width, cut to this length.</p>
+            <div className="grid grid-cols-2 gap-4 max-w-lg">
+              <div>
+                <Label className="text-xs mb-1 block">Qty (identical pieces)</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={qty}
+                  onChange={(e) => {
+                    const nextQty = Math.max(1, parseInt(e.target.value, 10) || 1);
+                    onUpdate({ qty: nextQty });
+                  }}
+                />
+              </div>
+              <div>
+                <Label className="text-xs mb-1 block">Length (meters)</Label>
+                <Input
+                  type="number"
+                  min={MIN_LINEAR_M}
+                  step={0.01}
+                  value={linearLength}
+                  onChange={(e) => {
+                    const nextLength = Math.max(MIN_LINEAR_M, parseFloat(e.target.value) || MIN_LINEAR_M);
+                    const dealerPerLinearM = Number(config.dealer_per_linear_m) || 0;
+                    const rollWidthM = Number(config.roll_width_m) || 0;
+                    onUpdate({
+                      linear_length_m: nextLength,
+                      unit_price: dealerPerLinearM > 0 ? dealerPerLinearM * nextLength : config.unit_price,
+                      area_m2: rollWidthM > 0 ? rollWidthM * nextLength : config.area_m2,
+                    });
+                  }}
+                />
+              </div>
+              <div className="col-span-2">
+                <p className="text-xs text-gray-400 mt-1">Enter length in meters (m). Qty applies to identical pieces at full roll width.</p>
+              </div>
             </div>
           )}
         </div>

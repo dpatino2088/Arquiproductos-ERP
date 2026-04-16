@@ -1012,10 +1012,16 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
                           <span className="ml-2 text-gray-900">{qty} roll{qty > 1 ? 's' : ''}</span>
                         </div>
                       ) : (
-                        <div className={specRow}>
-                          <span className="font-medium text-gray-700">Length:</span>
-                          <span className="ml-2 text-gray-900">{linearLen.toFixed(2)} m</span>
-                        </div>
+                        <>
+                          <div className={specRow}>
+                            <span className="font-medium text-gray-700">Quantity:</span>
+                            <span className="ml-2 text-gray-900">{qty} piece{qty > 1 ? 's' : ''}</span>
+                          </div>
+                          <div className={specRow}>
+                            <span className="font-medium text-gray-700">Length:</span>
+                            <span className="ml-2 text-gray-900">{linearLen.toFixed(2)} m</span>
+                          </div>
+                        </>
                       )}
                       <div className={specRow}>
                         <span className="font-medium text-gray-700">Manufacturer:</span>

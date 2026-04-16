@@ -214,9 +214,12 @@ export default function FilmVariantsStep({ config, onUpdate }: FilmVariantsStepP
       const rollArea = match.roll_width_m * match.roll_length_m;
       const dealerPerLinearM = dealerPerM2 * match.roll_width_m;
       const rollDealerTotal = dealerPerM2 * rollArea;
-      const area = sellMode === 'roll'
-        ? rollArea * qty
+      const unitArea = sellMode === 'roll'
+        ? rollArea
         : match.roll_width_m * linearLength;
+      const unitPrice = sellMode === 'linear'
+        ? dealerPerLinearM * linearLength
+        : rollDealerTotal;
       onUpdate({
         film_variant: variantName,
         film_model: `${selectedCollection} ${variantName}`,
@@ -227,8 +230,11 @@ export default function FilmVariantsStep({ config, onUpdate }: FilmVariantsStepP
         roll_width_m: match.roll_width_m,
         roll_length_m: match.roll_length_m,
         roll_area_m2: rollArea,
-        unit_price: sellMode === 'linear' ? dealerPerLinearM : rollDealerTotal,
-        area_m2: area,
+        dealer_per_m2: dealerPerM2,
+        dealer_per_linear_m: dealerPerLinearM,
+        roll_dealer_total: rollDealerTotal,
+        unit_price: unitPrice,
+        area_m2: unitArea,
         min_length_m: 0.3048,
       });
     }
@@ -245,6 +251,9 @@ export default function FilmVariantsStep({ config, onUpdate }: FilmVariantsStepP
       roll_width_m: 0,
       roll_length_m: 0,
       roll_area_m2: 0,
+      dealer_per_m2: 0,
+      dealer_per_linear_m: 0,
+      roll_dealer_total: 0,
       unit_price: 0,
       area_m2: 0,
     });
@@ -267,7 +276,7 @@ export default function FilmVariantsStep({ config, onUpdate }: FilmVariantsStepP
     const dealerPerM2 = msrpMap.get(selectedItem.id)?.dealer_price ?? 0;
     const rollArea = selectedItem.roll_width_m * selectedItem.roll_length_m;
     if (sellMode === 'roll') return dealerPerM2 * rollArea * qty;
-    return dealerPerM2 * selectedItem.roll_width_m * linearLength;
+    return dealerPerM2 * selectedItem.roll_width_m * linearLength * qty;
   }, [selectedItem, msrpMap, sellMode, qty, linearLength]);
 
   return (
@@ -415,7 +424,7 @@ export default function FilmVariantsStep({ config, onUpdate }: FilmVariantsStepP
                   <span className="text-gray-400 mx-2">·</span>
                   {sellMode === 'roll'
                     ? `${qty} roll${qty > 1 ? 's' : ''}`
-                    : `${linearLength.toFixed(2)}m linear`
+                    : `${qty} × ${linearLength.toFixed(2)}m linear`
                   }
                 </div>
                 <div className="text-right">
