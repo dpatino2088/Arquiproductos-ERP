@@ -23,8 +23,17 @@ const PT_MAP: Record<string, string> = {
   DRAPERY: 'drapery',
   AWNING: 'awning',
   FILM: 'window-film',
+  WINDOW_FILM: 'window-film',
   CATALOG: 'catalog',
 };
+
+function normalizeProductTypeCode(value: unknown): string {
+  return String(value ?? '')
+    .trim()
+    .toUpperCase()
+    .replace(/-/g, '_')
+    .replace(/\s+/g, '_');
+}
 
 export interface GetConfigFromQuoteLineParams {
   supabase: SupabaseClient;
@@ -62,7 +71,7 @@ export async function getConfigFromQuoteLine(
       .maybeSingle();
     if (data) productTypeId = data.id;
   }
-  const ptCode = line.product_type?.toUpperCase() || 'ROLLER';
+  const ptCode = normalizeProductTypeCode(line.product_type) || 'ROLLER';
   const productTypeUI = PT_MAP[ptCode] || 'roller-shade';
 
   // ── 3. Resolve CatalogItem (fabric) ────────────────────────────────
@@ -70,7 +79,7 @@ export async function getConfigFromQuoteLine(
   if (line.catalog_item_id) {
     const { data } = await supabase
       .from('CatalogItems')
-      .select('id, collection_name, variant_name, sku, name, item_name')
+      .select('id, collection_name, variant_name, sku, name, item_name, manufacturer, roll_width_m, roll_length_m')
       .eq('id', line.catalog_item_id)
       .eq('organization_id', organizationId)
       .eq('is_active', true)
@@ -165,15 +174,25 @@ export async function getConfigFromQuoteLine(
     config.unit_price = Number(line.unit_msrp) || 0;
     config.qty = line.quantity || 1;
     const snap = typeof line.config_snapshot === 'object' ? line.config_snapshot : {};
-    (config as any).sell_mode = snap.sell_mode ?? 'roll';
-    (config as any).film_model = snap.film_model ?? '';
-    (config as any).roll_width_inches = snap.roll_width_inches ?? 0;
-    (config as any).roll_width_m = snap.roll_width_m ?? 0;
-    (config as any).roll_length_m = snap.roll_length_m ?? 0;
-    (config as any).roll_area_m2 = snap.roll_area_m2 ?? 0;
+    const catRollWidthM = Number((catalogItem as any)?.roll_width_m ?? 0) || 0;
+    const catRollLengthM = Number((catalogItem as any)?.roll_length_m ?? 0) || 0;
+    const rollWidthM = Number((snap as any).roll_width_m ?? catRollWidthM ?? 0) || 0;
+    const rollLengthM = Number((snap as any).roll_length_m ?? catRollLengthM ?? 0) || 0;
+    const rollWidthIn = Number((snap as any).roll_width_inches ?? (snap as any).film_width ?? (rollWidthM > 0 ? Math.round(rollWidthM / 0.0254) : 0)) || 0;
+    const rollAreaM2 = Number((snap as any).roll_area_m2 ?? (rollWidthM > 0 && rollLengthM > 0 ? rollWidthM * rollLengthM : 0)) || 0;
+    (config as any).sell_mode = (snap as any).sell_mode ?? 'roll';
+    (config as any).film_collection = (snap as any).film_collection ?? (catalogItem as any)?.collection_name ?? '';
+    (config as any).film_variant = (snap as any).film_variant ?? (catalogItem as any)?.variant_name ?? '';
+    (config as any).film_model = (snap as any).film_model ?? '';
+    (config as any).film_width = rollWidthIn;
+    (config as any).roll_width_inches = rollWidthIn;
+    (config as any).roll_width_m = rollWidthM;
+    (config as any).roll_length_m = rollLengthM;
+    (config as any).roll_area_m2 = rollAreaM2;
     const rawLinearLength = Number(snap.linear_length_m ?? 0);
     (config as any).linear_length_m = rawLinearLength > 100 ? rawLinearLength / 1000 : rawLinearLength;
-    (config as any).area_m2 = snap.area_m2 ?? 0;
+    (config as any).area_m2 = Number((snap as any).area_m2 ?? 0) || 0;
+    (config as any).manufacturer = (snap as any).manufacturer ?? (catalogItem as any)?.manufacturer ?? config.manufacturer ?? null;
   }
 
   if (forEdit) {

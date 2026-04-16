@@ -30,6 +30,7 @@ export default function FilmSellModeStep({ config, onUpdate }: FilmSellModeStepP
   const sellMode: 'roll' | 'linear' = config.sell_mode ?? 'roll';
   const linearLength: number = normalizeLinearLengthMeters(config.linear_length_m);
   const qty: number = config.qty ?? 1;
+  const [qtyInput, setQtyInput] = useState<string>(String(Math.max(1, Number(qty) || 1)));
   const currentArea: string = config.area ?? '';
   const currentPosition: string = config.position ?? '';
 
@@ -62,6 +63,13 @@ export default function FilmSellModeStep({ config, onUpdate }: FilmSellModeStepP
     })();
     return () => { cancelled = true; };
   }, [activeOrganizationId, manufacturer]);
+
+  useEffect(() => {
+    const normalizedQty = String(Math.max(1, Number(qty) || 1));
+    if (qtyInput !== normalizedQty) {
+      setQtyInput(normalizedQty);
+    }
+  }, [qty]);
 
   const handleWidthSelect = (inches: number) => {
     onUpdate({
@@ -200,8 +208,23 @@ export default function FilmSellModeStep({ config, onUpdate }: FilmSellModeStepP
           {sellMode === 'roll' ? (
             <div className="max-w-xs">
               <Label className="text-xs mb-1 block">Number of Rolls</Label>
-              <Input type="number" min={1} value={qty}
-                onChange={(e) => onUpdate({ qty: Math.max(1, parseInt(e.target.value, 10) || 1) })} />
+              <Input
+                type="number"
+                min={1}
+                value={qtyInput}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  setQtyInput(raw);
+                  if (raw === '') return;
+                  const nextQty = Math.max(1, parseInt(raw, 10) || 1);
+                  onUpdate({ qty: nextQty });
+                }}
+                onBlur={() => {
+                  const nextQty = Math.max(1, parseInt(qtyInput, 10) || 1);
+                  setQtyInput(String(nextQty));
+                  onUpdate({ qty: nextQty });
+                }}
+              />
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-4 max-w-lg">
@@ -210,9 +233,17 @@ export default function FilmSellModeStep({ config, onUpdate }: FilmSellModeStepP
                 <Input
                   type="number"
                   min={1}
-                  value={qty}
+                  value={qtyInput}
                   onChange={(e) => {
-                    const nextQty = Math.max(1, parseInt(e.target.value, 10) || 1);
+                    const raw = e.target.value;
+                    setQtyInput(raw);
+                    if (raw === '') return;
+                    const nextQty = Math.max(1, parseInt(raw, 10) || 1);
+                    onUpdate({ qty: nextQty });
+                  }}
+                  onBlur={() => {
+                    const nextQty = Math.max(1, parseInt(qtyInput, 10) || 1);
+                    setQtyInput(String(nextQty));
                     onUpdate({ qty: nextQty });
                   }}
                 />

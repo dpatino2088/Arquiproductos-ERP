@@ -1026,7 +1026,7 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
           name: configAny.name ?? '',
           sku: configAny.sku ?? '',
           unit_price: configAny.unit_price ?? 0,
-          qty: configAny.sell_mode === 'roll' ? (configAny.qty ?? 1) : 1,
+          qty: Math.max(1, Number(configAny.qty) || 1),
           sell_mode: configAny.sell_mode,
           film_model: configAny.film_model ?? '',
           film_collection: configAny.film_collection ?? '',
