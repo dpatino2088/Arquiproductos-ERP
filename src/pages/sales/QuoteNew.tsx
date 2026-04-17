@@ -1712,7 +1712,7 @@ export default function QuoteNew() {
         // 3. Read CP_NEW from backend — this is the ONLY source of truth
         const { data: cpNew } = await supabase
           .from('ConfiguredProducts')
-          .select('width_mm, height_mm, roll_catalog_item_id, roll_collection_name, roll_variant_name')
+          .select('width_mm, height_mm, roll_catalog_item_id, roll_sku, roll_collection_name, roll_variant_name')
           .eq('id', cpNewId)
           .eq('organization_id', activeOrganizationId)
           .maybeSingle();
@@ -1730,6 +1730,20 @@ export default function QuoteNew() {
           return;
         }
 
+        // Fetch CatalogItem name/sku so QuoteLine.name and .sku stay in sync
+        let rollItemName: string | null = null;
+        let rollItemSku: string | null = null;
+        if (cpNew?.roll_catalog_item_id) {
+          const { data: rollCi } = await supabase
+            .from('CatalogItems')
+            .select('name, sku')
+            .eq('id', cpNew.roll_catalog_item_id)
+            .eq('is_active', true)
+            .maybeSingle();
+          rollItemName = rollCi?.name ?? null;
+          rollItemSku = rollCi?.sku ?? cpNew.roll_sku ?? null;
+        }
+
         // 4. Update QuoteLine — only structural fields, NO pricing
         const updatePayload: Record<string, any> = {
           configured_product_id: cpNewId,
@@ -1743,6 +1757,8 @@ export default function QuoteNew() {
           installation_location: (productConfig as any).installationLocation ?? null,
         };
         if (cpNew?.roll_catalog_item_id) updatePayload.catalog_item_id = cpNew.roll_catalog_item_id;
+        if (rollItemName) updatePayload.name = rollItemName;
+        if (rollItemSku) updatePayload.sku = rollItemSku;
         if (cpNew?.roll_collection_name) updatePayload.collection_name = cpNew.roll_collection_name;
         if (cpNew?.roll_variant_name) updatePayload.variant_name = cpNew.roll_variant_name;
 
@@ -1889,7 +1905,7 @@ export default function QuoteNew() {
         // Obtener CatalogItem
         const { data: rollData } = await supabase
           .from('CatalogItems')
-          .select('collection_name, variant_name, cost_exw, default_margin_pct, uom, item_category_id, sku')
+          .select('name, collection_name, variant_name, cost_exw, default_margin_pct, uom, item_category_id, sku')
           .eq('id', rollItemId)
           .eq('is_roll', true)
           .or(`organization_id.eq.${activeOrganizationId},organization_id.is.null`)
@@ -1897,7 +1913,7 @@ export default function QuoteNew() {
           .maybeSingle();
         
         catalogItem = rollData || {
-          // Usar datos del ConfiguredProduct como fallback si no se encuentra
+          name: null,
           collection_name: configuredProductData.roll_collection_name,
           variant_name: configuredProductData.roll_variant_name,
           sku: configuredProductData.roll_sku,
@@ -1945,8 +1961,9 @@ export default function QuoteNew() {
             discountPct: 0,
             bom_template_id: bomTemplateId,
             product_type_id: productTypeId,
-            // Campos clave de QuoteLine
             catalog_item_id: rollItemId || null,
+            name: catalogItem?.name || null,
+            sku: catalogItem?.sku || configuredProductData.roll_sku || null,
             collection_name: configuredProductData.roll_collection_name || catalogItem?.collection_name || null,
             variant_name: configuredProductData.roll_variant_name || catalogItem?.variant_name || null,
             area,
@@ -2124,6 +2141,8 @@ export default function QuoteNew() {
       const quoteLineData: Record<string, any> = {
         quote_id: quoteId,
         catalog_item_id: rollItemId,
+        name: catalogItem?.name || null,
+        sku: catalogItem?.sku || configuredProductData?.roll_sku || null,
         quantity: quantity,
         width_m,
         height_m,
@@ -2157,12 +2176,14 @@ export default function QuoteNew() {
       const allowedQuoteLineFields = new Set([
         'quote_id',
         'catalog_item_id',
+        'name',
+        'sku',
         'quantity',
         'width_m',
         'height_m',
         'collection_name',
         'variant_name',
-        'bom_template_id', // CRITICAL: para BOMInstances
+        'bom_template_id',
         'msrp',
         'total_cost',
         'area',
