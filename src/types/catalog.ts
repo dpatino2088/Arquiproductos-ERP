@@ -25,7 +25,9 @@ export type QuoteStatus =
   | 'sent'
   | 'approved'
   | 'rejected'
-  | 'cancelled';
+  | 'cancelled'
+  | 'converted'
+  | 'superseded';
 
 // CatalogItems interface
 // Based on NEW database schema

@@ -13,7 +13,9 @@ import { createProposalFromQuote } from '../../hooks/useProposals';
 import { useSOActions } from '../../hooks/useSOActions';
 import { useAuth } from '../../hooks/useAuth';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { FileText, ShoppingBag, Edit, ArrowLeft, ShieldCheck, Unlock } from 'lucide-react';
+import { FileText, ShoppingBag, Edit, ArrowLeft, ShieldCheck, Unlock, Copy } from 'lucide-react';
+import { duplicateQuote } from '../../hooks/useQuotes';
+import DuplicateQuoteModal, { type DuplicateQuoteMode } from '../../components/sales/DuplicateQuoteModal';
 import { getAppUsersDisplayNames } from '../../lib/appUsersDisplayNames';
 import QuoteAttachmentsTab from '../../components/sales/QuoteAttachmentsTab';
 import DimensionsStackView from '../../components/DimensionsStackView';
@@ -27,6 +29,39 @@ const SALES_SUBMODULES = [
 function formatCurrencyDisplay(amount: number | null | undefined): string {
   if (amount == null) return '---';
   return formatCurrency(amount, 'USD');
+}
+
+function normalizeLinearMeters(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  // Legacy snapshots may persist linear length in mm.
+  return value > 100 ? value / 1000 : value;
+}
+
+function parseLinearLengthFromText(text: string | null | undefined): number | null {
+  if (!text) return null;
+  const matches = [...text.matchAll(/(\d+(?:[.,]\d+)?)\s*m\s*linear/gi)];
+  if (matches.length === 0) return null;
+  const raw = matches[matches.length - 1]?.[1]?.replace(',', '.');
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function getWindowFilmMeasurementMm(line: QuoteLine): { widthMm: number; lengthMm: number } | null {
+  const snap = (line.config_snapshot ?? {}) as Record<string, any>;
+  const widthM = Number(snap.roll_width_m ?? line.width_m ?? 0);
+  const isRoll = String(snap.sell_mode ?? '').toLowerCase() === 'roll';
+
+  let lengthM = isRoll
+    ? Number(snap.roll_length_m ?? 0)
+    : normalizeLinearMeters(Number(snap.linear_length_m ?? line.height_m ?? 0));
+
+  if (!(lengthM > 0)) {
+    const parsedFromName = parseLinearLengthFromText(line.name);
+    if (parsedFromName) lengthM = parsedFromName;
+  }
+
+  if (!(widthM > 0) || !(lengthM > 0)) return null;
+  return { widthMm: Math.round(widthM * 1000), lengthMm: Math.round(lengthM * 1000) };
 }
 
 function getQuoteIdFromPath(): string | null {
@@ -56,6 +91,10 @@ interface Quote {
   measures_confirmed: boolean;
   measures_confirmed_at: string | null;
   measures_confirmed_by: string | null;
+  parent_quote_id?: string | null;
+  root_quote_id?: string | null;
+  version_no?: number | null;
+  is_version?: boolean | null;
 }
 
 interface QuoteLine {
@@ -167,6 +206,9 @@ export default function QuoteDetail() {
 
   const { createSOFromQuote } = useSOActions();
   const [priorityOpen, setPriorityOpen] = useState(false);
+  const [duplicateOpen, setDuplicateOpen] = useState(false);
+  const [duplicatingLoading, setDuplicatingLoading] = useState(false);
+  const [versionSiblings, setVersionSiblings] = useState<Array<{ id: string; quote_no: string; version_no: number; status: string; is_version: boolean | null }>>([]);
 
   const handlePriorityChange = useCallback(async (newPriority: string) => {
     if (!quote || newPriority === quote.priority) { setPriorityOpen(false); return; }
@@ -192,7 +234,7 @@ export default function QuoteDetail() {
       await initSessionContext();
       const quoteRes = await supabase
         .from('Quotes')
-        .select('id, quote_no, status, customer_id, contact_id, dealer_id, organization_id, description, notes, priority, subtotal, tax_amount, total_amount, expires_at, approved_at, converted_at, created_at, created_by_user_id, measures_confirmed, measures_confirmed_at, measures_confirmed_by')
+        .select('id, quote_no, status, customer_id, contact_id, dealer_id, organization_id, description, notes, priority, subtotal, tax_amount, total_amount, expires_at, approved_at, converted_at, created_at, created_by_user_id, measures_confirmed, measures_confirmed_at, measures_confirmed_by, parent_quote_id, root_quote_id, version_no, is_version')
         .eq('id', quoteId)
         .eq('organization_id', activeOrganizationId)
         .eq('deleted', false)
@@ -422,6 +464,44 @@ export default function QuoteDetail() {
     }
   }, [quoteId, user, acting, addNotification, refetch]);
 
+  const handleDuplicateConfirm = useCallback(async (mode: DuplicateQuoteMode, recalculate: boolean) => {
+    if (!quote) return;
+    setDuplicatingLoading(true);
+    try {
+      const newId = await duplicateQuote(quote.id, mode, recalculate);
+      addNotification({
+        type: 'success',
+        title: mode === 'version' ? 'Versión creada' : 'Cotización duplicada',
+        message: mode === 'version'
+          ? 'Se creó una nueva versión vinculada al quote original.'
+          : 'Se creó una cotización independiente.',
+      });
+      setDuplicateOpen(false);
+      router.navigate(withReturnTo(`/sales/quotes/${newId}/edit`));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to duplicate quote';
+      addNotification({ type: 'error', title: 'Error duplicando', message: msg });
+    } finally {
+      setDuplicatingLoading(false);
+    }
+  }, [quote, addNotification]);
+
+  // Load version siblings for the current family (so detail can link to other versions)
+  useEffect(() => {
+    if (!quote) { setVersionSiblings([]); return; }
+    const rootId = quote.root_quote_id ?? quote.id;
+    (async () => {
+      const { data } = await supabase
+        .from('Quotes')
+        .select('id, quote_no, version_no, status, is_version')
+        .or(`id.eq.${rootId},root_quote_id.eq.${rootId}`)
+        .eq('organization_id', quote.organization_id)
+        .or('deleted.is.false,deleted.is.null')
+        .order('version_no', { ascending: false });
+      setVersionSiblings((data ?? []) as any);
+    })();
+  }, [quote?.id, quote?.root_quote_id, quote?.organization_id]);
+
   const listPath = '/sales/quotes';
   const queryReturnTo = getReturnToFromCurrentQuery();
   const normalizePath = (path: string | null | undefined) => {
@@ -447,6 +527,7 @@ export default function QuoteDetail() {
     measuresConfirmed && status !== 'converted' && !salesOrder;
   const canCreateSO = status === 'approved' && measuresConfirmed && !salesOrder;
   const canEditQuote = !measuresConfirmed && status !== 'converted';
+  const canDuplicate = !!quote;
   const currentMfgStepIndex = useMemo(() => {
     if (mos.length === 0) {
       return -1;
@@ -544,9 +625,24 @@ export default function QuoteDetail() {
         );
       }
     }
+    if (canDuplicate) {
+      btns.push(
+        <button
+          key="duplicate"
+          type="button"
+          onClick={() => setDuplicateOpen(true)}
+          disabled={acting}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+          title="Duplicar / Nueva versión"
+        >
+          <Copy className="w-4 h-4" />
+          Duplicar
+        </button>
+      );
+    }
     if (btns.length === 0) return null;
     return <div className="flex items-center gap-2">{btns}</div>;
-  }, [hasRedirectBack, isPortal, quoteId, canCreateProposal, canCreateSO, canConfirmMeasures, canReopenMeasures, canEditQuote, acting, handleCreateProposal, handleCreateSalesOrder, handleReopenMeasures, onBackContextual]);
+  }, [hasRedirectBack, isPortal, quoteId, canCreateProposal, canCreateSO, canConfirmMeasures, canReopenMeasures, canEditQuote, canDuplicate, acting, handleCreateProposal, handleCreateSalesOrder, handleReopenMeasures, onBackContextual]);
 
   if (!quoteId) {
     return (
@@ -649,6 +745,27 @@ export default function QuoteDetail() {
           >
             Reintentar
           </button>
+        </div>
+      )}
+      {versionSiblings.length > 1 && (
+        <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3">
+          <p className="text-xs font-medium text-blue-900 mb-1.5">Versiones ({versionSiblings.length})</p>
+          <div className="flex flex-wrap gap-2">
+            {versionSiblings.map((sib) => (
+              <button
+                key={sib.id}
+                type="button"
+                onClick={() => router.navigate(withReturnTo(`/sales/quotes/${sib.id}`))}
+                className={`inline-flex items-center gap-1 px-2 py-1 text-xs rounded border transition-colors ${
+                  sib.id === quote.id
+                    ? 'bg-blue-600 text-white border-blue-600'
+                    : 'bg-white text-blue-700 border-blue-200 hover:bg-blue-100'
+                }`}
+              >
+                {sib.quote_no}
+              </button>
+            ))}
+          </div>
         </div>
       )}
       {measuresConfirmed && (
@@ -940,6 +1057,8 @@ export default function QuoteDetail() {
                   const qty = Number(line.quantity) || 0;
                   const unitPrice = line.unit_dealer_price_snapshot ?? line.unit_msrp ?? (line.dealer_price_total != null && qty > 0 ? Number(line.dealer_price_total) / qty : (line.msrp != null && qty > 0 ? Number(line.msrp) / qty : null));
                   const lineTotal = line.dealer_price_total ?? line.msrp ?? (unitPrice != null ? unitPrice * qty : null);
+                  const isFilmLine = (line.product_type ?? '').toLowerCase() === 'window_film';
+                  const filmMeasurement = isFilmLine ? getWindowFilmMeasurementMm(line) : null;
                   const cs = line.config_snapshot;
                   const dimSource = cs ? {
                     width_m: line.width_m,
@@ -960,7 +1079,15 @@ export default function QuoteDetail() {
                         {line.sku && <div className="text-xs text-gray-500">{line.sku}</div>}
                       </td>
                       <td className="px-4 py-4">{line.product_type ?? '—'}</td>
-                      <td className="px-4 py-4"><DimensionsStackView source={dimSource} /></td>
+                      <td className="px-4 py-4">
+                        {filmMeasurement ? (
+                          <span className="tabular-nums">
+                            {filmMeasurement.widthMm} x {filmMeasurement.lengthMm}
+                          </span>
+                        ) : (
+                          <DimensionsStackView source={dimSource} />
+                        )}
+                      </td>
                       <td className="px-4 py-4 text-right">{qty}</td>
                       <td className="px-4 py-4 text-right font-mono">{formatCurrencyDisplay(unitPrice)}</td>
                       <td className="px-4 py-4 text-right font-mono">{formatCurrencyDisplay(lineTotal)}</td>
@@ -1078,6 +1205,19 @@ export default function QuoteDetail() {
           </div>
         </div>
       )}
+      <DuplicateQuoteModal
+        isOpen={duplicateOpen}
+        onClose={() => !duplicatingLoading && setDuplicateOpen(false)}
+        onConfirm={handleDuplicateConfirm}
+        sourceQuoteNo={quote.quote_no}
+        disableVersion={status === 'converted'}
+        versionDisabledReason={
+          status === 'converted'
+            ? 'Este quote ya tiene Sales Order. Solo se puede crear una copia independiente.'
+            : null
+        }
+        isLoading={duplicatingLoading}
+      />
     </DetailPageLayout>
   );
 }

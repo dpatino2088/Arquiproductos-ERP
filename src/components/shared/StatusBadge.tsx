@@ -46,6 +46,7 @@ const STATUS_MAPS: Record<StatusBadgeProps['type'], Record<string, string>> = {
     cancelled: 'red',
     canceled: 'red',
     expired: 'orange',
+    superseded: 'slate',
   },
   proposal: {
     draft: 'gray',

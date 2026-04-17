@@ -22,6 +22,8 @@ export interface DealerAppUser {
   deleted: boolean;
   created_at: string;
   updated_at: string;
+  /** Data source to help UI explain legacy rows. */
+  source?: 'app' | 'legacy';
 }
 
 export type UseAppUsersByDealerOptions = {
@@ -65,8 +67,7 @@ export function useAppUsersByDealer(
         .order('created_at', { ascending: false });
 
       if (queryError) throw queryError;
-
-      setUsers((data ?? []).map((row: any) => ({
+      const appRows: DealerAppUser[] = (data ?? []).map((row: any) => ({
         id: row.id,
         organization_id: row.organization_id,
         dealer_id: row.dealer_id,
@@ -78,7 +79,60 @@ export function useAppUsersByDealer(
         deleted: row.deleted ?? false,
         created_at: row.created_at ?? '',
         updated_at: row.updated_at ?? '',
-      })));
+        source: 'app',
+      }));
+
+      // Legacy fallback: show DealerUsers rows not yet synced into AppUsers.
+      const { data: legacyRows, error: legacyError } = await supabase
+        .from('DealerUsers')
+        .select('id, organization_id, dealer_id, user_id, portal_user_email, portal_user_name, role, status, deleted, created_at, updated_at')
+        .eq('dealer_id', dealerId!)
+        .eq('deleted', false)
+        .order('created_at', { ascending: false });
+      if (legacyError) throw legacyError;
+
+      const authIdsInApp = new Set(appRows.map((u) => u.auth_user_id).filter(Boolean));
+      const emailsInApp = new Set(appRows.map((u) => u.email.toLowerCase()).filter(Boolean));
+      const normalizeLegacyRole = (role: string | null | undefined): string => {
+        const s = (role ?? '').toString().trim().toLowerCase();
+        return s === 'dealer_manager' ? 'dealer_manager' : 'dealer_member';
+      };
+      const normalizeLegacyStatus = (status: string | null | undefined): DealerAppUserStatus => {
+        const s = (status ?? '').toString().trim().toLowerCase();
+        if (s === 'disabled') return 'disabled';
+        if (s === 'active' || s === 'authorized') return 'active';
+        return 'invited';
+      };
+
+      const legacyOnlyRows: DealerAppUser[] = (legacyRows ?? [])
+        .filter((row: any) => {
+          const authId = row.user_id ?? null;
+          const email = (row.portal_user_email ?? '').toString().trim().toLowerCase();
+          if (authId && authIdsInApp.has(authId)) return false;
+          if (email && emailsInApp.has(email)) return false;
+          return true;
+        })
+        .map((row: any) => ({
+          id: `legacy:${row.id}`,
+          organization_id: row.organization_id,
+          dealer_id: row.dealer_id,
+          auth_user_id: row.user_id ?? null,
+          email: (row.portal_user_email ?? '').toString().trim(),
+          display_name: row.portal_user_name ?? null,
+          role_code: normalizeLegacyRole(row.role),
+          status: normalizeLegacyStatus(row.status),
+          deleted: row.deleted ?? false,
+          created_at: row.created_at ?? '',
+          updated_at: row.updated_at ?? '',
+          source: 'legacy',
+        }));
+
+      const merged = [...appRows, ...legacyOnlyRows].sort((a, b) => {
+        const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return tb - ta;
+      });
+      setUsers(merged);
     } catch (err: any) {
       const msg = err?.message ?? 'Error loading dealer users';
       console.error('[useAppUsersByDealer]', msg, err);
@@ -107,8 +161,7 @@ export function useAppUsersByDealer(
 /** Map AppUser.role_code to portal display role (for UI labels). */
 export function roleCodeToPortalLabel(roleCode: string): string {
   const s = (roleCode ?? '').toString().trim().toLowerCase();
-  if (s === 'dealer_manager' || s === 'member_manager' || s === 'manager') return 'Manager';
-  return 'Member';
+  return s === 'dealer_manager' ? 'Manager' : 'Member';
 }
 
 /** Map CompanyPortalRole (dealer_member | dealer_manager) to AppUsers/DealerUsers.role_code. */
@@ -119,8 +172,7 @@ export function portalRoleToRoleCode(role: 'dealer_member' | 'dealer_manager'): 
 /** Map AppUsers/DealerUsers.role_code to CompanyPortalRole. */
 export function roleCodeToPortalRole(roleCode: string): 'dealer_member' | 'dealer_manager' {
   const s = (roleCode ?? '').toString().trim().toLowerCase();
-  if (['dealer_manager', 'member_manager', 'manager'].includes(s)) return 'dealer_manager';
-  return 'dealer_member';
+  return s === 'dealer_manager' ? 'dealer_manager' : 'dealer_member';
 }
 
 /** DealerAppUser with dealer_name (for list views across all dealers in org). */

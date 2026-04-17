@@ -2,7 +2,8 @@ import { useEffect, useState, useMemo, useCallback } from 'react';
 import { router } from '../../lib/router';
 import { withReturnTo } from '../../lib/navigation/returnTo';
 
-import { useQuotes, type QuoteListItem } from '../../hooks/useQuotes';
+import { useQuotes, duplicateQuote, type QuoteListItem } from '../../hooks/useQuotes';
+import DuplicateQuoteModal, { type DuplicateQuoteMode } from '../../components/sales/DuplicateQuoteModal';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAccessContext } from '../../hooks/useAccessContext';
 import { useGranularAccess } from '../../hooks/usePermissions';
@@ -15,7 +16,7 @@ import { formatDate } from '../../lib/utils';
 import { 
   Search, Plus, List, Grid3X3, Edit, Trash2, Archive, RotateCcw,
   FileText, RefreshCw,
-  SortAsc, SortDesc, Eye
+  SortAsc, SortDesc, Eye, Copy, ChevronRight, ChevronDown
 } from 'lucide-react';
 import { QuoteStatus } from '../../types/catalog';
 import StatusBadge from '../../components/shared/StatusBadge';
@@ -80,10 +81,17 @@ export default function Quotes() {
     }
     return 'all';
   });
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [duplicateTarget, setDuplicateTarget] = useState<EnrichedQuote | null>(null);
+  const [duplicatingLoading, setDuplicatingLoading] = useState(false);
 
   const quotes = hookQuotes;
   const getStatusForDisplay = useCallback((quote: EnrichedQuote) => {
     const raw = (quote.status || '').toLowerCase();
+    if (raw === 'superseded') {
+      // Legacy rows that were auto-marked as superseded should keep a neutral editable status in UI.
+      return 'draft';
+    }
     if (raw === 'approved') {
       if (!quote.sale_order_id) return 'approved';
       return quote.has_payment ? 'released' : 'ordered';
@@ -381,6 +389,51 @@ export default function Quotes() {
     router.navigate(withReturnTo(`/sales/quotes/${quote.id}/edit`));
   };
 
+  // === DUPLICATE HANDLER ===
+  const openDuplicateModal = (quote: EnrichedQuote, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDuplicateTarget(quote);
+  };
+
+  const handleDuplicateConfirm = useCallback(
+    async (mode: DuplicateQuoteMode, recalculate: boolean) => {
+      if (!duplicateTarget) return;
+      setDuplicatingLoading(true);
+      try {
+        const newId = await duplicateQuote(duplicateTarget.id, mode, recalculate);
+        useUIStore.getState().addNotification({
+          type: 'success',
+          title: mode === 'version' ? 'Versión creada' : 'Cotización duplicada',
+          message:
+            mode === 'version'
+              ? 'Se creó una nueva versión vinculada al quote original.'
+              : 'Se creó una cotización independiente.',
+        });
+        setDuplicateTarget(null);
+        await refetch();
+        router.navigate(withReturnTo(`/sales/quotes/${newId}/edit`));
+      } catch (err: any) {
+        useUIStore.getState().addNotification({
+          type: 'error',
+          title: 'Error duplicando',
+          message: getSupabaseErrorMessage(err),
+        });
+      } finally {
+        setDuplicatingLoading(false);
+      }
+    },
+    [duplicateTarget, refetch]
+  );
+
+  const toggleGroup = (rootId: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(rootId)) next.delete(rootId);
+      else next.add(rootId);
+      return next;
+    });
+  };
+
   // === SORTING ===
   const handleSort = (field: typeof sortBy) => {
     if (sortBy === field) {
@@ -439,10 +492,53 @@ export default function Quotes() {
     return result;
   }, [quotes, nonArchivedQuotes, searchTerm, sortBy, sortOrder, statusTab]);
 
-  // Pagination
-  const totalPages = Math.ceil(filteredQuotes.length / itemsPerPage);
+  // Group quotes by root_quote_id (versioning family). Latest version displayed;
+  // older versions collapsed behind a chevron.
+  type QuoteGroup = { key: string; latest: EnrichedQuote; older: EnrichedQuote[] };
+  const groupedQuotes: QuoteGroup[] = useMemo(() => {
+    const groupMap = new Map<string, EnrichedQuote[]>();
+    const idToQuote = new Map<string, EnrichedQuote>();
+    filteredQuotes.forEach((q) => {
+      idToQuote.set(q.id, q);
+      const key = (q.root_quote_id as string | null) ?? q.id;
+      if (!groupMap.has(key)) groupMap.set(key, []);
+      groupMap.get(key)!.push(q);
+    });
+
+    const groups: QuoteGroup[] = [];
+    groupMap.forEach((rows, key) => {
+      const sorted = [...rows].sort((a, b) => {
+        const av = Number(a.version_no ?? 1);
+        const bv = Number(b.version_no ?? 1);
+        if (av !== bv) return bv - av;
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      });
+      const [latest, ...older] = sorted;
+      groups.push({ key, latest, older });
+    });
+
+    // Sort groups using the same sortBy/sortOrder applied to the latest row.
+    const factor = sortOrder === 'asc' ? 1 : -1;
+    groups.sort((a, b) => {
+      if (sortBy === 'created_at') {
+        return (new Date(a.latest.created_at).getTime() - new Date(b.latest.created_at).getTime()) * factor;
+      }
+      if (sortBy === 'total') {
+        return (a.latest.total - b.latest.total) * factor;
+      }
+      const aVal = String((a.latest as any)[sortBy] || '').toLowerCase();
+      const bVal = String((b.latest as any)[sortBy] || '').toLowerCase();
+      return aVal.localeCompare(bVal) * factor;
+    });
+
+    return groups;
+  }, [filteredQuotes, sortBy, sortOrder]);
+
+  // Pagination (by groups, not by individual rows)
+  const totalPages = Math.ceil(groupedQuotes.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
-  const paginatedQuotes = filteredQuotes.slice(startIndex, startIndex + itemsPerPage);
+  const paginatedGroups = groupedQuotes.slice(startIndex, startIndex + itemsPerPage);
+  const paginatedQuotes = paginatedGroups.map((g) => g.latest);
 
   const toggleSelect = useCallback((id: string) => {
     setSelectedIds((prev) => {
@@ -633,130 +729,195 @@ export default function Quotes() {
                   </td>
                 </tr>
               ) : (
-                paginatedQuotes.map((quote) => (
-                  <tr key={quote.id} className="hover:bg-gray-50">
-                    <td className="py-4 px-4 text-center" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.has(quote.id)}
-                        onChange={() => toggleSelect(quote.id)}
-                        className="rounded border-gray-300"
-                      />
+                paginatedGroups.flatMap((group) => {
+                  const isExpanded = expandedGroups.has(group.key);
+                  const rows: React.ReactNode[] = [];
+                  const renderQuoteRow = (quote: EnrichedQuote, opts: { isOlder?: boolean } = {}) => (
+                  <tr key={quote.id} className={`${opts.isOlder ? 'bg-gray-50/60 text-gray-400' : 'hover:bg-gray-50'}`}>
+                    <td className="py-3 px-4 text-center" onClick={(e) => e.stopPropagation()}>
+                      {opts.isOlder ? (
+                        <span className="inline-block w-4" />
+                      ) : (
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(quote.id)}
+                          onChange={() => toggleSelect(quote.id)}
+                          className="rounded border-gray-300"
+                        />
+                      )}
                     </td>
-                    <td className="py-4 px-4 text-gray-900 text-sm font-medium text-left">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); router.navigate(withReturnTo(`/sales/quotes/${quote.id}`)); }}
-                        className="text-primary hover:underline"
-                      >
-                        {quote.quote_no}
-                      </button>
+                    <td className={`py-3 px-4 text-sm font-medium text-left whitespace-nowrap ${opts.isOlder ? 'pl-6' : ''}`}>
+                      <div className="flex items-center gap-2">
+                        {!opts.isOlder && group.older.length > 0 ? (
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); toggleGroup(group.key); }}
+                            className="p-0.5 hover:bg-gray-200 rounded text-gray-500"
+                            title={isExpanded ? 'Ocultar versiones anteriores' : 'Mostrar versiones anteriores'}
+                          >
+                            {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                          </button>
+                        ) : opts.isOlder ? (
+                          <span className="text-gray-300 text-xs select-none">└</span>
+                        ) : (
+                          <span className="w-3.5 h-3.5 inline-block" />
+                        )}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); router.navigate(withReturnTo(`/sales/quotes/${quote.id}`)); }}
+                          className={opts.isOlder ? 'text-gray-400 hover:text-gray-600 hover:underline' : 'text-primary hover:underline'}
+                        >
+                          {quote.quote_no}
+                        </button>
+                        {opts.isOlder && Number(quote.version_no ?? 1) > 1 && (
+                          <span className="text-[10px] text-gray-400">
+                            v{Number(quote.version_no)}
+                          </span>
+                        )}
+                        {!opts.isOlder && group.older.length > 0 && !isExpanded && (
+                          <span
+                            className="inline-block w-2 h-2 rounded-full bg-blue-500"
+                            title={`${group.older.length} versión${group.older.length > 1 ? 'es' : ''} anterior${group.older.length > 1 ? 'es' : ''}`}
+                          />
+                        )}
+                      </div>
                     </td>
-                    <td className="py-4 px-4 text-center">
-                      <StatusBadge status={getStatusForDisplay(quote)} type="quote" size="sm" />
+                    <td className="py-3 px-4 text-center">
+                      <span className={opts.isOlder ? 'opacity-60' : ''}>
+                        <StatusBadge status={getStatusForDisplay(quote)} type="quote" size="sm" />
+                      </span>
                     </td>
                     {isInternal ? (
                       <>
-                        <td className="py-4 px-4 text-gray-700 text-sm text-center"><span className="block truncate">{quote.dealer_id ? (dealerById[quote.dealer_id]?.dealer_name ?? '—') : '—'}</span></td>
-                        <td className="py-4 px-4 text-gray-700 text-sm text-center font-mono"><span className="block truncate">{quote.dealer_id ? (dealerById[quote.dealer_id]?.dealer_no ?? '—') : '—'}</span></td>
+                        <td className={`py-3 px-4 text-sm text-center ${opts.isOlder ? 'text-gray-400' : 'text-gray-700'}`}><span className="block truncate">{quote.dealer_id ? (dealerById[quote.dealer_id]?.dealer_name ?? '—') : '—'}</span></td>
+                        <td className={`py-3 px-4 text-sm text-center font-mono ${opts.isOlder ? 'text-gray-400' : 'text-gray-700'}`}><span className="block truncate">{quote.dealer_id ? (dealerById[quote.dealer_id]?.dealer_no ?? '—') : '—'}</span></td>
                       </>
                     ) : (
-                      <td className="py-4 px-4 text-gray-700 text-sm text-center"><span className="block truncate">{quote.customer_name ?? '—'}</span></td>
+                      <td className={`py-3 px-4 text-sm text-center ${opts.isOlder ? 'text-gray-400' : 'text-gray-700'}`}><span className="block truncate">{quote.customer_name ?? '—'}</span></td>
                     )}
-                    <td className="py-4 px-4 text-center">
+                    <td className="py-3 px-4 text-center">
                       {proposalByQuoteMap[quote.id]
                         ? (
                           <button
                             onClick={(e) => { e.stopPropagation(); router.navigate(withReturnTo(`/sales/proposals/${proposalByQuoteMap[quote.id].id}`)); }}
-                            className="text-primary hover:underline font-medium"
+                            className={opts.isOlder ? 'text-gray-400 hover:text-gray-600 hover:underline text-sm' : 'text-primary hover:underline font-medium'}
                           >
                             {proposalByQuoteMap[quote.id].no}
                           </button>
                         )
                         : <span className="text-gray-400 text-sm">—</span>}
                     </td>
-                    <td className="py-4 px-4 text-sm text-center">
+                    <td className="py-3 px-4 text-sm text-center">
                       {soNumberMap[quote.id]
                         ? (
                           <button
                             onClick={(e) => { e.stopPropagation(); router.navigate(withReturnTo(`/sales/orders/${soNumberMap[quote.id].id}`)); }}
-                            className="text-primary hover:underline font-medium text-sm whitespace-nowrap"
+                            className={opts.isOlder ? 'text-gray-400 hover:text-gray-600 hover:underline text-sm whitespace-nowrap' : 'text-primary hover:underline font-medium text-sm whitespace-nowrap'}
                           >
                             {soNumberMap[quote.id].no}
                           </button>
                         )
                         : <span className="text-gray-400">—</span>}
                     </td>
-                    <td className="py-4 px-4 text-gray-600 text-sm text-center">
+                    <td className={`py-3 px-4 text-sm text-center ${opts.isOlder ? 'text-gray-400' : 'text-gray-600'}`}>
                       {formatDate(quote.created_at)}
                     </td>
-                    <td className="py-4 px-4 text-gray-900 text-sm font-medium text-center">
+                    <td className={`py-3 px-4 text-sm font-medium text-center ${opts.isOlder ? 'text-gray-400' : 'text-gray-900'}`}>
                       {formatCurrency(quote.total)}
                     </td>
-                    <td className="py-4 px-4 text-right" onClick={(e) => e.stopPropagation()}>
-                      <div className="flex items-center gap-1 justify-end flex-nowrap">
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); router.navigate(withReturnTo(`/sales/quotes/${quote.id}`)); }}
-                          className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
-                          title="Quote Detail"
-                        >
-                          <Eye style={{ width: 14, height: 14 }} />
-                        </button>
-                        {statusTab === 'archived' ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={(e) => handleEdit(quote, e)}
-                              className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
-                              title="Edit"
-                            >
-                              <Edit style={{ width: 14, height: 14 }} />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => handleRestore(quote, e)}
-                              className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
-                              title="Restore"
-                            >
-                              <RotateCcw style={{ width: 14, height: 14 }} />
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <button
-                              type="button"
-                              onClick={(e) => handleEdit(quote, e)}
-                              className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
-                              title="Edit"
-                            >
-                              <Edit style={{ width: 14, height: 14 }} />
-                            </button>
-                            {canArchiveQuote && (
+                    <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
+                      {opts.isOlder ? (
+                        <div className="flex items-center gap-1 justify-end flex-nowrap">
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); router.navigate(withReturnTo(`/sales/quotes/${quote.id}`)); }}
+                            className="p-1.5 hover:bg-gray-100 rounded text-gray-400 transition-colors"
+                            title="Ver detalle"
+                          >
+                            <Eye style={{ width: 14, height: 14 }} />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1 justify-end flex-nowrap">
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); router.navigate(withReturnTo(`/sales/quotes/${quote.id}`)); }}
+                            className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+                            title="Quote Detail"
+                          >
+                            <Eye style={{ width: 14, height: 14 }} />
+                          </button>
+                          {statusTab === 'archived' ? (
+                            <>
                               <button
                                 type="button"
-                                onClick={(e) => handleArchive(quote, e)}
+                                onClick={(e) => handleEdit(quote, e)}
                                 className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
-                                title="Archive"
+                                title="Edit"
                               >
-                                <Archive style={{ width: 14, height: 14 }} />
+                                <Edit style={{ width: 14, height: 14 }} />
                               </button>
-                            )}
-                            {canDeleteQuote && (
                               <button
                                 type="button"
-                                onClick={(e) => handleDelete(quote, e)}
+                                onClick={(e) => handleRestore(quote, e)}
                                 className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
-                                title="Delete"
+                                title="Restore"
                               >
-                                <Trash2 style={{ width: 14, height: 14 }} />
+                                <RotateCcw style={{ width: 14, height: 14 }} />
                               </button>
-                            )}
-                          </>
-                        )}
-                      </div>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onClick={(e) => handleEdit(quote, e)}
+                                className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+                                title="Edit"
+                              >
+                                <Edit style={{ width: 14, height: 14 }} />
+                              </button>
+                              {canCreateQuote && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => openDuplicateModal(quote, e)}
+                                  className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+                                  title="Duplicar / Nueva versión"
+                                >
+                                  <Copy style={{ width: 14, height: 14 }} />
+                                </button>
+                              )}
+                              {canArchiveQuote && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleArchive(quote, e)}
+                                  className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+                                  title="Archive"
+                                >
+                                  <Archive style={{ width: 14, height: 14 }} />
+                                </button>
+                              )}
+                              {canDeleteQuote && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleDelete(quote, e)}
+                                  className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+                                  title="Delete"
+                                >
+                                  <Trash2 style={{ width: 14, height: 14 }} />
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )}
                     </td>
                   </tr>
-                ))
+                  );
+                  rows.push(renderQuoteRow(group.latest));
+                  if (isExpanded) {
+                    group.older.forEach((older) => rows.push(renderQuoteRow(older, { isOlder: true })));
+                  }
+                  return rows;
+                })
               )}
             </tbody>
           </table>
@@ -818,6 +979,20 @@ export default function Quotes() {
         confirmText={dialogState.confirmText}
         cancelText={dialogState.cancelText}
         isLoading={dialogState.isLoading}
+      />
+
+      <DuplicateQuoteModal
+        isOpen={!!duplicateTarget}
+        onClose={() => !duplicatingLoading && setDuplicateTarget(null)}
+        onConfirm={handleDuplicateConfirm}
+        sourceQuoteNo={duplicateTarget?.quote_no ?? null}
+        disableVersion={duplicateTarget?.status === 'converted'}
+        versionDisabledReason={
+          duplicateTarget?.status === 'converted'
+            ? 'Este quote ya tiene Sales Order. Solo se puede crear una copia independiente.'
+            : null
+        }
+        isLoading={duplicatingLoading}
       />
     </div>
   );

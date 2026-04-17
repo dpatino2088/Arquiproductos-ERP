@@ -311,6 +311,18 @@ function Layout({ children }: LayoutProps) {
     userType === 'internal' &&
     (isSuperAdminUser || currentRole === 'admin' || currentRole === 'sales_coordinator');
   const { activeDealerId, activeDealer } = useActiveDealer();
+  const normalizeDisplayName = (value: string | null | undefined) =>
+    String(value ?? '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+  const orgDisplayName = activeOrganization?.name ?? '';
+  const dealerDisplayName = activeDealer?.dealer_name ?? '';
+  const showSingleScopeName =
+    normalizeDisplayName(orgDisplayName).length > 0 &&
+    normalizeDisplayName(orgDisplayName) === normalizeDisplayName(dealerDisplayName);
+  const scopeDisplayLabel = dealerDisplayName
+    ? (showSingleScopeName ? dealerDisplayName : `${orgDisplayName} · ${dealerDisplayName}`)
+    : orgDisplayName;
   const currentScopeKey = `${activeOrganization?.id ?? 'none'}:${activeDealerId ?? 'none'}`;
   const {
     loadContacts: directoryLoadContacts,
@@ -746,6 +758,12 @@ function Layout({ children }: LayoutProps) {
   const handleNavigation = useCallback((path: string) => {
     // ✅ BONUS BLINDAJE: Portal - bloquear navegación a módulos prohibidos desde sidebar o links internos
     if (userType === "portal") {
+      const isDealerAccountPath = path.startsWith('/settings/dealer-account');
+      if (isDealerAccountPath) {
+        router.navigate(path, true);
+        setCurrentRoute(path);
+        return;
+      }
       const first = (path.split('/')[1] || '').toLowerCase();
       const map: Record<string, ModuleKey> = {
         dashboard: "dashboard",
@@ -864,6 +882,9 @@ function Layout({ children }: LayoutProps) {
     if (!moduleKey) return;
 
     if (userType === 'portal') {
+      if (currentRoute.startsWith('/settings/dealer-account')) {
+        return;
+      }
       if (!allowedModules.includes(moduleKey)) {
         router.navigate('/dashboard', true);
         setCurrentRoute('/dashboard');
@@ -1293,7 +1314,24 @@ function Layout({ children }: LayoutProps) {
                             >
                               <div className="flex items-start justify-between gap-2">
                                 <div className="text-sm font-medium text-gray-900">{n.title}</div>
-                                {!n.is_read && <span className="w-2 h-2 rounded-full bg-blue-600 mt-1.5" />}
+                                {!n.is_read ? (
+                                  <div className="flex items-center gap-2">
+                                    <span className="w-2 h-2 rounded-full bg-blue-600 mt-0.5" />
+                                    <button
+                                      type="button"
+                                      onClick={async (e) => {
+                                        e.stopPropagation();
+                                        await markNotificationAsRead(n.id);
+                                      }}
+                                      className="inline-flex items-center gap-1 text-[11px] text-blue-700 hover:text-blue-800 hover:underline"
+                                      aria-label="Mark notification as read"
+                                      title="Mark as read"
+                                    >
+                                      <Check style={{ width: '12px', height: '12px' }} />
+                                      Mark read
+                                    </button>
+                                  </div>
+                                ) : null}
                               </div>
                               <div className="text-xs text-gray-600 mt-1">{n.message}</div>
                               <div className="text-[11px] text-gray-400 mt-1">
@@ -1359,7 +1397,7 @@ function Layout({ children }: LayoutProps) {
                       {(activeOrganization?.name || activeDealer?.dealer_name) && (
                         <div className="text-xs text-gray-500 mt-1 flex items-center gap-1">
                           <Building2 style={{ width: '12px', height: '12px' }} />
-                          {activeDealer?.dealer_name ? `${activeOrganization?.name} · ${activeDealer.dealer_name}` : activeOrganization?.name}
+                          {scopeDisplayLabel}
                         </div>
                       )}
                     </div>
@@ -1396,21 +1434,6 @@ function Layout({ children }: LayoutProps) {
                         </button>
                       )}
                       
-                      <button
-                        className="w-full px-4 py-2 text-left text-sm text-blue-600 hover:bg-gray-50 flex items-center gap-2"
-                        onClick={() => {
-                          setIsUserMenuOpen(false);
-                          // Add navigation to account page if needed
-                        }}
-                        role="menuitem"
-                        aria-label="Go to my account settings"
-                      >
-                        <User style={{ width: '16px', height: '16px' }} aria-hidden="true" />
-                        My Account
-                      </button>
-                      
-
-
                       <button
                         className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2 border-t border-gray-100 mt-1 pt-3"
                         onClick={async () => {

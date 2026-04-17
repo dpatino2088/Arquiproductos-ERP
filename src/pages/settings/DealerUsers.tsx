@@ -472,7 +472,7 @@ function EditDealerUserModal({ isOpen, onClose, onSuccess, organizationId, user 
       setUser_email(user.email || '');
       setDealer_id(user.dealer_id || '');
       const rc = (user.role_code ?? '').toLowerCase();
-      setRole(rc === 'dealer_manager' || rc === 'member_manager' || rc === 'manager' ? 'dealer_manager' : 'dealer_member');
+      setRole(rc === 'dealer_manager' ? 'dealer_manager' : 'dealer_member');
       const st = (user.status ?? 'active').toLowerCase();
       setStatus(st === 'disabled' ? 'disabled' : st === 'invited' ? 'active' : st);
       setSubmitError(null);
@@ -797,8 +797,18 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
       (user.dealer_name?.toLowerCase() || '').includes(search)
     );
   }, [users, searchTerm]);
+  const isLegacyUser = useCallback((user: DealerAppUserWithDealer) => user.source === 'legacy' || user.id.startsWith('legacy:'), []);
+  const legacyUsersCount = useMemo(() => users.filter((u) => isLegacyUser(u)).length, [users, isLegacyUser]);
 
   const handleAuthorize = async (userId: string) => {
+    if (userId.startsWith('legacy:')) {
+      addNotification({
+        type: 'warning',
+        title: 'Legacy user',
+        message: 'This user comes from legacy DealerUsers and must be re-invited to AppUsers before authorization actions.',
+      });
+      return;
+    }
     if (!activeOrganizationId) return;
     try {
       setAuthorizingId(userId);
@@ -819,6 +829,14 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
   };
 
   const handleEdit = (user: DealerAppUserWithDealer) => {
+    if (isLegacyUser(user)) {
+      addNotification({
+        type: 'warning',
+        title: 'Legacy user',
+        message: 'This user comes from legacy DealerUsers. Re-invite this email to manage it from AppUsers.',
+      });
+      return;
+    }
     if (useInlineEdit) {
       router.navigate(`/partners/dealer-users/edit/${user.id}`);
       return;
@@ -828,6 +846,14 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
   };
 
   const handleArchive = async (user: DealerAppUserWithDealer) => {
+    if (isLegacyUser(user)) {
+      addNotification({
+        type: 'warning',
+        title: 'Legacy user',
+        message: 'This user comes from legacy DealerUsers. Re-invite this email to manage it from AppUsers.',
+      });
+      return;
+    }
     if (!activeOrganizationId) return;
     const confirmed = await showConfirm({
       title: 'Archive Dealer User',
@@ -858,6 +884,14 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
   };
 
   const handleDelete = async (user: DealerAppUserWithDealer) => {
+    if (isLegacyUser(user)) {
+      addNotification({
+        type: 'warning',
+        title: 'Legacy user',
+        message: 'This user comes from legacy DealerUsers. Re-invite this email to manage it from AppUsers.',
+      });
+      return;
+    }
     if (!activeOrganizationId) return;
     const confirmed = await showConfirm({
       title: 'Delete Dealer User',
@@ -925,6 +959,14 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
   };
 
   const handleResendInvite = async (user: DealerAppUserWithDealer) => {
+    if (isLegacyUser(user)) {
+      addNotification({
+        type: 'warning',
+        title: 'Legacy user',
+        message: 'This user comes from legacy DealerUsers. Re-invite this email from Add Dealer User to move it into AppUsers.',
+      });
+      return;
+    }
     if (!activeOrganizationId || !user.email || !user.dealer_id || !currentUser) return;
     setInvitingId(user.id);
     try {
@@ -1044,6 +1086,15 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
 
       {/* Search and Filters */}
       <div className="mb-4">
+        {legacyUsersCount > 0 && (
+          <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+            <p className="text-sm font-medium text-amber-900">Legacy users detected: {legacyUsersCount}</p>
+            <p className="mt-1 text-xs text-amber-800">
+              This list reads from `AppUsers` as source of truth and also shows unmatched `DealerUsers` rows to avoid missing users.
+              Legacy rows are read-only until re-invited into `AppUsers`.
+            </p>
+          </div>
+        )}
         <div className={`bg-white border border-gray-200 py-6 px-6 ${
           showFilters ? 'rounded-t-lg' : 'rounded-lg'
         }`}>
@@ -1149,6 +1200,11 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
                         <span className="font-medium text-gray-900 truncate">
                           {user.display_name || 'No name'}
                         </span>
+                        {isLegacyUser(user) && (
+                          <span className="px-2 py-0.5 rounded border border-amber-300 bg-amber-50 text-[10px] font-medium text-amber-800">
+                            Legacy
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap truncate">
@@ -1186,7 +1242,7 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
                     {/* Actions - only Dealer Manager (portal) or internal users can manage */}
                     <td className="py-4 px-6">
                       <div className="flex items-center justify-end gap-2">
-                        {(isPortalManager || canManageDealerUsersInternal) && user.status === 'invited' && (
+                        {(isPortalManager || canManageDealerUsersInternal) && user.status === 'invited' && !isLegacyUser(user) && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -1200,7 +1256,7 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
                           </button>
                         )}
                         
-                        {(isPortalManager || canManageDealerUsersInternal) && user.status === 'invited' && user.email && (
+                        {(isPortalManager || canManageDealerUsersInternal) && user.status === 'invited' && user.email && !isLegacyUser(user) && (
                           <div className="flex items-center gap-1">
                             <button
                               onClick={() => handleResendInvite(user)}
@@ -1240,7 +1296,7 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
                         )}
 
                         {/* Edit / Archive / Delete - only for Manager (portal) or internal */}
-                        {(isPortalManager || canManageDealerUsersInternal) && (
+                        {(isPortalManager || canManageDealerUsersInternal) && !isLegacyUser(user) && (
                           <>
                             <button
                               onClick={(e) => {

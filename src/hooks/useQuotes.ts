@@ -32,6 +32,10 @@ export interface QuoteListItem {
   sale_order_id?: string | null;
   total_paid?: number;
   has_payment?: boolean;
+  parent_quote_id?: string | null;
+  root_quote_id?: string | null;
+  version_no?: number | null;
+  is_version?: boolean | null;
   [key: string]: unknown;
 }
 
@@ -84,7 +88,7 @@ export function useQuotes(dealerId?: string | null) {
 
       let query = supabase
         .from('Quotes')
-        .select('id, quote_no, status, priority, created_at, created_by_user_id, customer_id, contact_id, dealer_id, organization_id, description, archived')
+        .select('id, quote_no, status, priority, created_at, created_by_user_id, customer_id, contact_id, dealer_id, organization_id, description, archived, parent_quote_id, root_quote_id, version_no, is_version')
         .eq('organization_id', activeOrganizationId)
         .or('deleted.is.false,deleted.is.null');
 
@@ -1185,4 +1189,38 @@ export async function approveQuote(quoteId: string, organizationId: string): Pro
   }
 
   return fullQuote as Quote;
+}
+
+/**
+ * Duplicate a Quote. Two modes:
+ *   - 'copy'    -> brand new QT-XXXXX number (independent quote)
+ *   - 'version' -> new _V<N> quote linked to original via parent_quote_id/root_quote_id.
+ *                  The previous editable version is marked as 'superseded' automatically.
+ *
+ * When `recalculate = true`, cloned lines are flagged with pricing_locked=false
+ * and last_priced_at=NULL so the UI can prompt a fresh pricing pass.
+ *
+ * Returns the new Quote id on success.
+ */
+export async function duplicateQuote(
+  quoteId: string,
+  mode: 'copy' | 'version',
+  recalculate: boolean = true,
+): Promise<string> {
+  const { data, error } = await supabase.rpc('duplicate_quote', {
+    p_quote_id: quoteId,
+    p_mode: mode,
+    p_recalculate: recalculate,
+  });
+
+  if (error) {
+    console.error('[duplicateQuote] RPC error:', error);
+    throw new Error(error.message || 'Failed to duplicate quote');
+  }
+
+  const newId = typeof data === 'string' ? data : (data as any)?.id ?? null;
+  if (!newId) {
+    throw new Error('duplicate_quote returned no id');
+  }
+  return newId as string;
 }

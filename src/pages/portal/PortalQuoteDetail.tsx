@@ -2,8 +2,8 @@
  * Portal Quote Detail Component
  * 
  * Shows quote details with role-based actions:
- * - member: can edit own quotes (draft only), cannot approve
- * - member_manager: can approve/reject, can edit
+ * - dealer_member: can edit own quotes (draft only), cannot approve
+ * - dealer_manager: can approve/reject, can edit
  */
 
 import { useEffect, useState } from 'react';
@@ -20,7 +20,9 @@ import {
   type CompanyPortalRole,
   type PortalQuote,
 } from '../../portal/portalAccess';
-import { Edit, CheckCircle, XCircle, ArrowLeft, Loader2 } from 'lucide-react';
+import { Edit, CheckCircle, XCircle, ArrowLeft, Loader2, Copy } from 'lucide-react';
+import { duplicateQuote } from '../../hooks/useQuotes';
+import DuplicateQuoteModal, { type DuplicateQuoteMode } from '../../components/sales/DuplicateQuoteModal';
 
 interface PortalUser {
   id: string;
@@ -38,6 +40,9 @@ export default function PortalQuoteDetail() {
   const [error, setError] = useState<string | null>(null);
   const [approving, setApproving] = useState(false);
   const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);
+  const addNotification = useUIStore((s) => s.addNotification);
+  const [duplicateOpen, setDuplicateOpen] = useState(false);
+  const [duplicatingLoading, setDuplicatingLoading] = useState(false);
 
   useEffect(() => {
     setGlobalLoading(loading);
@@ -215,6 +220,33 @@ export default function PortalQuoteDetail() {
 
   const canEdit = canEditQuote(portalUser.portal_user_role, quote, user?.id);
   const canApprove = canApproveQuote(portalUser.portal_user_role, quote);
+  // Portal users can duplicate any quote they can view (mirrors internal behavior).
+  const canDuplicate = canViewQuote(portalUser.portal_user_role, quote, user?.id);
+
+  const handleDuplicateConfirm = async (mode: DuplicateQuoteMode, recalculate: boolean) => {
+    setDuplicatingLoading(true);
+    try {
+      const newId = await duplicateQuote(quote.id, mode, recalculate);
+      addNotification({
+        type: 'success',
+        title: mode === 'version' ? 'Versión creada' : 'Cotización duplicada',
+        message:
+          mode === 'version'
+            ? 'Se creó una nueva versión vinculada al quote original.'
+            : 'Se creó una cotización independiente.',
+      });
+      setDuplicateOpen(false);
+      window.location.href = `/portal/quotes/${newId}/edit`;
+    } catch (err: any) {
+      addNotification({
+        type: 'error',
+        title: 'Error duplicando',
+        message: err?.message || 'Failed to duplicate quote',
+      });
+    } finally {
+      setDuplicatingLoading(false);
+    }
+  };
 
   return (
     <div className="p-6">
@@ -234,6 +266,15 @@ export default function PortalQuoteDetail() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {canDuplicate && (
+            <button
+              onClick={() => setDuplicateOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
+            >
+              <Copy className="w-4 h-4" />
+              Duplicar
+            </button>
+          )}
           {canEdit && (
             <button
               onClick={() => {
@@ -300,6 +341,20 @@ export default function PortalQuoteDetail() {
       </div>
 
       {/* Note: Add quote lines, customer info, etc. as needed */}
+
+      <DuplicateQuoteModal
+        isOpen={duplicateOpen}
+        onClose={() => !duplicatingLoading && setDuplicateOpen(false)}
+        onConfirm={handleDuplicateConfirm}
+        sourceQuoteNo={quote.quote_no}
+        disableVersion={quote.status === 'converted'}
+        versionDisabledReason={
+          quote.status === 'converted'
+            ? 'Este quote ya tiene Sales Order. Solo se puede crear una copia independiente.'
+            : null
+        }
+        isLoading={duplicatingLoading}
+      />
     </div>
   );
 }

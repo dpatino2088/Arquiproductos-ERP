@@ -40,11 +40,15 @@ type AccessContextState = {
 
 const PORTAL_ALLOWED_MODULES: ModuleKey[] = ["dashboard", "directory", "sales", "financials", "service"];
 
-/** Map AppUser.role_code (dealer_manager, dealer_member) or DealerUsers.role to PortalRole */
+/**
+ * Map role_code string to PortalRole.
+ * Only `dealer_manager` and `dealer_member` are valid portal roles.
+ * Legacy values (`manager`, `member_manager`, `member`) are no longer supported.
+ */
 function roleCodeToPortalRole(v: any): PortalRole | null {
   const s = (v ?? "").toString().trim().toLowerCase();
-  if (s === "member" || s === "dealer_member") return "dealer_member";
-  if (s === "member_manager" || s === "manager" || s === "dealer_manager") return "dealer_manager";
+  if (s === "dealer_manager") return "dealer_manager";
+  if (s === "dealer_member") return "dealer_member";
   return null;
 }
 
@@ -300,12 +304,12 @@ export function useAccessContext(): AccessContextState {
   }, [userType, portalRole]);
 
   const canSeeAllDealerQuotes = useMemo(() => {
-    // Only member_manager portal users can see all dealer quotes
+    // Only dealer_manager portal users can see all dealer quotes
     return userType === "portal" && portalRole === "dealer_manager";
   }, [userType, portalRole]);
 
   const canEditDirectory = useMemo(() => {
-    // Both portal roles (member and member_manager) can edit Directory
+    // Both portal roles (dealer_member and dealer_manager) can edit Directory
     return userType === "portal";
   }, [userType]);
 

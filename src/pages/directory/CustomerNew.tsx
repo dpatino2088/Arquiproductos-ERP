@@ -109,7 +109,7 @@ export default function CustomerNew() {
   const { canEditDirectory, userType, loading: accessLoading } = useAccessContext();
   const { canEditCustomers, isViewer, loading: roleLoading, isSuperAdmin, isAdmin, isOwner } = useCurrentOrgRole();
   
-  // Portal users can always edit Directory (both member and member_manager)
+  // Portal users can always edit Directory (both dealer_member and dealer_manager)
   // Internal users need explicit canEditCustomers permission or be superadmin/admin/owner
   const canEdit = userType === "portal" 
     ? canEditDirectory 

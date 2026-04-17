@@ -328,6 +328,8 @@ export function getReadPermissionsForPath(pathname: string): string[] {
     '/my-financials/payments': ['portal.financials.payments.read'],
     '/my-financials/statement': ['portal.financials.statement.read'],
     '/my-financials/accounts': ['portal.financials.statement.read'],
+    // Portal dealer account settings (dealer manager scope)
+    '/settings/dealer-account': ['portal.financials.invoices.read'],
     '/financials/vendor-accounts': ['financials.vendor_accounts.read'],
     '/financials/purchase-orders': ['financials.purchase_orders.read'],
     '/financials/bills': ['financials.bills.read'],

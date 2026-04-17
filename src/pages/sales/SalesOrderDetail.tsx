@@ -11,7 +11,7 @@ import { router } from '../../lib/router';
 import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
 import { formatCurrency, formatDate } from '../../lib/utils';
 import { useSOActions } from '../../hooks/useSOActions';
-import { ChevronDown, FileText, ShoppingBag, CreditCard, Factory, Package, CheckCircle2, AlertTriangle, XCircle, ArrowLeft, Eye, Loader2, Truck } from 'lucide-react';
+import { ChevronDown, FileText, ShoppingBag, CreditCard, Factory, Package, CheckCircle2, AlertTriangle, XCircle, ArrowLeft, Eye, Loader2, Truck, CalendarDays } from 'lucide-react';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useSOFulfillmentSummary } from '../../hooks/useInventoryAllocations';
 import { usePayments } from '../../hooks/usePayments';
@@ -85,6 +85,8 @@ interface ManufacturingOrder {
   quantity: number;
   priority: string;
   created_at: string;
+  planned_start_at?: string | null;
+  planned_end_at?: string | null;
 }
 
 interface SOInvoice {
@@ -137,6 +139,37 @@ function normalizeMfgStatus(status: string | null | undefined): string {
     return 'delivered';
   }
   return normalized;
+}
+
+function parseLinearLengthFromText(text: string | null | undefined): number | null {
+  if (!text) return null;
+  const matches = [...text.matchAll(/(\d+(?:[.,]\d+)?)\s*m\s*linear/gi)];
+  if (matches.length === 0) return null;
+  const raw = matches[matches.length - 1]?.[1]?.replace(',', '.');
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function getLineMeasurementsDisplay(line: SalesOrderLine): string {
+  const widthMm = line.width_m != null && line.width_m > 0 ? Math.round(line.width_m * 1000) : null;
+  const heightMm = line.height_m != null && line.height_m > 0 ? Math.round(line.height_m * 1000) : null;
+  const isFilmLine = (line.product_type ?? '').toLowerCase() === 'window_film';
+
+  if (!isFilmLine) {
+    return widthMm != null && heightMm != null ? `${widthMm} x ${heightMm}` : '—';
+  }
+
+  const parsedLinearLengthM = parseLinearLengthFromText(line.description);
+  const linearLengthMm =
+    heightMm != null
+      ? heightMm
+      : parsedLinearLengthM != null
+        ? Math.round(parsedLinearLengthM * 1000)
+        : null;
+
+  if (widthMm != null && linearLengthMm != null) return `${widthMm} x ${linearLengthMm}`;
+  if (linearLengthMm != null) return `${linearLengthMm}`;
+  return '—';
 }
 
 function formatInvoiceBillingAddress(d: InvoicePdfDealer): string {
@@ -196,6 +229,7 @@ export default function SalesOrderDetail() {
   const [moDisplayStatusMap, setMoDisplayStatusMap] = useState<Map<string, string>>(new Map());
   const [soClaims, setSOClaims] = useState<{ id: string; claim_no: string; status: string; claim_type: string; created_at: string }[]>([]);
   const [supplyOnlyCodes, setSupplyOnlyCodes] = useState<Set<string>>(new Set());
+  const [savingDeliveryDate, setSavingDeliveryDate] = useState(false);
 
   const { transitionSOStatus, createMO, isActing } = useSOActions();
   const { registerSubmodules } = useSubmoduleNav();
@@ -239,7 +273,7 @@ export default function SalesOrderDetail() {
           .order('line_number', { ascending: true, nullsFirst: false }),
         supabase
           .from('ManufacturingOrders')
-          .select('id, manufacturing_order_no, status, mo_type, product_name, quantity, priority, created_at')
+          .select('id, manufacturing_order_no, status, mo_type, product_name, quantity, priority, created_at, planned_start_at, planned_end_at')
           .eq('sales_order_id', salesOrderId)
           .eq('deleted', false)
           .order('created_at', { ascending: false }),
@@ -427,6 +461,37 @@ export default function SalesOrderDetail() {
     },
     [salesOrderId, user, transitionSOStatus, refetch]
   );
+
+  const handleDeliveryDateChange = useCallback(async (newDate: string | null) => {
+    if (!salesOrderId || !so) return;
+    setSavingDeliveryDate(true);
+    try {
+      const oldDate = so.expected_delivery_date;
+      const { error: updateErr } = await supabase
+        .from('SalesOrders')
+        .update({ expected_delivery_date: newDate || null })
+        .eq('id', salesOrderId);
+      if (updateErr) throw updateErr;
+
+      await supabase.from('ActivityTimeline').insert({
+        entity_type: 'sales_order',
+        entity_id: salesOrderId,
+        action: 'expected_delivery_updated',
+        description: newDate
+          ? `Expected delivery date ${oldDate ? 'changed' : 'set'} to ${new Date(newDate).toLocaleDateString('en-GB')}`
+          : 'Expected delivery date cleared',
+        user_name: user?.name ?? null,
+        metadata: { old_date: oldDate, new_date: newDate },
+      });
+
+      addNotification({ type: 'success', title: 'Date Updated', message: 'Expected delivery date saved.' });
+      refetch();
+    } catch (err: any) {
+      addNotification({ type: 'error', title: 'Error', message: err?.message || 'Failed to update delivery date' });
+    } finally {
+      setSavingDeliveryDate(false);
+    }
+  }, [salesOrderId, so, user, addNotification, refetch]);
 
   const handleCreateMO = useCallback(async () => {
     if (!salesOrderId || !user?.id) return;
@@ -1010,8 +1075,43 @@ export default function SalesOrderDetail() {
                 <dd className="font-medium text-gray-900 mt-0.5">{formatDate(so.created_at)}</dd>
               </div>
               <div>
-                <dt className="text-gray-500">Expected Delivery</dt>
-                <dd className="font-medium text-gray-900 mt-0.5">{formatDate(so.expected_delivery_date)}</dd>
+                <dt className="text-gray-500 flex items-center gap-1">
+                  Expected Delivery
+                  {savingDeliveryDate && <Loader2 className="w-3 h-3 animate-spin text-gray-400" />}
+                </dt>
+                <dd className="mt-0.5">
+                  {isInternal && soStatus !== 'cancelled' ? (
+                    <div className="relative">
+                      <input
+                        type="date"
+                        value={so.expected_delivery_date ? so.expected_delivery_date.slice(0, 10) : ''}
+                        onChange={(e) => handleDeliveryDateChange(e.target.value || null)}
+                        disabled={savingDeliveryDate}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+                      />
+                      <span className="inline-flex items-center gap-1.5 font-medium text-gray-900 text-sm cursor-pointer border-b border-dashed border-gray-300 hover:border-primary pb-0.5">
+                        {so.expected_delivery_date ? formatDate(so.expected_delivery_date) : <span className="text-gray-400">Set date</span>}
+                        <CalendarDays className="w-3.5 h-3.5 text-gray-400" />
+                      </span>
+                    </div>
+                  ) : (
+                    <span className="font-medium text-gray-900">{formatDate(so.expected_delivery_date)}</span>
+                  )}
+                </dd>
+                {(() => {
+                  const activeMos = mos.filter((m) => (m.status || '').toLowerCase() !== 'cancelled');
+                  const latestEnd = activeMos
+                    .map((m) => m.planned_end_at)
+                    .filter(Boolean)
+                    .sort()
+                    .pop();
+                  if (!latestEnd) return null;
+                  return (
+                    <p className="text-[11px] text-gray-400 mt-1" title="Based on manufacturing schedule">
+                      Production ETA: {formatDate(latestEnd)}
+                    </p>
+                  );
+                })()}
               </div>
               <div>
                 <dt className="text-gray-500">Completed</dt>
@@ -1146,7 +1246,7 @@ export default function SalesOrderDetail() {
                         ? `${line.collection_name} - ${line.variant_name}`
                         : line.collection_name || line.variant_name || line.CatalogItems?.name) ??
                       '—';
-                    const dims = [line.width_m, line.height_m].filter((v) => v != null);
+                    const dimensionsText = getLineMeasurementsDisplay(line);
                     const linkedMo = lineMoMap.get(line.id);
                     return (
                       <tr key={line.id} className={`border-t hover:bg-gray-50 ${linkedMo ? 'bg-green-50/30' : ''}`}>
@@ -1158,7 +1258,7 @@ export default function SalesOrderDetail() {
                           )}
                         </td>
                         <td className="px-4 py-4 text-gray-700">{line.product_type ?? '—'}</td>
-                        <td className="px-4 py-4 text-gray-700">{dims.length === 2 ? `${line.width_m} x ${line.height_m}` : '—'}</td>
+                        <td className="px-4 py-4 text-gray-700 tabular-nums">{dimensionsText}</td>
                         <td className="px-4 py-4 text-right text-gray-900 tabular-nums">{line.quantity}</td>
                         <td className="px-4 py-4 text-right font-mono text-gray-900">{formatCurrency(line.unit_price ?? 0, currency)}</td>
                         <td className="px-4 py-4 text-right font-mono font-medium text-gray-900">{formatCurrency(line.line_total ?? 0, currency)}</td>

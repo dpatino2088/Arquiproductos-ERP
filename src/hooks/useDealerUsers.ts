@@ -132,13 +132,8 @@ export function useDealerUsers(dealerId?: string | null, options?: UseDealerUser
       portal_user_email,
       portal_user_name: row.portal_user_name || null,
       portal_user_role: (() => {
-        const rawRole = row.role || row.portal_user_role;
-        if (rawRole === 'dealer_manager' || rawRole === 'member_manager') return 'dealer_manager' as const;
-        if (rawRole === 'dealer_member' || rawRole === 'member') return 'dealer_member' as const;
-        if (!rawRole || rawRole === '' || rawRole === null) return 'dealer_member' as const;
-        const normalized = String(rawRole).toLowerCase().trim();
-        if (['dealer_manager', 'member_manager', 'manager'].includes(normalized)) return 'dealer_manager' as const;
-        return 'dealer_member' as const;
+        const rawRole = String(row.role ?? row.portal_user_role ?? '').toLowerCase().trim();
+        return rawRole === 'dealer_manager' ? ('dealer_manager' as const) : ('dealer_member' as const);
       })(),
       portal_user_status,
       organization_id: row.organization_id || (row.Dealers?.organization_id || null),

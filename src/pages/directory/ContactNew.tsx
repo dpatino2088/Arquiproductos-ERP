@@ -64,7 +64,7 @@ export default function ContactNew() {
   const { canEditDirectory, userType, loading: accessLoading } = useAccessContext();
   const { canEditContacts, isViewer, loading: roleLoading, isSuperAdmin, isAdmin, isOwner, role } = useCurrentOrgRole();
   
-  // Portal users can always edit Directory (both member and member_manager)
+  // Portal users can always edit Directory (both dealer_member and dealer_manager)
   // Internal users need explicit canEditContacts permission or be superadmin/admin/owner
   const canEdit = userType === "portal" 
     ? canEditDirectory 

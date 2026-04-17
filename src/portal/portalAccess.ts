@@ -11,7 +11,7 @@ export interface PortalQuote {
   id: string;
   dealer_id: string;
   created_by_user_id: string | null;
-  status: 'draft' | 'sent' | 'approved' | 'rejected' | 'cancelled';
+  status: 'draft' | 'sent' | 'approved' | 'rejected' | 'cancelled' | 'converted' | 'superseded';
   [key: string]: any;
 }
 
@@ -94,18 +94,14 @@ export function canApproveQuote(
 }
 
 /**
- * Normalize legacy role values to dealer_manager | dealer_member
+ * Normalize role string to dealer_manager | dealer_member.
+ * Only `dealer_manager` is recognized as the manager role — legacy values
+ * (`manager`, `member_manager`) are no longer valid.
  */
 export function normalizeRole(role: string | null | undefined): CompanyPortalRole {
   if (!role) return 'dealer_member';
-
   const normalized = role.toLowerCase().trim();
-
-  if (['manager', 'member_manager', 'dealer_manager'].includes(normalized)) {
-    return 'dealer_manager';
-  }
-
-  return 'dealer_member';
+  return normalized === 'dealer_manager' ? 'dealer_manager' : 'dealer_member';
 }
 
 /**

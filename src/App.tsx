@@ -1070,6 +1070,13 @@ function App() {
         setCurrentPage('login');
       }
     });
+    router.addRoute('/settings/dealer-account/users', () => {
+      if (isAuthenticated) {
+        setCurrentPage('dealer-account');
+      } else {
+        setCurrentPage('login');
+      }
+    });
     router.addRoute('/settings/dealer-account/terms', () => {
       if (isAuthenticated) {
         setCurrentPage('dealer-account');

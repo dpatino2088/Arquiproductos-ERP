@@ -151,14 +151,14 @@ export default function Claims() {
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Claim #</th>
-                <th className="py-3 px-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Date</th>
-                <th className="py-3 px-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">SO #</th>
-                {isInternal && <th className="py-3 px-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Dealer</th>}
-                <th className="py-3 px-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Type</th>
-                <th className="py-3 px-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Priority</th>
-                <th className="py-3 px-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Status</th>
-                <th className="py-3 px-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Description</th>
+                <th className="py-3 px-4 text-left text-xs font-medium text-gray-500">Claim #</th>
+                <th className="py-3 px-3 text-left text-xs font-medium text-gray-500">Date</th>
+                <th className="py-3 px-3 text-left text-xs font-medium text-gray-500">SO #</th>
+                {isInternal && <th className="py-3 px-3 text-left text-xs font-medium text-gray-500">Dealer</th>}
+                <th className="py-3 px-3 text-left text-xs font-medium text-gray-500">Type</th>
+                <th className="py-3 px-3 text-left text-xs font-medium text-gray-500">Priority</th>
+                <th className="py-3 px-3 text-left text-xs font-medium text-gray-500">Status</th>
+                <th className="py-3 px-3 text-left text-xs font-medium text-gray-500">Description</th>
               </tr>
             </thead>
             <tbody>

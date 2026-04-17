@@ -97,7 +97,7 @@ export default function PartnerDealerUserForm({ dealerUserId }: PartnerDealerUse
       setUserEmail(data.email || '');
       setDealerId(data.dealer_id || '');
       const rc = (data.role_code ?? '').toLowerCase();
-      setRole(rc === 'dealer_manager' || rc === 'member_manager' || rc === 'manager' ? 'dealer_manager' : 'dealer_member');
+      setRole(rc === 'dealer_manager' ? 'dealer_manager' : 'dealer_member');
       const st = (data.status ?? 'active').toLowerCase();
       setStatus(st === 'disabled' ? 'disabled' : 'active');
       setIsLoading(false);
