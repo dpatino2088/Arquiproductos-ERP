@@ -359,12 +359,12 @@ export function generateQuotePDF(
     n: 7,
     area: 16,
     pos: 18,
-    desc: 40,
+    desc: 36,
     measurements: 26,
-    productType: 27,
-    qty: 7,
-    unit: 23,
-    total: 22,
+    productType: 21,
+    qty: 11,
+    unit: 25,
+    total: 26,
   };
 
   const tableData = lines.map((line, index) => {
@@ -439,9 +439,9 @@ export function generateQuotePDF(
         minCellHeight: 20,
       },
       5: { cellWidth: W.productType, halign: 'center', valign: 'middle' },
-      6: { cellWidth: W.qty, halign: 'center', valign: 'middle', cellPadding: { top: 3, bottom: 3, left: 2, right: 2 } },
+      6: { cellWidth: W.qty, halign: 'center', valign: 'middle', cellPadding: { top: 3, bottom: 3, left: 0, right: 0 } },
       7: { cellWidth: W.unit, halign: 'right', valign: 'middle', cellPadding: { top: 3, bottom: 3, left: 0, right: 2 } },
-      8: { cellWidth: W.total, halign: 'right', valign: 'middle', cellPadding: { top: 3, bottom: 3, left: 5, right: 5 } },
+      8: { cellWidth: W.total, halign: 'right', valign: 'middle', overflow: 'visible', cellPadding: { top: 3, bottom: 3, left: 1, right: 2 } },
     },
     didParseCell: (data: any) => {
       if (data.section === 'head') {
@@ -453,12 +453,15 @@ export function generateQuotePDF(
           data.cell.styles.halign = 'center';
           data.cell.styles.cellPadding = { top: 2, bottom: 2, left: 2, right: 2 };
         }
-        if (data.column.index === 5) { data.cell.styles.cellPadding = { top: 2, bottom: 2, left: 5, right: 0 }; }
-        if (data.column.index === 6) { data.cell.styles.halign = 'center'; data.cell.styles.cellPadding = { top: 2, bottom: 2, left: 0, right: 2 }; }
-        if (data.column.index === 7) data.cell.styles.halign = 'right';
+        if (data.column.index === 5) { data.cell.styles.cellPadding = { top: 2, bottom: 2, left: 1, right: 0 }; }
+        if (data.column.index === 6) { data.cell.styles.halign = 'center'; data.cell.styles.cellPadding = { top: 2, bottom: 2, left: 0, right: 0 }; }
+        if (data.column.index === 7) {
+          data.cell.styles.halign = 'right';
+          data.cell.styles.cellPadding = { top: 2, bottom: 2, left: 2, right: 2 };
+        }
         if (data.column.index === 8) {
           data.cell.styles.halign = 'right';
-          data.cell.styles.cellPadding = { top: 2, bottom: 2, left: 5, right: 5 };
+          data.cell.styles.cellPadding = { top: 2, bottom: 2, left: 2, right: 2 };
         }
       }
       if (data.section === 'body') {
