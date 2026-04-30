@@ -64,6 +64,16 @@ function getWindowFilmMeasurementMm(line: QuoteLine): { widthMm: number; lengthM
   return { widthMm: Math.round(widthM * 1000), lengthMm: Math.round(lengthM * 1000) };
 }
 
+function normalizeStyleLabel(styleCode?: string | null): string {
+  const raw = (styleCode || '').trim();
+  if (!raw) return '';
+  return raw
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function getQuoteIdFromPath(): string | null {
   const match = window.location.pathname.match(/\/sales\/quotes\/([^/]+)/);
   return match ? match[1] : null;
@@ -557,19 +567,6 @@ export default function QuoteDetail() {
       );
     }
     if (!isPortal) {
-      if (canEditQuote) {
-        btns.push(
-          <button
-            key="edit"
-            type="button"
-            onClick={() => router.navigate(withReturnTo(`/sales/quotes/${quoteId}/edit`))}
-            className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
-            title="Edit Quote"
-          >
-            <Edit style={{ width: 14, height: 14 }} />
-          </button>
-        );
-      }
       if (canCreateProposal) {
         btns.push(
           <button
@@ -624,6 +621,21 @@ export default function QuoteDetail() {
           </button>
         );
       }
+    }
+    if (canEditQuote) {
+      btns.push(
+        <button
+          key="edit"
+          type="button"
+          onClick={() => router.navigate(withReturnTo(`/sales/quotes/${quoteId}/edit`))}
+          disabled={acting}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+          title="Edit Quote"
+        >
+          <Edit className="w-4 h-4" />
+          Edit
+        </button>
+      );
     }
     if (canDuplicate) {
       btns.push(
@@ -1058,6 +1070,12 @@ export default function QuoteDetail() {
                   const unitPrice = line.unit_dealer_price_snapshot ?? line.unit_msrp ?? (line.dealer_price_total != null && qty > 0 ? Number(line.dealer_price_total) / qty : (line.msrp != null && qty > 0 ? Number(line.msrp) / qty : null));
                   const lineTotal = line.dealer_price_total ?? line.msrp ?? (unitPrice != null ? unitPrice * qty : null);
                   const isFilmLine = (line.product_type ?? '').toLowerCase() === 'window_film';
+                  const isDraperyTrackOnly =
+                    (line.product_type ?? '').toLowerCase() === 'drapery' &&
+                    Boolean(line.config_snapshot?.track_only);
+                  const draperyStyleLabel = normalizeStyleLabel(
+                    line.config_snapshot?.style_code ?? line.config_snapshot?.styleCode ?? null
+                  );
                   const filmMeasurement = isFilmLine ? getWindowFilmMeasurementMm(line) : null;
                   const cs = line.config_snapshot;
                   const dimSource = cs ? {
@@ -1075,10 +1093,21 @@ export default function QuoteDetail() {
                     <tr key={line.id} className="border-t hover:bg-gray-50">
                       <td className="px-4 py-4">{idx + 1}</td>
                       <td className="px-4 py-4">
-                        <div>{line.name ?? '—'}</div>
+                        <div>
+                          {isDraperyTrackOnly
+                            ? `Drapery Track${draperyStyleLabel ? ` | ${draperyStyleLabel}` : ''}`
+                            : (line.name ?? '—')}
+                        </div>
                         {line.sku && <div className="text-xs text-gray-500">{line.sku}</div>}
+                        {isDraperyTrackOnly && (
+                          <div className="text-xs text-gray-500">
+                            Style: {draperyStyleLabel || '—'}
+                          </div>
+                        )}
                       </td>
-                      <td className="px-4 py-4">{line.product_type ?? '—'}</td>
+                      <td className="px-4 py-4">
+                        {isDraperyTrackOnly ? 'Drapery Track' : (line.product_type ?? '—')}
+                      </td>
                       <td className="px-4 py-4">
                         {filmMeasurement ? (
                           <span className="tabular-nums">

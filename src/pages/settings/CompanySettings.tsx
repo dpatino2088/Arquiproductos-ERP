@@ -10,6 +10,7 @@ import {
   Shield,
   Factory,
   Scissors,
+  MapPin,
 } from 'lucide-react';
 import OrganizationUser from './OrganizationUser';
 import OrganizationUserNew from './OrganizationUserNew';
@@ -18,6 +19,7 @@ import CostEngineSettings from './CostEngineSettings';
 import DealerProfile from './DealerProfile';
 import WorkCentersSettings from './WorkCentersSettings';
 import FabricRulesSettings from './FabricRulesSettings';
+import AddressDirectorySettings from './AddressDirectorySettings';
 import AdminRoles from '../admin/Roles';
 
 export default function CompanySettings() {
@@ -84,6 +86,12 @@ export default function CompanySettings() {
     }
   }, [currentRoute, activeSection]);
 
+  useEffect(() => {
+    if (currentRoute.includes('/settings/address-directory') && activeSection !== 'address-directory') {
+      setActiveSection('address-directory');
+    }
+  }, [currentRoute, activeSection]);
+
   // Keep roles section in sync with route.
   useEffect(() => {
     if (currentRoute.includes('/settings/roles') && activeSection !== 'roles') {
@@ -111,6 +119,7 @@ export default function CompanySettings() {
     { id: 'cost-engine', label: 'Cost Engine', icon: SettingsIcon },
     { id: 'work-centers', label: 'Work Centers', icon: Factory },
     { id: 'fabric-rules', label: 'Fabric & System Rules', icon: Scissors },
+    { id: 'address-directory', label: 'Address Directory', icon: MapPin },
     { id: 'roles', label: 'Roles & Permissions', icon: Shield }
   ];
 
@@ -139,6 +148,8 @@ export default function CompanySettings() {
       router.navigate('/settings/work-centers');
     } else if (sectionId === 'fabric-rules') {
       router.navigate('/settings/fabric-rules');
+    } else if (sectionId === 'address-directory') {
+      router.navigate('/settings/address-directory');
     } else if (sectionId === 'roles') {
       router.navigate('/settings/roles');
     }
@@ -214,6 +225,10 @@ export default function CompanySettings() {
 
     if (activeSection === 'fabric-rules') {
       return <FabricRulesSettings />;
+    }
+
+    if (activeSection === 'address-directory') {
+      return <AddressDirectorySettings />;
     }
 
     if (activeSection === 'roles') {

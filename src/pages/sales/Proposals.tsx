@@ -414,17 +414,18 @@ export default function Proposals() {
           </div>
         )}
         <div className="table-fit-wrapper overflow-x-auto">
-          <table className="table-fit w-full min-w-[1240px]">
+          <table className="table-fit w-full min-w-[1320px]">
             <colgroup>
-              <col style={{ width: '4%' }} />
-              <col style={{ width: '12%' }} />
-              <col style={{ width: '9%' }} />
-              <col style={{ width: '12%' }} />
-              <col style={{ width: '11%' }} />
-              <col style={{ width: '11%' }} />
-              <col style={{ width: '9%' }} />
-              <col style={{ width: '11%' }} />
-              <col style={{ width: '11%' }} />
+              <col style={{ width: '44px' }} />
+              <col style={{ width: '140px' }} />
+              <col style={{ width: '100px' }} />
+              <col style={{ width: '180px' }} />
+              <col style={{ width: '150px' }} />
+              <col style={{ width: '150px' }} />
+              <col style={{ width: '110px' }} />
+              <col style={{ width: '110px' }} />
+              <col style={{ width: '120px' }} />
+              <col style={{ width: '110px' }} />
             </colgroup>
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
@@ -436,10 +437,10 @@ export default function Proposals() {
                     className="rounded border-gray-300"
                   />
                 </th>
-                <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs" style={{ paddingRight: 0 }}>
+                <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">
                   <button
                     onClick={() => handleSort('proposal_no')}
-                    className="flex items-center gap-1 hover:text-gray-900"
+                    className="flex items-center gap-1 hover:text-gray-900 justify-center w-full"
                   >
                     Proposal / Quote
                     {sortBy === 'proposal_no' &&
@@ -456,18 +457,18 @@ export default function Proposals() {
                       (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                   </button>
                 </th>
-                <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">
+                <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs">
                   <button
                     onClick={() => handleSort('customer_name')}
-                    className="flex items-center gap-1 hover:text-gray-900 justify-center w-full"
+                    className="flex items-center gap-1 hover:text-gray-900"
                   >
                     Customer
                     {sortBy === 'customer_name' &&
                       (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                   </button>
                 </th>
-                <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">Created by</th>
-                <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">Quote created by</th>
+                <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs">Created by</th>
+                <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs">Quote created by</th>
                 <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">
                   <button
                     onClick={() => handleSort('updated_at')}
@@ -522,7 +523,7 @@ export default function Proposals() {
                         className="rounded border-gray-300"
                       />
                     </td>
-                    <td className="py-4 px-4 text-gray-900 text-sm font-medium text-left" style={{ paddingRight: 0 }}>
+                    <td className="py-4 px-4 text-gray-900 text-sm font-medium text-center">
                       <span className="block truncate">{p.proposal_no || `Proposal ${p.id.slice(0, 8)}`}</span>
                       {p.quote_no && (
                         <span className="text-xs text-gray-500 font-normal block truncate">Quote: {p.quote_no}</span>
@@ -531,9 +532,9 @@ export default function Proposals() {
                     <td className="py-4 px-4 text-center">
                       <StatusBadge status={p.status} type="proposal" size="sm" />
                     </td>
-                    <td className="py-4 px-4 text-gray-700 text-sm text-center"><span className="block truncate">{p.customer_name ?? '—'}</span></td>
-                    <td className="py-4 px-4 text-gray-600 text-sm text-center"><span className="block truncate">{p.proposal_created_by ?? '—'}</span></td>
-                    <td className="py-4 px-4 text-gray-600 text-sm text-center"><span className="block truncate">{p.quote_created_by ?? '—'}</span></td>
+                    <td className="py-4 px-4 text-gray-700 text-sm text-left" title={p.customer_name ?? ''}><span className="block truncate">{p.customer_name ?? '—'}</span></td>
+                    <td className="py-4 px-4 text-gray-600 text-sm text-left" title={p.proposal_created_by ?? ''}><span className="block truncate">{p.proposal_created_by ?? '—'}</span></td>
+                    <td className="py-4 px-4 text-gray-600 text-sm text-left" title={p.quote_created_by ?? ''}><span className="block truncate">{p.quote_created_by ?? '—'}</span></td>
                     <td className="py-4 px-4 text-gray-600 text-sm text-center">{formatDate(p.updated_at)}</td>
                     <td className="py-4 px-4 text-gray-700 text-sm text-right whitespace-nowrap">
                       {formatCurrency(p.quote_total_amount)}

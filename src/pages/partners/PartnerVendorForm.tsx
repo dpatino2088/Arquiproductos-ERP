@@ -8,7 +8,7 @@ import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useDirectoryVendors, type VendorInput } from '../../hooks/useDirectoryVendors';
 import { useUIStore } from '../../stores/ui-store';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { Building, Store, Building2, ExternalLink } from 'lucide-react';
+import { Building, Store, Building2, ExternalLink, Plus, Unlink, X } from 'lucide-react';
 import { COUNTRIES } from '../../lib/constants';
 import Input from '../../components/ui/Input';
 import Label from '../../components/ui/Label';
@@ -135,7 +135,12 @@ export default function PartnerVendorForm({ vendorId }: PartnerVendorFormProps) 
   const savedSuccessfullyRef = useRef(false);
 
   const isEdit = !!vendorId;
-  const [linkedMfrNames, setLinkedMfrNames] = useState<string[]>([]);
+  const [linkedManufacturers, setLinkedManufacturers] = useState<Array<{ id: string; name: string; code?: string | null }>>([]);
+  const [allManufacturers, setAllManufacturers] = useState<Array<{ id: string; name: string; code?: string | null }>>([]);
+  const [showLinkManufacturerModal, setShowLinkManufacturerModal] = useState(false);
+  const [linkManufacturerSearch, setLinkManufacturerSearch] = useState('');
+  const [linkingManufacturerId, setLinkingManufacturerId] = useState<string | null>(null);
+  const [unlinkingManufacturerId, setUnlinkingManufacturerId] = useState<string | null>(null);
 
   const form = useForm<VendorFormValues>({
     resolver: zodResolver(vendorSchema),
@@ -199,6 +204,24 @@ export default function PartnerVendorForm({ vendorId }: PartnerVendorFormProps) 
   useEffect(() => {
     if (!vendorId) return;
     let mounted = true;
+    const loadLinkedManufacturers = async () => {
+      const { data: vmRows } = await supabase
+        .from('VendorManufacturers')
+        .select('manufacturer_id')
+        .eq('vendor_id', vendorId);
+      if (!mounted) return;
+      if (vmRows && vmRows.length > 0) {
+        const mfrIds = vmRows.map((r: any) => r.manufacturer_id);
+        const { data: mfrRows } = await supabase
+          .from('Manufacturers')
+          .select('id, name, code')
+          .in('id', mfrIds)
+          .order('name');
+        if (mounted) setLinkedManufacturers(mfrRows ?? []);
+      } else {
+        if (mounted) setLinkedManufacturers([]);
+      }
+    };
     (async () => {
       const { data, error } = await supabase
         .from('DirectoryVendors')
@@ -237,26 +260,82 @@ export default function PartnerVendorForm({ vendorId }: PartnerVendorFormProps) 
       });
       const hasBilling = !!(data.billing_street_address_line_1 || data.billing_city || data.billing_state);
       setBillingSameAsLocation(!hasBilling);
+      await loadLinkedManufacturers();
+    })();
 
-      // Load linked manufacturer names (read-only)
-      const { data: vmRows } = await supabase
-        .from('VendorManufacturers')
-        .select('manufacturer_id')
-        .eq('vendor_id', vendorId);
-      if (mounted && vmRows && vmRows.length > 0) {
-        const mfrIds = vmRows.map((r: any) => r.manufacturer_id);
+    if (activeOrganizationId) {
+      (async () => {
         const { data: mfrRows } = await supabase
           .from('Manufacturers')
-          .select('name')
-          .in('id', mfrIds)
+          .select('id, name, code')
+          .eq('organization_id', activeOrganizationId)
+          .eq('deleted', false)
           .order('name');
-        if (mounted) setLinkedMfrNames((mfrRows ?? []).map((m: any) => m.name));
-      } else {
-        if (mounted) setLinkedMfrNames([]);
-      }
-    })();
+        if (mounted) setAllManufacturers(mfrRows ?? []);
+      })();
+    }
+
     return () => { mounted = false; };
-  }, [vendorId, form]);
+  }, [vendorId, form, activeOrganizationId]);
+
+  const filteredLinkableManufacturers = allManufacturers.filter((mfr) => {
+    if (linkedManufacturers.some((lm) => lm.id === mfr.id)) return false;
+    const q = linkManufacturerSearch.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      mfr.name.toLowerCase().includes(q) ||
+      (mfr.code ?? '').toLowerCase().includes(q)
+    );
+  });
+
+  const handleLinkManufacturer = async (manufacturerId: string) => {
+    if (!vendorId || !activeOrganizationId) return;
+    setLinkingManufacturerId(manufacturerId);
+    try {
+      const { error } = await supabase
+        .from('VendorManufacturers')
+        .upsert(
+          {
+            vendor_id: vendorId,
+            manufacturer_id: manufacturerId,
+            organization_id: activeOrganizationId,
+            is_primary: false,
+          },
+          { onConflict: 'vendor_id,manufacturer_id' }
+        );
+      if (error) throw error;
+
+      const mfr = allManufacturers.find((m) => m.id === manufacturerId);
+      if (mfr) {
+        setLinkedManufacturers((prev) => [...prev, mfr].sort((a, b) => a.name.localeCompare(b.name)));
+      }
+      addNotification({ type: 'success', title: 'Manufacturer linked', message: 'Manufacturer linked to vendor.' });
+    } catch (err: any) {
+      addNotification({ type: 'error', title: 'Error', message: err.message || 'Failed to link manufacturer' });
+    } finally {
+      setLinkingManufacturerId(null);
+    }
+  };
+
+  const handleUnlinkManufacturer = async (manufacturerId: string) => {
+    if (!vendorId || !activeOrganizationId) return;
+    setUnlinkingManufacturerId(manufacturerId);
+    try {
+      const { error } = await supabase
+        .from('VendorManufacturers')
+        .delete()
+        .eq('vendor_id', vendorId)
+        .eq('manufacturer_id', manufacturerId)
+        .eq('organization_id', activeOrganizationId);
+      if (error) throw error;
+      setLinkedManufacturers((prev) => prev.filter((m) => m.id !== manufacturerId));
+      addNotification({ type: 'success', title: 'Manufacturer unlinked', message: 'Manufacturer removed from vendor.' });
+    } catch (err: any) {
+      addNotification({ type: 'error', title: 'Error', message: err.message || 'Failed to unlink manufacturer' });
+    } finally {
+      setUnlinkingManufacturerId(null);
+    }
+  };
 
   const handleSave = async () => {
     if (!activeOrganizationId) {
@@ -458,30 +537,63 @@ export default function PartnerVendorForm({ vendorId }: PartnerVendorFormProps) 
               </div>
             </div>
 
-            {/* Manufacturers (read-only — managed from Partners > Manufacturers) */}
+            {/* Manufacturers (editable multi-link) */}
             {isEdit && (
             <div className="col-span-12 mt-4">
-              <div className="flex items-center gap-2 mb-2">
+              <div className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-semibold text-gray-900">Manufacturers Supplied</h3>
-                <button
-                  type="button"
-                  onClick={() => router.navigate('/partners/manufacturers')}
-                  className="p-1 rounded hover:bg-gray-100 transition-colors text-gray-400 hover:text-primary"
-                  title="Go to Manufacturers to manage links"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </button>
-              </div>
-              {linkedMfrNames.length > 0 ? (
-                <div className="flex flex-col gap-0.5">
-                  {linkedMfrNames.map((name) => (
-                    <span key={name} className="text-xs text-gray-700 py-0.5">• {name}</span>
-                  ))}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowLinkManufacturerModal(true)}
+                    className="flex items-center gap-2 px-2 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 text-sm transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Link manufacturer
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => router.navigate('/partners/manufacturers')}
+                    className="p-1 rounded hover:bg-gray-100 transition-colors text-gray-400 hover:text-primary"
+                    title="Go to Manufacturers"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </button>
                 </div>
+              </div>
+              {linkedManufacturers.length > 0 ? (
+                <table className="w-full text-sm border border-gray-200 rounded-lg overflow-hidden">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="text-left py-2 px-3 text-xs font-medium text-gray-700">Manufacturer</th>
+                      <th className="text-left py-2 px-3 text-xs font-medium text-gray-700">Code</th>
+                      <th className="text-right py-2 px-3 text-xs font-medium text-gray-700">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {linkedManufacturers.map((mfr) => (
+                      <tr key={mfr.id} className="border-b border-gray-100 last:border-b-0">
+                        <td className="py-2 px-3 text-xs text-gray-900">{mfr.name}</td>
+                        <td className="py-2 px-3 text-xs text-gray-600">{mfr.code || '—'}</td>
+                        <td className="py-2 px-3 text-right">
+                          <button
+                            type="button"
+                            onClick={() => handleUnlinkManufacturer(mfr.id)}
+                            disabled={unlinkingManufacturerId === mfr.id}
+                            className="p-1.5 hover:bg-gray-100 rounded text-gray-600 disabled:opacity-50"
+                            title="Unlink manufacturer"
+                          >
+                            <Unlink className="w-4 h-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               ) : (
                 <p className="text-xs text-gray-400 italic">No manufacturers linked to this vendor.</p>
               )}
-              <p className="text-[10px] text-gray-400 mt-2">Managed from Partners → Manufacturers</p>
+              <p className="text-[10px] text-gray-400 mt-2">You can link multiple manufacturers to this vendor.</p>
             </div>
             )}
 
@@ -728,6 +840,67 @@ export default function PartnerVendorForm({ vendorId }: PartnerVendorFormProps) 
           </div>
         </div>
       </div>
+
+      {isEdit && showLinkManufacturerModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-2xl rounded-lg bg-white border border-gray-200 shadow-lg">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+              <h4 className="text-sm font-semibold text-gray-900">Link Existing Manufacturer</h4>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowLinkManufacturerModal(false);
+                  setLinkManufacturerSearch('');
+                }}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4">
+              <Input
+                value={linkManufacturerSearch}
+                onChange={(e) => setLinkManufacturerSearch(e.target.value)}
+                placeholder="Search by name or code..."
+                className="py-1 text-xs mb-3"
+              />
+              <div className="max-h-80 overflow-auto border border-gray-200 rounded">
+                {filteredLinkableManufacturers.length === 0 ? (
+                  <p className="text-sm text-gray-500 p-3">No manufacturers available to link.</p>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 border-b border-gray-200 sticky top-0">
+                      <tr>
+                        <th className="text-left py-2 px-3 text-xs font-medium text-gray-700">Name</th>
+                        <th className="text-left py-2 px-3 text-xs font-medium text-gray-700">Code</th>
+                        <th className="text-right py-2 px-3 text-xs font-medium text-gray-700">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredLinkableManufacturers.map((mfr) => (
+                        <tr key={mfr.id} className="border-b border-gray-100">
+                          <td className="py-2 px-3 text-gray-900">{mfr.name}</td>
+                          <td className="py-2 px-3 text-gray-700">{mfr.code || '—'}</td>
+                          <td className="py-2 px-3 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleLinkManufacturer(mfr.id)}
+                              disabled={linkingManufacturerId === mfr.id}
+                              className="px-2 py-1 text-xs border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                            >
+                              {linkingManufacturerId === mfr.id ? 'Linking…' : 'Link'}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

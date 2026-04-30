@@ -18,6 +18,7 @@ import { useGranularAccess } from '../../hooks/usePermissions';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useWarehouses } from '../../hooks/useWarehouses';
 import { useDirectoryVendors } from '../../hooks/useDirectoryVendors';
+import { useOrganizationAddresses } from '../../hooks/useOrganizationAddresses';
 import { useUIStore } from '../../stores/ui-store';
 import { supabase } from '../../lib/supabase/client';
 import { useCostSettings } from '../../hooks/useCosts';
@@ -277,7 +278,9 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
   const [expectedDate, setExpectedDate] = useState('');
   const [currency, setCurrency] = useState('USD');
   const [poNotes, setPoNotes] = useState('');
+  const [shipToAddressId, setShipToAddressId] = useState('');
   const { vendors } = useDirectoryVendors();
+  const { addresses } = useOrganizationAddresses();
   const { settings: costSettings } = useCostSettings();
 
   const [draftLines, setDraftLines] = useState<DraftLine[]>([]);
@@ -375,6 +378,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
     setExpectedDate(purchaseOrder.expected_date ?? '');
     setCurrency(purchaseOrder.currency ?? 'USD');
     setPoNotes(purchaseOrder.notes ?? '');
+    setShipToAddressId(purchaseOrder.ship_to_address_id ?? '');
 
     const moIds = [...new Set(lines.filter(l => l.allocation_mo_id).map(l => l.allocation_mo_id!))];
 
@@ -400,6 +404,15 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
       setDraftLines(lines.map(l => mapLineToDraft(l)));
     }
   }, [purchaseOrder, lines, isCreateMode, mapLineToDraft]);
+
+  useEffect(() => {
+    if (!isCreateMode) return;
+    if (shipToAddressId) return;
+    const defaultAddress = addresses.find((a) => a.is_default_po_ship_to && a.is_active);
+    if (defaultAddress) {
+      setShipToAddressId(defaultAddress.id);
+    }
+  }, [isCreateMode, shipToAddressId, addresses]);
 
   // Pre-populate from Material Demand (sessionStorage)
   useEffect(() => {
@@ -510,6 +523,25 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
     () => vendors.find(v => v.id === vendorId) ?? null,
     [vendors, vendorId]
   );
+
+  const selectedShipToAddress = useMemo(
+    () => addresses.find((a) => a.id === shipToAddressId) ?? null,
+    [addresses, shipToAddressId]
+  );
+
+  const shipToAddressSnapshot = useMemo(() => {
+    if (!selectedShipToAddress) return null;
+    return [
+      selectedShipToAddress.name,
+      selectedShipToAddress.street_address_line_1,
+      selectedShipToAddress.street_address_line_2,
+      [selectedShipToAddress.city, selectedShipToAddress.state, selectedShipToAddress.zip_code].filter(Boolean).join(', '),
+      selectedShipToAddress.country,
+      selectedShipToAddress.contact_person ? `Contact: ${selectedShipToAddress.contact_person}` : null,
+      selectedShipToAddress.contact_phone ? `Phone: ${selectedShipToAddress.contact_phone}` : null,
+      selectedShipToAddress.contact_email ? `Email: ${selectedShipToAddress.contact_email}` : null,
+    ].filter(Boolean).join('\n');
+  }, [selectedShipToAddress]);
 
   const filteredVendors = useMemo(() => {
     if (!vendorSearch.trim()) return vendors;
@@ -753,6 +785,8 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
         const po = await createPurchaseOrder({
           warehouse_id: warehouseId,
           vendor_id: vendorId || null,
+          ship_to_address_id: shipToAddressId || null,
+          ship_to_address_snapshot: shipToAddressSnapshot,
           expected_date: expectedDate || null,
           notes: poNotes || null,
           currency,
@@ -790,6 +824,8 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
         await updatePurchaseOrder(poId, {
           warehouse_id: warehouseId,
           vendor_id: vendorId || null,
+          ship_to_address_id: shipToAddressId || null,
+          ship_to_address_snapshot: shipToAddressSnapshot,
           expected_date: expectedDate || null,
           notes: poNotes || null,
           currency,
@@ -995,6 +1031,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
         total,
         notes: poData.notes,
         allocation_summary: allocationSummary || null,
+        ship_to_address: poData.ship_to_address_snapshot ?? shipToAddressSnapshot,
       },
       vendor ? {
         name: vendor.name,
@@ -1865,20 +1902,63 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
               </table>
             </div>
 
-            <div className="flex justify-end">
-              <div className="bg-white border border-gray-200 rounded-lg p-6 w-full lg:w-[22rem] shrink-0 self-start">
-                <h3 className="text-sm font-semibold text-gray-700 mb-3">Summary</h3>
-                <div className="flex justify-between py-1 text-sm">
-                  <span className="text-gray-600">Subtotal</span>
-                  <span className="font-mono">{fmtCurrency(subtotal, currency)}</span>
+            <div className="w-full">
+              <div className="w-full shrink-0 self-start grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_22rem] gap-4 items-start">
+                <div className="bg-white border border-gray-200 rounded-lg p-6 lg:order-2">
+                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Summary</h3>
+                  <div className="flex justify-between py-1 text-sm">
+                    <span className="text-gray-600">Subtotal</span>
+                    <span className="font-mono">{fmtCurrency(subtotal, currency)}</span>
+                  </div>
+                  <div className="flex justify-between py-1 text-sm">
+                    <span className="text-gray-600">Tax {isVendorTaxable ? `(${(taxPct * 100).toFixed(1)}%)` : '(Exempt)'}</span>
+                    <span className="font-mono">{fmtCurrency(taxAmount, currency)}</span>
+                  </div>
+                  <div className="flex justify-between py-2 mt-2 border-t border-gray-200 font-semibold">
+                    <span>Total {currency ? `(${currency})` : ''}</span>
+                    <span className="font-mono">{fmtCurrency(total, currency)}</span>
+                  </div>
                 </div>
-                <div className="flex justify-between py-1 text-sm">
-                  <span className="text-gray-600">Tax {isVendorTaxable ? `(${(taxPct * 100).toFixed(1)}%)` : '(Exempt)'}</span>
-                  <span className="font-mono">{fmtCurrency(taxAmount, currency)}</span>
-                </div>
-                <div className="flex justify-between py-2 mt-2 border-t border-gray-200 font-semibold">
-                  <span>Total {currency ? `(${currency})` : ''}</span>
-                  <span className="font-mono">{fmtCurrency(total, currency)}</span>
+
+                <div className="bg-white border border-gray-200 rounded-lg p-6 lg:order-1">
+                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Notes</h3>
+                  <textarea
+                    value={poNotes}
+                    onChange={(e) => setPoNotes(e.target.value)}
+                    rows={4}
+                    disabled={!canEdit}
+                    placeholder="Add any comment for this purchase order..."
+                    className="w-full px-3 py-2 border border-gray-200 rounded text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 disabled:bg-gray-50 disabled:text-gray-500"
+                  />
+
+                  <h3 className="text-sm font-semibold text-gray-700 mt-5 mb-2">Address</h3>
+                  <SelectShadcn
+                    value={shipToAddressId || '__none__'}
+                    onValueChange={(value) => setShipToAddressId(value === '__none__' ? '' : value)}
+                    disabled={!canEdit}
+                  >
+                    <SelectTrigger className="h-10 rounded-lg text-sm">
+                      <SelectValue placeholder="Select ship-to address..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">No address selected</SelectItem>
+                      {addresses.filter((a) => a.is_active).map((address) => (
+                        <SelectItem key={address.id} value={address.id}>
+                          {address.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </SelectShadcn>
+
+                  <div className="mt-2 min-h-[72px] border border-gray-100 bg-gray-50 rounded px-3 py-2">
+                    {selectedShipToAddress ? (
+                      <p className="text-xs text-gray-700 whitespace-pre-line leading-relaxed">
+                        {shipToAddressSnapshot}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-gray-400 italic">No ship-to address selected.</p>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

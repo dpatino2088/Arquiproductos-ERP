@@ -27,6 +27,15 @@ export default function CatalogItemStep({ config, onUpdate }: CatalogItemStepPro
 
   const { items: catalogItems, loading: catalogLoading, error: catalogError } = useCatalogItems(undefined, undefined);
 
+  // Resolve color: prefer cfg.color, fall back to lookup by catalog_item_id from loaded catalog
+  const selectedColor: string = useMemo(() => {
+    if (cfg.color && String(cfg.color).trim()) return String(cfg.color).trim();
+    if (!selectedItemId) return '';
+    const found = catalogItems.find((it) => it.id === selectedItemId);
+    if (!found) return '';
+    return String((found as any).color || (found as any).variant_name || '').trim();
+  }, [cfg.color, selectedItemId, catalogItems]);
+
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -60,7 +69,15 @@ export default function CatalogItemStep({ config, onUpdate }: CatalogItemStepPro
       const name = String((item as any).item_name || item.name || '').toLowerCase();
       const sku = String(item.sku || '').toLowerCase();
       const desc = String((item as any).description || '').toLowerCase();
-      return name.includes(lower) || sku.includes(lower) || desc.includes(lower);
+      const color = String((item as any).color || '').toLowerCase();
+      const variant = String((item as any).variant_name || '').toLowerCase();
+      return (
+        name.includes(lower)
+        || sku.includes(lower)
+        || desc.includes(lower)
+        || color.includes(lower)
+        || variant.includes(lower)
+      );
     });
     return results
       .sort((a, b) => {
@@ -82,12 +99,14 @@ export default function CatalogItemStep({ config, onUpdate }: CatalogItemStepPro
   const handleSelectItem = (item: CatalogItem) => {
     const itemName = (item as any).item_name || item.name || 'Unknown';
     const unitPrice = (item as any).msrp || item.unit_price || 0;
+    const itemColor = (item as any).color || (item as any).variant_name || '';
     setSearchTerm('');
     setShowDropdown(false);
     onUpdate({
       catalog_item_id: item.id,
       name: itemName,
       sku: item.sku || '',
+      color: itemColor,
       unit_price: unitPrice,
       qty: qty || 1,
     } as any);
@@ -98,6 +117,7 @@ export default function CatalogItemStep({ config, onUpdate }: CatalogItemStepPro
       catalog_item_id: null,
       name: '',
       sku: '',
+      color: '',
       unit_price: 0,
     } as any);
   };
@@ -145,7 +165,12 @@ export default function CatalogItemStep({ config, onUpdate }: CatalogItemStepPro
                   <Package className="w-5 h-5 text-blue-600" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-900">{selectedName}</p>
+                  <p className="text-sm font-semibold text-gray-900">
+                    {selectedName}
+                    {selectedColor && (
+                      <span className="text-gray-500 font-normal"> — {selectedColor}</span>
+                    )}
+                  </p>
                   {selectedSku && (
                     <p className="text-xs text-gray-500 mt-0.5">SKU: {selectedSku}</p>
                   )}
@@ -217,6 +242,7 @@ export default function CatalogItemStep({ config, onUpdate }: CatalogItemStepPro
                     const sku = item.sku || '';
                     const unitPrice = (item as any).msrp || item.unit_price || 0;
                     const role = (item as any).item_role || '';
+                    const color = (item as any).color || (item as any).variant_name || '';
                     return (
                       <button
                         key={item.id}
@@ -225,7 +251,12 @@ export default function CatalogItemStep({ config, onUpdate }: CatalogItemStepPro
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-gray-900 truncate">{itemName}</p>
+                            <p className="text-sm font-medium text-gray-900 truncate">
+                              {itemName}
+                              {color && (
+                                <span className="text-gray-500 font-normal"> — {color}</span>
+                              )}
+                            </p>
                             <div className="flex items-center gap-2 mt-0.5">
                               {sku && <span className="text-xs text-gray-500">SKU: {sku}</span>}
                               {role && <span className="text-xs text-gray-400 capitalize">{role}</span>}

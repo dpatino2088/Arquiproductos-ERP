@@ -8,7 +8,7 @@
 export const LIST_QUERY_VERSION = 'v1' as const;
 
 /** Bump when detail fetcher/response shape changes (roles, components, tiers, etc.). */
-export const DETAIL_QUERY_VERSION = 'v1' as const;
+export const DETAIL_QUERY_VERSION = 'v2' as const;
 
 /** Detail key convention: ['module','resource','detail', DETAIL_QUERY_VERSION, scopeKey, id] */
 export function catalogItemDetailKey(scopeKey: string, id: string): unknown[] {
@@ -266,4 +266,9 @@ export function serviceClaimsListKey(scopeKey: string): unknown[] {
 /** Service Claim detail */
 export function serviceClaimDetailKey(scopeKey: string, claimId: string): unknown[] {
   return ['service', 'claims', 'detail', DETAIL_QUERY_VERSION, scopeKey, claimId];
+}
+
+/** Organization Address Directory list */
+export function organizationAddressesListKey(scopeKey: string): unknown[] {
+  return ['settings', 'organization-addresses', 'list', LIST_QUERY_VERSION, scopeKey];
 }

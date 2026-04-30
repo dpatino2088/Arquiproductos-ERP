@@ -31,6 +31,7 @@ export interface POPDFData {
   total: number;
   notes: string | null;
   allocation_summary: string | null;
+  ship_to_address: string | null;
 }
 
 export interface POPDFVendor {
@@ -162,10 +163,11 @@ export function generatePurchaseOrderPDF(
     ...(po.expected_date ? [{ label: 'Expected Date', value: formatDate(po.expected_date) }] : []),
     { label: 'Currency', value: po.currency },
     ...(po.allocation_summary ? [{ label: 'Allocation', value: po.allocation_summary }] : []),
+    ...(po.ship_to_address ? [{ label: 'Ship To', value: po.ship_to_address }] : []),
   ];
 
   for (const item of detailItems) {
-    if (item.label === 'Allocation') {
+    if (item.label === 'Allocation' || item.label === 'Ship To') {
       doc.setFont('helvetica', 'bold');
       doc.text(`${item.label}:`, rightLabelX, rightY);
       rightY += lineH + 1;

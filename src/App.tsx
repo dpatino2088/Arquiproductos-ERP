@@ -1160,6 +1160,13 @@ function App() {
         setCurrentPage('login');
       }
     });
+    router.addRoute('/settings/address-directory', () => {
+      if (isAuthenticated) {
+        setCurrentPage('company-settings');
+      } else {
+        setCurrentPage('login');
+      }
+    });
     router.addRoute('/settings/dealer-tiers', () => {
       if (isAuthenticated) {
         setCurrentPage('company-settings');

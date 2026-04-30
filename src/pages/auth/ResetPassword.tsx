@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Mail, CheckCircle, AlertCircle, Box } from 'lucide-react';
+import { ArrowLeft, Mail, CheckCircle, AlertCircle } from 'lucide-react';
+import AdaptioMark from '../../components/AdaptioMark';
 import { supabase } from '../../lib/supabase/client';
 import { router } from '../../lib/router';
 
@@ -61,7 +62,7 @@ export default function ResetPassword() {
           <div className="w-full max-w-md">
             <div className="lg:hidden text-center mb-8">
               <div className="mx-auto mb-4 flex items-center justify-center gap-2">
-                <Box size={32} style={{ color: '#404a63' }} />
+                <AdaptioMark size={32} color="var(--primary-brand-hex)" />
                 <span className="text-2xl font-semibold text-gray-900">Adaptio</span>
               </div>
             </div>
@@ -114,7 +115,7 @@ export default function ResetPassword() {
         <div className="w-full max-w-md">
           <div className="lg:hidden text-center mb-8">
             <div className="mx-auto mb-4 flex items-center justify-center gap-2">
-              <Box size={32} style={{ color: '#404a63' }} />
+              <AdaptioMark size={32} color="var(--primary-brand-hex)" />
               <span className="text-2xl font-semibold text-gray-900">Adaptio</span>
             </div>
           </div>
@@ -189,7 +190,7 @@ export default function ResetPassword() {
         <div className="max-w-md text-center text-white">
           <div className="mb-8">
             <div className="mx-auto mb-6 flex items-center justify-center gap-3">
-              <Box size={48} style={{ color: '#ffffff' }} />
+              <AdaptioMark size={48} color="var(--primary-brand-hex)" />
               <span className="text-4xl font-semibold text-white">Adaptio</span>
             </div>
           </div>

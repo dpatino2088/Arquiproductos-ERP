@@ -16,7 +16,7 @@ import { formatDate } from '../../lib/utils';
 import { 
   Search, Plus, List, Grid3X3, Edit, Trash2, Archive, RotateCcw,
   FileText, RefreshCw,
-  SortAsc, SortDesc, Eye, Copy, ChevronRight, ChevronDown
+  SortAsc, SortDesc, Copy, ChevronRight, ChevronDown
 } from 'lucide-react';
 import { QuoteStatus } from '../../types/catalog';
 import StatusBadge from '../../components/shared/StatusBadge';
@@ -642,24 +642,25 @@ export default function Quotes() {
           </div>
         )}
         <div className="table-fit-wrapper quotes-table-wrapper overflow-x-auto">
-          <table className="table-fit w-full min-w-[1180px]">
+          <table className="table-fit w-full min-w-[1360px]">
             <colgroup>
               <col style={{ width: '44px' }} />
               <col style={{ width: '120px' }} />
               <col style={{ width: '110px' }} />
               {isInternal ? (
                 <>
-                  <col style={{ width: '130px' }} />
+                  <col style={{ width: '200px' }} />
+                  <col style={{ width: '160px' }} />
                   <col style={{ width: '90px' }} />
                 </>
               ) : (
-                <col style={{ width: '150px' }} />
+                <col style={{ width: '180px' }} />
               )}
-              <col style={{ width: '100px' }} />
-              <col style={{ width: '130px' }} />
               <col style={{ width: '110px' }} />
-              <col style={{ width: '95px' }} />
-              <col style={{ width: '130px' }} />
+              <col style={{ width: '140px' }} />
+              <col style={{ width: '110px' }} />
+              <col style={{ width: '110px' }} />
+              <col style={{ width: '140px' }} />
             </colgroup>
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
@@ -671,8 +672,8 @@ export default function Quotes() {
                     className="rounded border-gray-300"
                   />
                 </th>
-                <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs">
-                  <button onClick={() => handleSort('quote_no')} className="flex items-center gap-1 hover:text-gray-900">
+                <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">
+                  <button onClick={() => handleSort('quote_no')} className="flex items-center gap-1 hover:text-gray-900 justify-center w-full">
                     Quote #
                     {sortBy === 'quote_no' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                   </button>
@@ -685,12 +686,18 @@ export default function Quotes() {
                 </th>
                 {isInternal ? (
                   <>
-                    <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">Dealer</th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs">
+                      <button onClick={() => handleSort('customer_name')} className="flex items-center gap-1 hover:text-gray-900">
+                        Customer
+                        {sortBy === 'customer_name' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                      </button>
+                    </th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs">Dealer</th>
                     <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">Dealer No</th>
                   </>
                 ) : (
-                  <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">
-                    <button onClick={() => handleSort('customer_name')} className="flex items-center gap-1 hover:text-gray-900 justify-center w-full">
+                  <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs">
+                    <button onClick={() => handleSort('customer_name')} className="flex items-center gap-1 hover:text-gray-900">
                       Customer
                       {sortBy === 'customer_name' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
@@ -716,7 +723,7 @@ export default function Quotes() {
             <tbody className="divide-y divide-gray-100">
               {paginatedQuotes.length === 0 ? (
                 <tr>
-                  <td colSpan={isInternal ? 10 : 9} className="py-12 px-4 text-center">
+                  <td colSpan={isInternal ? 11 : 9} className="py-12 px-4 text-center">
                     <div className="flex flex-col items-center">
                       <Search className="w-12 h-12 text-gray-300 mb-4" />
                       <p className="text-gray-600 mb-2">No se encontraron cotizaciones</p>
@@ -746,8 +753,8 @@ export default function Quotes() {
                         />
                       )}
                     </td>
-                    <td className={`py-3 px-4 text-sm font-medium text-left whitespace-nowrap ${opts.isOlder ? 'pl-6' : ''}`}>
-                      <div className="flex items-center gap-2">
+                    <td className={`py-3 px-4 text-sm font-medium text-center whitespace-nowrap ${opts.isOlder ? 'pl-6' : ''}`}>
+                      <div className="flex items-center gap-2 justify-center">
                         {!opts.isOlder && group.older.length > 0 ? (
                           <button
                             type="button"
@@ -788,11 +795,12 @@ export default function Quotes() {
                     </td>
                     {isInternal ? (
                       <>
-                        <td className={`py-3 px-4 text-sm text-center ${opts.isOlder ? 'text-gray-400' : 'text-gray-700'}`}><span className="block truncate">{quote.dealer_id ? (dealerById[quote.dealer_id]?.dealer_name ?? '—') : '—'}</span></td>
+                        <td className={`py-3 px-4 text-sm text-left ${opts.isOlder ? 'text-gray-400' : 'text-gray-700'}`} title={quote.customer_name ?? ''}><span className="block truncate">{quote.customer_name ?? '—'}</span></td>
+                        <td className={`py-3 px-4 text-sm text-left ${opts.isOlder ? 'text-gray-400' : 'text-gray-700'}`} title={quote.dealer_id ? (dealerById[quote.dealer_id]?.dealer_name ?? '') : ''}><span className="block truncate">{quote.dealer_id ? (dealerById[quote.dealer_id]?.dealer_name ?? '—') : '—'}</span></td>
                         <td className={`py-3 px-4 text-sm text-center font-mono ${opts.isOlder ? 'text-gray-400' : 'text-gray-700'}`}><span className="block truncate">{quote.dealer_id ? (dealerById[quote.dealer_id]?.dealer_no ?? '—') : '—'}</span></td>
                       </>
                     ) : (
-                      <td className={`py-3 px-4 text-sm text-center ${opts.isOlder ? 'text-gray-400' : 'text-gray-700'}`}><span className="block truncate">{quote.customer_name ?? '—'}</span></td>
+                      <td className={`py-3 px-4 text-sm text-left ${opts.isOlder ? 'text-gray-400' : 'text-gray-700'}`} title={quote.customer_name ?? ''}><span className="block truncate">{quote.customer_name ?? '—'}</span></td>
                     )}
                     <td className="py-3 px-4 text-center">
                       {proposalByQuoteMap[quote.id]
@@ -827,25 +835,10 @@ export default function Quotes() {
                     <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                       {opts.isOlder ? (
                         <div className="flex items-center gap-1 justify-end flex-nowrap">
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); router.navigate(withReturnTo(`/sales/quotes/${quote.id}`)); }}
-                            className="p-1.5 hover:bg-gray-100 rounded text-gray-400 transition-colors"
-                            title="Ver detalle"
-                          >
-                            <Eye style={{ width: 14, height: 14 }} />
-                          </button>
+                          <span className="inline-block w-7" aria-hidden />
                         </div>
                       ) : (
                         <div className="flex items-center gap-1 justify-end flex-nowrap">
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); router.navigate(withReturnTo(`/sales/quotes/${quote.id}`)); }}
-                            className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
-                            title="Quote Detail"
-                          >
-                            <Eye style={{ width: 14, height: 14 }} />
-                          </button>
                           {statusTab === 'archived' ? (
                             <>
                               <button

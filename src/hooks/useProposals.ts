@@ -247,6 +247,10 @@ export interface QuoteLineInfoForPDF {
   height_m?: number | null;
   configured_product_id?: string | null;
   config_snapshot?: Record<string, unknown> | null;
+  /** Catalog item id (for catalog product_type lines) */
+  catalog_item_id?: string | null;
+  /** Catalog item color, only set for catalog product_type lines */
+  catalog_color?: string | null;
 }
 
 export interface ProposalDetailCustomer {
@@ -339,7 +343,7 @@ export async function fetchProposalDetailData(proposalId: string): Promise<Propo
   if (proposal.quote_id) {
     const { data: qlData, error: qlError } = await supabase
       .from('QuoteLines')
-      .select('id, quantity, name, sku, msrp, unit_msrp_total_snapshot, dealer_price_total, area, position, product_type, product_type_id, collection_name, variant_name, drive_type, width_m, height_m, configured_product_id')
+      .select('id, quantity, name, sku, msrp, unit_msrp_total_snapshot, dealer_price_total, area, position, product_type, product_type_id, collection_name, variant_name, drive_type, width_m, height_m, configured_product_id, catalog_item_id')
       .eq('quote_id', proposal.quote_id);
 
     if (qlError) throw new Error(qlError.message || 'Error loading quote lines');
@@ -368,8 +372,32 @@ export async function fetchProposalDetailData(proposalId: string): Promise<Propo
         height_m: ql.height_m != null ? Number(ql.height_m) : null,
         configured_product_id: ql.configured_product_id ?? null,
         config_snapshot: null,
+        catalog_item_id: ql.catalog_item_id ?? null,
+        catalog_color: null,
       });
     });
+
+    // Load color for catalog lines
+    const catalogItemIds = (qlData || [])
+      .filter((ql: any) => String(ql.product_type ?? '').trim().toLowerCase() === 'catalog')
+      .map((ql: any) => ql.catalog_item_id)
+      .filter((id: string | null | undefined): id is string => !!id);
+    const uniqueCatalogIds = [...new Set(catalogItemIds)];
+    if (uniqueCatalogIds.length > 0) {
+      const { data: ciData } = await supabase
+        .from('CatalogItems')
+        .select('id, color')
+        .in('id', uniqueCatalogIds);
+      const colorMap = new Map<string, string>();
+      (ciData || []).forEach((ci: any) => {
+        if (ci.color) colorMap.set(ci.id, String(ci.color));
+      });
+      quoteLinesMap.forEach((ql, qlId) => {
+        if (ql.catalog_item_id && colorMap.has(ql.catalog_item_id)) {
+          quoteLinesMap.set(qlId, { ...ql, catalog_color: colorMap.get(ql.catalog_item_id)! });
+        }
+      });
+    }
 
     const ptIdsToResolve = (qlData || [])
       .filter((ql: any) => ql.product_type_id)

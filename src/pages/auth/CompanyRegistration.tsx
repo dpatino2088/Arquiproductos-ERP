@@ -17,8 +17,8 @@ import {
   Globe,
   Hash,
   X,
-  Box,
 } from "lucide-react";
+import AdaptioMark from "../../components/AdaptioMark";
 
 import taxIdRules from "../../../tax_id_rules_global_en.json";
 import phoneRules from "../../../phone_number_rules_global_full.json";
@@ -455,7 +455,7 @@ export default function CompanyRegistration() {
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between h-16">
               <div className="flex items-center gap-2">
-                <Box size={24} style={{ color: "#404a63" }} />
+                <AdaptioMark size={24} color="var(--primary-brand-hex)" />
                 <span className="text-lg font-semibold text-gray-900">Adaptio</span>
               </div>
               <span className="text-sm text-gray-500">Account created successfully</span>
@@ -1234,7 +1234,7 @@ export default function CompanyRegistration() {
         <div className="w-full max-w-md">
           <div className="text-center mb-12">
             <div className="flex items-center justify-center gap-2 mb-6">
-              <Box size={32} style={{ color: "#ffffff" }} />
+              <AdaptioMark size={32} color="var(--primary-brand-hex)" />
               <span className="text-2xl font-semibold text-white">Adaptio</span>
             </div>
             <h2 className="text-2xl font-bold text-white mb-2">Company Registration</h2>

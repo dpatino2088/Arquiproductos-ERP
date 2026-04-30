@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '../../../lib/supabase/client';
 import { Loader2, Box, ChevronDown, ChevronRight, CheckCircle2, Circle, PackageCheck, Clock } from 'lucide-react';
 import RollerAssemblyDiagram from './RollerAssemblyDiagram';
@@ -21,6 +21,8 @@ interface AssemblyDetailProps {
   productName: string;
   lines: AssemblyLine[];
   onToggleLine: (lineId: string, completed: boolean) => void;
+  /** Optional bulk path: marca/desmarca varias líneas en una sola op (evita parpadeo). */
+  onBulkToggleLines?: (lineIds: string[], completed: boolean) => Promise<void> | void;
   siblingTasks?: SiblingTaskInfo[];
   readOnly?: boolean;
 }
@@ -433,6 +435,7 @@ export default function AssemblyDetail({
   productName,
   lines,
   onToggleLine,
+  onBulkToggleLines,
   siblingTasks: siblingTasksProp,
   readOnly = false,
 }: AssemblyDetailProps) {
@@ -440,6 +443,18 @@ export default function AssemblyDetail({
   const [loading, setLoading] = useState(true);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const [markingIdx, setMarkingIdx] = useState<number | null>(null);
+
+  // Stable structural key: only changes when the SET of bom_instance_line_ids/line_ids changes,
+  // NOT when `completed` flags change. This is what controls whether we hit the DB.
+  const structuralKey = useMemo(
+    () => lines.map(l => `${l.id}:${l.bom_instance_line_id ?? ''}`).sort().join('|'),
+    [lines]
+  );
+
+  const hasLoadedRef = useRef(false);
+  // Keep latest `lines` accessible inside fetchProducts without re-creating the callback.
+  const linesRef = useRef(lines);
+  useEffect(() => { linesRef.current = lines; }, [lines]);
 
   const readinessMap = useMemo(() => {
     const map: Record<string, ReadinessStatus> = {};
@@ -478,21 +493,36 @@ export default function AssemblyDetail({
     try {
       const isComplete = unit.lines.length > 0 && unit.lines.every(l => l.completed);
       const newCompleted = !isComplete;
+      const lineIdsToToggle = unit.lines
+        .filter(l => l.completed !== newCompleted)
+        .map(l => l.id);
 
-      for (const line of unit.lines) {
-        if (line.completed !== newCompleted) {
-          onToggleLine(line.id, newCompleted);
+      if (lineIdsToToggle.length === 0) return;
+
+      try {
+        if (onBulkToggleLines) {
+          await onBulkToggleLines(lineIdsToToggle, newCompleted);
+        } else {
+          for (const id of lineIdsToToggle) {
+            onToggleLine(id, newCompleted);
+          }
         }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[Assembly] Toggle failed:', err);
       }
     } finally {
       setTimeout(() => setMarkingIdx(null), 300);
     }
-  }, [products, onToggleLine]);
+  }, [products, onToggleLine, onBulkToggleLines]);
 
   const fetchProducts = useCallback(async () => {
-    setLoading(true);
+    // Only show spinner on the very first load. Subsequent structural changes
+    // (which are rare) are handled silently to avoid flicker.
+    if (!hasLoadedRef.current) setLoading(true);
+    const currentLines = linesRef.current;
     try {
-      const bilIds = lines.map(l => l.bom_instance_line_id).filter(Boolean) as string[];
+      const bilIds = currentLines.map(l => l.bom_instance_line_id).filter(Boolean) as string[];
       if (bilIds.length === 0) {
         setProducts([{
           solId: 'unknown',
@@ -500,10 +530,11 @@ export default function AssemblyDetail({
           description: productName,
           widthMm: 0,
           heightMm: 0,
-          lines,
+          lines: currentLines,
           config: null,
         }]);
         setLoading(false);
+        hasLoadedRef.current = true;
         return;
       }
 
@@ -532,7 +563,7 @@ export default function AssemblyDetail({
 
       // Build line-to-SOL mapping
       const lineToSol: Record<string, string> = {};
-      for (const line of lines) {
+      for (const line of currentLines) {
         if (line.bom_instance_line_id) {
           const biId = bilToBi[line.bom_instance_line_id];
           const solId = biId ? biToSol[biId] : undefined;
@@ -543,7 +574,7 @@ export default function AssemblyDetail({
       // Group lines by SOL
       const solGroups = new Map<string, AssemblyLine[]>();
       const unmapped: AssemblyLine[] = [];
-      for (const line of lines) {
+      for (const line of currentLines) {
         const solId = lineToSol[line.id];
         if (solId) {
           if (!solGroups.has(solId)) solGroups.set(solId, []);
@@ -707,15 +738,42 @@ export default function AssemblyDetail({
       });
 
       setProducts(units);
+      hasLoadedRef.current = true;
     } catch (err) {
       console.error('AssemblyDetail fetch error:', err);
       setProducts([]);
     } finally {
       setLoading(false);
     }
-  }, [manufacturingOrderId, lines, productName]);
+    // We intentionally depend ONLY on the structural key (not on `lines`)
+    // so that toggling `completed` does not trigger a refetch + spinner.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manufacturingOrderId, structuralKey, productName]);
 
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
+
+  // Sync `completed` flags from the parent into the cached products WITHOUT
+  // refetching from the DB. This is what makes Mark/Undo Assembly snappy.
+  useEffect(() => {
+    const completedMap = new Map<string, boolean>(lines.map((l) => [l.id, l.completed]));
+    setProducts((prev) => {
+      if (prev.length === 0) return prev;
+      let changed = false;
+      const next = prev.map((unit) => {
+        let unitChanged = false;
+        const newUnitLines = unit.lines.map((l) => {
+          const c = completedMap.get(l.id);
+          if (c === undefined || c === l.completed) return l;
+          unitChanged = true;
+          return { ...l, completed: c };
+        });
+        if (!unitChanged) return unit;
+        changed = true;
+        return { ...unit, lines: newUnitLines };
+      });
+      return changed ? next : prev;
+    });
+  }, [lines]);
 
   if (loading) {
     return (

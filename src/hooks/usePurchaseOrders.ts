@@ -13,6 +13,8 @@ export interface PurchaseOrder {
   organization_id: string;
   warehouse_id: string;
   vendor_id: string | null;
+  ship_to_address_id: string | null;
+  ship_to_address_snapshot: string | null;
   po_number: string | null;
   expected_date: string | null;
   status: PurchaseOrderStatus;
@@ -252,6 +254,8 @@ export function useCreatePurchaseOrder() {
   const createPurchaseOrder = useCallback(async (params: {
     warehouse_id: string;
     vendor_id?: string | null;
+    ship_to_address_id?: string | null;
+    ship_to_address_snapshot?: string | null;
     expected_date?: string | null;
     po_number?: string | null;
     notes?: string | null;
@@ -277,6 +281,8 @@ export function useCreatePurchaseOrder() {
           organization_id: activeOrganizationId,
           warehouse_id: params.warehouse_id,
           vendor_id: params.vendor_id ?? null,
+          ship_to_address_id: params.ship_to_address_id ?? null,
+          ship_to_address_snapshot: params.ship_to_address_snapshot ?? null,
           expected_date: params.expected_date ?? null,
           po_number: poNumber,
           status: params.status ?? 'DRAFT',
@@ -430,6 +436,8 @@ export function useUpdatePurchaseOrder() {
   const updatePurchaseOrder = useCallback(async (poId: string, params: {
     warehouse_id?: string;
     vendor_id?: string | null;
+    ship_to_address_id?: string | null;
+    ship_to_address_snapshot?: string | null;
     expected_date?: string | null;
     notes?: string | null;
     currency?: string;
@@ -450,6 +458,8 @@ export function useUpdatePurchaseOrder() {
       const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
       if (params.warehouse_id != null) updates.warehouse_id = params.warehouse_id;
       if (params.vendor_id !== undefined) updates.vendor_id = params.vendor_id;
+      if (params.ship_to_address_id !== undefined) updates.ship_to_address_id = params.ship_to_address_id;
+      if (params.ship_to_address_snapshot !== undefined) updates.ship_to_address_snapshot = params.ship_to_address_snapshot;
       if (params.expected_date !== undefined) updates.expected_date = params.expected_date;
       if (params.notes !== undefined) updates.notes = params.notes;
       if (params.currency !== undefined) updates.currency = params.currency;

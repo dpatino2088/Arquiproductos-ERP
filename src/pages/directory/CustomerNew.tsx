@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -92,6 +92,10 @@ interface RelatedContact {
   contact_primary_phone: string | null;
 }
 
+interface LinkableContact extends RelatedContact {
+  customer_id: string | null;
+}
+
 export default function CustomerNew() {
   const [activeTab, setActiveTab] = useState<'details' | 'billing'>('details');
   const [isSaving, setIsSaving] = useState(false);
@@ -101,9 +105,14 @@ export default function CustomerNew() {
   const [loadingContacts, setLoadingContacts] = useState(true);
   const [relatedContacts, setRelatedContacts] = useState<RelatedContact[]>([]);
   const [loadingRelatedContacts, setLoadingRelatedContacts] = useState(false);
+  const [showLinkContactModal, setShowLinkContactModal] = useState(false);
+  const [linkContactSearch, setLinkContactSearch] = useState('');
+  const [linkableContacts, setLinkableContacts] = useState<LinkableContact[]>([]);
+  const [loadingLinkableContacts, setLoadingLinkableContacts] = useState(false);
+  const [linkingContactId, setLinkingContactId] = useState<string | null>(null);
   const { activeOrganizationId } = useOrganizationContext();
   const { deleteCustomer, isDeleting } = useDeleteCustomer();
-  const { createCustomer, updateCustomer } = useDirectoryCustomers({ organizationId: activeOrganizationId ?? undefined });
+  const { createCustomer, updateCustomer, customers: directoryCustomers } = useDirectoryCustomers({ organizationId: activeOrganizationId ?? undefined });
   
   // Get permissions: use AccessContext for portal users, CurrentOrgRole for internal users
   const { canEditDirectory, userType, loading: accessLoading } = useAccessContext();
@@ -252,37 +261,37 @@ export default function CustomerNew() {
 
   // Load contacts for Primary Contact dropdown.
   // Business rule: only contacts already related to this customer.
-  useEffect(() => {
-    const loadContacts = async () => {
-      if (!activeOrganizationId || !customerId) {
-        // On create mode there are no related contacts yet.
-        setContacts([]);
-        setValue('primary_contact_id', '');
-        setLoadingContacts(false);
-        return;
-      }
+  const loadCustomerContacts = useCallback(async () => {
+    if (!activeOrganizationId || !customerId) {
+      // On create mode there are no related contacts yet.
+      setContacts([]);
+      setValue('primary_contact_id', '');
+      setLoadingContacts(false);
+      return;
+    }
 
-      try {
-        setLoadingContacts(true);
-        const { data, error } = await supabase
-          .from('DirectoryContacts')
-          .select('id, contact_name, contact_id_number, contact_type')
-          .eq('organization_id', activeOrganizationId)
-          .eq('customer_id', customerId)
-          .eq('deleted', false)
-          .order('contact_name', { ascending: true });
-        if (error) throw error;
-        setContacts(data ?? []);
-      } catch (err) {
-        console.error('Error loading contacts', err);
-        setContacts([]);
-      } finally {
-        setLoadingContacts(false);
-      }
-    };
-
-    loadContacts();
+    try {
+      setLoadingContacts(true);
+      const { data, error } = await supabase
+        .from('DirectoryContacts')
+        .select('id, contact_name, contact_id_number, contact_type')
+        .eq('organization_id', activeOrganizationId)
+        .eq('customer_id', customerId)
+        .eq('deleted', false)
+        .order('contact_name', { ascending: true });
+      if (error) throw error;
+      setContacts(data ?? []);
+    } catch (err) {
+      console.error('Error loading contacts', err);
+      setContacts([]);
+    } finally {
+      setLoadingContacts(false);
+    }
   }, [activeOrganizationId, customerId, setValue]);
+
+  useEffect(() => {
+    loadCustomerContacts();
+  }, [loadCustomerContacts]);
 
   // Load related contacts (contacts linked to this customer) when editing
   const loadRelatedContacts = async () => {
@@ -313,6 +322,89 @@ export default function CustomerNew() {
     loadRelatedContacts();
   }, [customerId, activeOrganizationId]);
 
+  const loadLinkableContacts = useCallback(async () => {
+    if (!activeOrganizationId || !customerId) {
+      setLinkableContacts([]);
+      return;
+    }
+    setLoadingLinkableContacts(true);
+    try {
+      const { data, error } = await supabase
+        .from('DirectoryContacts')
+        .select('id, customer_id, contact_name, contact_email, contact_primary_phone')
+        .eq('organization_id', activeOrganizationId)
+        .or('deleted.is.false,deleted.is.null')
+        .or(`customer_id.is.null,customer_id.neq.${customerId}`)
+        .order('contact_name', { ascending: true })
+        .limit(200);
+      if (error) throw error;
+      setLinkableContacts((data as LinkableContact[]) || []);
+    } catch (err) {
+      console.error('Error loading linkable contacts', err);
+      setLinkableContacts([]);
+    } finally {
+      setLoadingLinkableContacts(false);
+    }
+  }, [activeOrganizationId, customerId]);
+
+  useEffect(() => {
+    if (!showLinkContactModal) return;
+    loadLinkableContacts();
+  }, [showLinkContactModal, loadLinkableContacts]);
+
+  const filteredLinkableContacts = useMemo(() => {
+    const q = linkContactSearch.trim().toLowerCase();
+    if (!q) return linkableContacts;
+    return linkableContacts.filter((c) => {
+      const hay = `${c.contact_name ?? ''} ${c.contact_email ?? ''} ${c.contact_primary_phone ?? ''}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [linkableContacts, linkContactSearch]);
+
+  const customerNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of directoryCustomers ?? []) {
+      map.set(c.id, c.customer_name ?? '—');
+    }
+    return map;
+  }, [directoryCustomers]);
+
+  const handleLinkExistingContact = async (contactId: string) => {
+    if (!activeOrganizationId || !customerId) return;
+    try {
+      setLinkingContactId(contactId);
+      const { error } = await supabase
+        .from('DirectoryContacts')
+        .update({ customer_id: customerId, updated_at: new Date().toISOString() })
+        .eq('id', contactId)
+        .eq('organization_id', activeOrganizationId);
+      if (error) throw error;
+
+      // Auto-select as primary if none selected yet.
+      const currentPrimary = watch('primary_contact_id');
+      if (!currentPrimary) {
+        setValue('primary_contact_id', contactId, { shouldValidate: true });
+      }
+
+      useUIStore.getState().addNotification({
+        type: 'success',
+        title: 'Contact linked',
+        message: 'Contact has been linked to this customer.',
+      });
+      await Promise.all([loadRelatedContacts(), loadCustomerContacts(), loadLinkableContacts()]);
+      setShowLinkContactModal(false);
+      setLinkContactSearch('');
+    } catch (err: any) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Error',
+        message: err?.message ?? 'Could not link contact.',
+      });
+    } finally {
+      setLinkingContactId(null);
+    }
+  };
+
   const handleUnlinkContact = async (contactId: string, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -325,7 +417,7 @@ export default function CustomerNew() {
         .eq('organization_id', activeOrganizationId);
       if (error) throw error;
       useUIStore.getState().addNotification({ type: 'success', title: 'Contact unlinked', message: 'Contact has been unlinked from this customer.' });
-      loadRelatedContacts();
+      await Promise.all([loadRelatedContacts(), loadCustomerContacts()]);
     } catch (err: any) {
       useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: err?.message ?? 'Could not unlink contact.' });
     }
@@ -886,14 +978,23 @@ export default function CustomerNew() {
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
           <div className="py-4 px-6 border-b border-gray-200 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-gray-900">Related Contacts</h3>
-            <button
-              type="button"
-              onClick={() => router.navigate(`/directory/contacts/new?customerId=${customerId}`)}
-              className="flex items-center gap-2 px-2 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 text-sm transition-colors"
-            >
-              <Plus style={{ width: 14, height: 14 }} />
-              Link contact
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowLinkContactModal(true)}
+                className="flex items-center gap-2 px-2 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 text-sm transition-colors"
+              >
+                <Plus style={{ width: 14, height: 14 }} />
+                Link contact
+              </button>
+              <button
+                type="button"
+                onClick={() => router.navigate(`/directory/contacts/new?customerId=${customerId}`)}
+                className="px-2 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 text-sm transition-colors"
+              >
+                New contact
+              </button>
+            </div>
           </div>
           <div className="px-6 py-4">
             {loadingRelatedContacts ? (
@@ -941,6 +1042,75 @@ export default function CustomerNew() {
                 </tbody>
               </table>
             )}
+          </div>
+        </div>
+      )}
+
+      {customerId && showLinkContactModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-2xl rounded-lg bg-white border border-gray-200 shadow-lg">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+              <h4 className="text-sm font-semibold text-gray-900">Link Existing Contact</h4>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowLinkContactModal(false);
+                  setLinkContactSearch('');
+                }}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4">
+              <Input
+                value={linkContactSearch}
+                onChange={(e) => setLinkContactSearch(e.target.value)}
+                placeholder="Search by name, email, or phone..."
+                className="py-1 text-xs mb-3"
+              />
+              <div className="max-h-80 overflow-auto border border-gray-200 rounded">
+                {loadingLinkableContacts ? (
+                  <p className="text-sm text-gray-500 p-3">Loading contacts…</p>
+                ) : filteredLinkableContacts.length === 0 ? (
+                  <p className="text-sm text-gray-500 p-3">No contacts available to link.</p>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 border-b border-gray-200 sticky top-0">
+                      <tr>
+                        <th className="text-left py-2 px-3 text-xs font-medium text-gray-700">Name</th>
+                        <th className="text-left py-2 px-3 text-xs font-medium text-gray-700">Email</th>
+                        <th className="text-left py-2 px-3 text-xs font-medium text-gray-700">Phone</th>
+                        <th className="text-left py-2 px-3 text-xs font-medium text-gray-700">Current Customer</th>
+                        <th className="text-right py-2 px-3 text-xs font-medium text-gray-700">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredLinkableContacts.map((c) => (
+                        <tr key={c.id} className="border-b border-gray-100">
+                          <td className="py-2 px-3 text-gray-900">{c.contact_name ?? '—'}</td>
+                          <td className="py-2 px-3 text-gray-700">{c.contact_email ?? '—'}</td>
+                          <td className="py-2 px-3 text-gray-700">{c.contact_primary_phone ?? '—'}</td>
+                          <td className="py-2 px-3 text-gray-700">
+                            {c.customer_id ? (customerNameById.get(c.customer_id) ?? 'Assigned') : 'Standalone'}
+                          </td>
+                          <td className="py-2 px-3 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleLinkExistingContact(c.id)}
+                              disabled={linkingContactId === c.id}
+                              className="px-2 py-1 text-xs border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                            >
+                              {linkingContactId === c.id ? 'Linking…' : 'Link'}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}

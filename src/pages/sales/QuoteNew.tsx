@@ -105,6 +105,16 @@ function getEffectiveLinePrices(
   return { qty, unitMsrp, unitPrice, lineTotal, isCommercialAdjusted };
 }
 
+function normalizeStyleLabel(styleCode?: string | null): string {
+  const raw = (styleCode || '').trim();
+  if (!raw) return '';
+  return raw
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (c: string) => c.toUpperCase());
+}
+
 // ====================================================
 // UTILS: Product Type Resolution (A)
 // ====================================================
@@ -3710,29 +3720,37 @@ export default function QuoteNew() {
                 return acc.qty > 1 ? `${name} ×${acc.qty}` : name;
               }).join(', ')
             : null;
+        const productTypeCode = String(line.product_type ?? '').trim().toLowerCase();
+        const isCatalogLine = productTypeCode === 'catalog';
         return {
           id: line.id,
           area: line.area,
           position: line.position,
           product_type: line.ProductType?.name ?? line.product_type ?? '—',
+          style_code: line.config_snapshot?.style_code ?? line.config_snapshot?.styleCode ?? null,
+          track_only: Boolean(line.config_snapshot?.track_only),
           collection_name: line.collection_name,
           variant_name: line.variant_name,
           drive_type: line.drive_type,
           operating_system_sku_name: line.drive_system_label ?? null,
           width_m: line.width_m,
           height_m: line.height_m,
-          dimensions_source: {
-            width_m: line.width_m,
-            height_m: line.height_m,
-            width_mm: line.config_snapshot?.width_mm,
-            height_mm: line.config_snapshot?.height_mm,
-            measurements: line.config_snapshot?.measurements,
-            panels: line.config_snapshot?.panels,
-          },
+          dimensions_source: isCatalogLine
+            ? null
+            : {
+                width_m: line.width_m,
+                height_m: line.height_m,
+                width_mm: line.config_snapshot?.width_mm,
+                height_mm: line.config_snapshot?.height_mm,
+                measurements: line.config_snapshot?.measurements,
+                panels: line.config_snapshot?.panels,
+              },
           qty: n,
           line_total: lineTotal,
           accessories: accessoriesStr,
           CatalogItems: line.CatalogItems ?? null,
+          catalog_name: isCatalogLine ? (line.name ?? line.CatalogItems?.name ?? null) : null,
+          catalog_color: isCatalogLine ? (line.CatalogItems?.color ?? null) : null,
         };
       });
 
@@ -3916,11 +3934,15 @@ export default function QuoteNew() {
                 return acc.qty > 1 ? `${name} ×${acc.qty}` : name;
               }).join(', ')
             : null;
+        const productTypeCode = String(line.product_type ?? '').trim().toLowerCase();
+        const isCatalogLine = productTypeCode === 'catalog';
         return {
           id: line.id,
           area: line.area,
           position: line.position,
           product_type: line.ProductType?.name ?? line.product_type ?? '—',
+          style_code: line.config_snapshot?.style_code ?? line.config_snapshot?.styleCode ?? null,
+          track_only: Boolean(line.config_snapshot?.track_only),
           collection_name: line.collection_name,
           variant_name: line.variant_name,
           drive_type: line.drive_type,
@@ -3931,6 +3953,8 @@ export default function QuoteNew() {
           line_total: lineTotal,
           accessories: accessoriesStr,
           CatalogItems: line.CatalogItems ?? null,
+          catalog_name: isCatalogLine ? (line.name ?? line.CatalogItems?.name ?? null) : null,
+          catalog_color: isCatalogLine ? (line.CatalogItems?.color ?? null) : null,
         };
       });
 
@@ -4751,19 +4775,33 @@ export default function QuoteNew() {
 
                     const isCatalogLine = line.product_type === 'catalog';
                     const isFilmLine = line.product_type === 'window_film';
+                    const isDraperyTrackOnly =
+                      !isCatalogLine &&
+                      !isFilmLine &&
+                      String(line.product_type || '').trim().toLowerCase() === 'drapery' &&
+                      Boolean(line.config_snapshot?.track_only);
+                    const draperyStyleLabel = normalizeStyleLabel(
+                      line.config_snapshot?.style_code ?? line.config_snapshot?.styleCode ?? null
+                    );
                     const productTypeName = isCatalogLine
                       ? (line.CatalogItems?.item_role
                           ? String(line.CatalogItems.item_role).replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())
                           : 'Catalog')
                       : isFilmLine ? 'Window Film'
-                      : (line.ProductType?.name || line.product_type || 'N/A');
+                      : isDraperyTrackOnly
+                        ? 'Drapery Track'
+                        : (line.ProductType?.name || line.product_type || 'N/A');
                     const collectionDisplay = (isCatalogLine || isFilmLine)
                       ? (() => {
                           const itemName = line.CatalogItems?.name || line.name || '';
                           const itemSku = line.CatalogItems?.sku || line.sku || '';
-                          if (itemName && itemSku && itemName !== itemSku) return `${itemName} (${itemSku})`;
-                          return itemName || itemSku || '—';
+                          const itemColor = isCatalogLine ? (line.CatalogItems?.color || '') : '';
+                          const head = itemColor && itemName ? `${itemName} — ${itemColor}` : itemName;
+                          if (head && itemSku && head !== itemSku) return `${head} (${itemSku})`;
+                          return head || itemSku || '—';
                         })()
+                      : isDraperyTrackOnly
+                        ? (draperyStyleLabel ? `Style: ${draperyStyleLabel}` : 'Style: —')
                       : (line.collection_name && line.variant_name
                           ? `${line.collection_name} - ${line.variant_name}`
                           : line.collection_name || line.variant_name || 'N/A');

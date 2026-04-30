@@ -19,7 +19,7 @@ import { useResolvedStorageUrl } from '../../hooks/useResolvedStorageUrl';
 import Input from '../../components/ui/Input';
 import Label from '../../components/ui/Label';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
-import { ChevronDown, ChevronRight, GripVertical, Plus, AlertTriangle, Printer, Eye, ArrowLeft, Download } from 'lucide-react';
+import { ChevronDown, ChevronRight, GripVertical, Plus, AlertTriangle, Printer, Eye, ArrowLeft, Download, Trash2 } from 'lucide-react';
 import DetailPageLayout from '../../components/shared/DetailPageLayout';
 import StatusBadge from '../../components/shared/StatusBadge';
 import TimelineView from '../../components/shared/TimelineView';
@@ -146,6 +146,27 @@ function getProposalLineQty(
   return 1;
 }
 
+function normalizeStyleLabel(styleCode?: string | null): string {
+  const raw = (styleCode || '').trim();
+  if (!raw) return '';
+  return raw
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function getDraperyTrackDescription(params: {
+  productTypeName?: string | null;
+  trackOnly?: boolean | null;
+  styleCode?: string | null;
+}): string | null {
+  const isDrapery = /drapery/i.test(params.productTypeName ?? '');
+  if (!isDrapery || !params.trackOnly) return null;
+  const styleLabel = normalizeStyleLabel(params.styleCode);
+  return styleLabel ? `Drapery Track | ${styleLabel}` : 'Drapery Track';
+}
+
 function getProposalIdFromPath(): string | null {
   const path = window.location.pathname;
   const m = path.match(/\/sales\/proposals\/([^/]+)/);
@@ -164,6 +185,8 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
   const [expandedLineId, setExpandedLineId] = useState<string | null>(null);
   const [draftLines, setDraftLines] = useState<ProposalLine[]>([]);
   const [draftAddonsMap, setDraftAddonsMap] = useState<Map<string, ProposalLineAddOn[]>>(new Map());
+  const [installationFieldDraft, setInstallationFieldDraft] = useState<Record<string, { cost?: string; markup?: string }>>({});
+  const [removedCustomLineIds, setRemovedCustomLineIds] = useState<string[]>([]);
   const [linesDirty, setLinesDirty] = useState(false);
   const [addonsDirty, setAddonsDirty] = useState(false);
   const lastLinesRef = useRef<ProposalLine[]>([]);
@@ -183,6 +206,8 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           ])
         )
       );
+      setInstallationFieldDraft({});
+      setRemovedCustomLineIds([]);
     }
   }, [proposal, loading, lines, addonsMap, linesDirty, addonsDirty]);
   const displayLines = draftLines;
@@ -269,6 +294,8 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
 
   const [showAdjSubtotal, setShowAdjSubtotal] = useState(false);
   const [showAdjTotal, setShowAdjTotal] = useState(false);
+  const [targetSubtotalInput, setTargetSubtotalInput] = useState('');
+  const [targetTotalInput, setTargetTotalInput] = useState('');
 
   const resolvedLogoUrl = useResolvedStorageUrl(dealerLogoUrl ?? null);
   const [logoError, setLogoError] = useState(false);
@@ -428,7 +455,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
 
   const handleSave = useCallback(async () => {
     if (!proposal || !canWrite) return;
-    if (!headerDirty && !linesDirty && !addonsDirty) {
+    if (!headerDirty && !linesDirty && !addonsDirty && removedCustomLineIds.length === 0) {
       return;
     }
     setSaving(true);
@@ -499,6 +526,32 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           }
         }
       }
+      if (ok && removedCustomLineIds.length > 0) {
+        const { error: addonsDeleteError } = await supabase
+          .from('ProposalLineAddOns')
+          .update({ deleted: true })
+          .in('proposal_line_id', removedCustomLineIds)
+          .eq('proposal_id', proposal.id);
+        if (addonsDeleteError && isRLSError(addonsDeleteError)) setCanWrite(false);
+        if (addonsDeleteError) {
+          useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: getSupabaseErrorMessage(addonsDeleteError) });
+          ok = false;
+        }
+
+        if (ok) {
+          const { error: linesDeleteError } = await supabase
+            .from('ProposalLines')
+            .update({ deleted: true })
+            .in('id', removedCustomLineIds)
+            .eq('proposal_id', proposal.id)
+            .eq('line_type', 'custom');
+          if (linesDeleteError && isRLSError(linesDeleteError)) setCanWrite(false);
+          if (linesDeleteError) {
+            useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: getSupabaseErrorMessage(linesDeleteError) });
+            ok = false;
+          }
+        }
+      }
       if (ok && addonsDirty) {
         for (const [lineId, addons] of draftAddonsMap) {
           const resolvedLineId = tempToNewId.get(lineId) ?? lineId;
@@ -553,6 +606,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
         setHeaderDirty(false);
         setLinesDirty(false);
         setAddonsDirty(false);
+        setRemovedCustomLineIds([]);
         await refetch();
         const action = headerDirty ? 'status_changed' : 'updated';
         const description = headerDirty
@@ -574,7 +628,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     } finally {
       setSaving(false);
     }
-  }, [proposal, canWrite, headerDirty, linesDirty, addonsDirty, draftLines, draftAddonsMap, addonsMap, saveHeader, refetch, setCanWrite, headerForm.status, authUser, refetchTimeline]);
+  }, [proposal, canWrite, headerDirty, linesDirty, addonsDirty, removedCustomLineIds, draftLines, draftAddonsMap, addonsMap, saveHeader, refetch, setCanWrite, headerForm.status, authUser, refetchTimeline]);
 
   const handleSaveAndClose = useCallback(async () => {
     await handleSave();
@@ -679,6 +733,29 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     setDraftLines((prev) => [...prev, newLine]);
     setLinesDirty(true);
   }, [proposal, canWrite, displayLines.length]);
+
+  const removeCustomLine = useCallback(
+    (lineId: string) => {
+      if (!canWrite) return;
+      const target = displayLines.find((line) => line.id === lineId);
+      if (!target || target.line_type !== 'custom') return;
+
+      if (!target.id.startsWith('temp-')) {
+        setRemovedCustomLineIds((prev) => (prev.includes(target.id) ? prev : [...prev, target.id]));
+      }
+
+      setDraftLines((prev) => prev.filter((line) => line.id !== lineId));
+      setDraftAddonsMap((prev) => {
+        const next = new Map(prev);
+        next.delete(lineId);
+        return next;
+      });
+      if (expandedLineId === lineId) setExpandedLineId(null);
+      setLinesDirty(true);
+      setAddonsDirty(true);
+    },
+    [canWrite, displayLines, expandedLineId]
+  );
 
   const reorderLines = useCallback(
     (newOrder: ProposalLine[]) => {
@@ -788,6 +865,8 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     // Fee is baked into each line total so Unit Price & Line Total reflect it
     const lineTotals: number[] = [];
     let totalProduct = 0;
+    let baseTotalProduct = 0;
+    let baseInstallationTotal = 0;
     let installationTotal = 0;
     displayLines.forEach((line) => {
       const qlInfo = line.quote_line_id ? quoteLinesMap.get(line.quote_line_id) : undefined;
@@ -795,9 +874,11 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
       const material = rawMaterial * feeMul;
       lineTotals.push(material);
       totalProduct += material;
+      baseTotalProduct += rawMaterial;
       const lineQty = getProposalLineQty(line, qlInfo);
       const installationAddons = (displayAddonsMap?.get(line.id) || []).filter((a) => a.addon_type === 'installation');
       const rawInstall = installationAddons.reduce((s, a) => s + ((Number(a.sale_amount) || 0) * lineQty), 0);
+      baseInstallationTotal += rawInstall;
       installationTotal += rawInstall * instFeeMul;
     });
 
@@ -818,6 +899,8 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
 
     return {
       totalProduct,
+      baseTotalProduct,
+      baseInstallationTotal,
       discountPct,
       discountAmount,
       globalFeePct,
@@ -833,6 +916,70 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
       instFeePct,
     };
   }, [displayLines, quoteLinesMap, displayAddonsMap, proposal?.status, proposal?.global_discount_pct, proposal?.global_fee_amount, proposal?.global_installation_discount_pct, proposal?.global_installation_fee_pct, proposal?.tax_pct, headerForm.global_discount_pct, headerForm.global_fee_amount, headerForm.global_installation_discount_pct, headerForm.global_installation_fee_pct, headerForm.exempt_tax]);
+
+  /**
+   * Resolve targetAfterDiscount (= base product net the dealer wants AFTER fee/discount)
+   * into either a Global Discount % or a Global Fee % so totalProduct(after) === target.
+   *
+   * Single-pass math (no fee already applied):
+   *   afterDiscount = baseTotalProduct * (1 + fee/100) * (1 - disc/100)
+   * We use only ONE of fee/disc at a time:
+   *   ratio = afterDiscount / baseTotalProduct
+   *     - ratio < 1 → disc = (1 - ratio) * 100, fee = 0
+   *     - ratio > 1 → fee = (ratio - 1) * 100, disc = 0
+   *     - ratio == 1 → both 0
+   */
+  const setHeaderFromTargetProductNet = useCallback(
+    (targetAfterDiscount: number) => {
+      const base = totals.baseTotalProduct ?? 0;
+      if (base <= 0) return;
+      let nextDiscount = '0';
+      let nextFee = '0';
+      if (targetAfterDiscount <= 0) {
+        nextDiscount = '100';
+      } else if (targetAfterDiscount < base) {
+        const disc = Math.round(((base - targetAfterDiscount) / base) * 1000000) / 10000;
+        nextDiscount = String(disc);
+      } else if (targetAfterDiscount > base) {
+        const fee = Math.round(((targetAfterDiscount - base) / base) * 1000000) / 10000;
+        nextFee = String(fee);
+      }
+      setHeaderForm((f) => ({
+        ...f,
+        global_discount_pct: nextDiscount,
+        global_fee_amount: nextFee,
+      }));
+      setHeaderDirty(true);
+    },
+    [totals.baseTotalProduct]
+  );
+
+  /** Target subtotal = afterDiscount + installationNet (sin tax). */
+  const applyTargetSubtotal = useCallback(
+    (raw: string) => {
+      const target = parseFloat(raw);
+      if (Number.isNaN(target) || target < 0) return;
+      const installNet = totals.installationNet ?? 0;
+      const targetAfterDiscount = target - installNet;
+      setHeaderFromTargetProductNet(targetAfterDiscount);
+    },
+    [totals.installationNet, setHeaderFromTargetProductNet]
+  );
+
+  /** Target total (con o sin ITBMS según exempt_tax) → derive subtotal then product net. */
+  const applyTargetTotal = useCallback(
+    (raw: string) => {
+      const targetTotal = parseFloat(raw);
+      if (Number.isNaN(targetTotal) || targetTotal < 0) return;
+      const exemptTax = headerForm.exempt_tax;
+      const taxPct = exemptTax ? 0 : (proposal?.tax_pct ?? 0.07);
+      const targetSub = targetTotal / (1 + taxPct);
+      const installNet = totals.installationNet ?? 0;
+      const targetAfterDiscount = targetSub - installNet;
+      setHeaderFromTargetProductNet(targetAfterDiscount);
+    },
+    [headerForm.exempt_tax, proposal?.tax_pct, totals.installationNet, setHeaderFromTargetProductNet]
+  );
 
   const customLinesInvalid = useMemo(() => {
     return displayLines.some(
@@ -1016,6 +1163,26 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           (qlInfo?.product_type_id && productTypeNameByCodeOrId.byId.get(qlInfo.product_type_id)) ??
           (productTypeRaw && productTypeNameByCodeOrId.byCode.get(productTypeRaw.trim().toLowerCase())) ??
           productTypeRaw;
+        const styleCode =
+          (snapFrozen as { style_code?: string; styleCode?: string } | null)?.style_code ??
+          (snapFrozen as { style_code?: string; styleCode?: string } | null)?.styleCode ??
+          (qlInfo?.config_snapshot as { style_code?: string; styleCode?: string } | null)?.style_code ??
+          (qlInfo?.config_snapshot as { style_code?: string; styleCode?: string } | null)?.styleCode ??
+          null;
+        const trackOnly =
+          Boolean((snapFrozen as { track_only?: boolean } | null)?.track_only) ||
+          Boolean((qlInfo?.config_snapshot as { track_only?: boolean } | null)?.track_only);
+        const draperyTrackDescription = getDraperyTrackDescription({
+          productTypeName: productTypeName ?? null,
+          trackOnly,
+          styleCode,
+        });
+        const isCatalogLine = String(productTypeRaw ?? '').trim().toLowerCase() === 'catalog';
+        const catalogColor = isCatalogLine ? (qlInfo?.catalog_color ?? null) : null;
+        const baseName = snapFrozen?.name ?? snapFrozen?.sku ?? qlInfo?.name ?? qlInfo?.sku ?? null;
+        const catalogDescription = isCatalogLine && baseName
+          ? (catalogColor ? `${baseName} — ${catalogColor}` : baseName)
+          : null;
         return {
           area: snapFrozen?.area ?? qlInfo?.area ?? null,
           position: snapFrozen?.position ?? qlInfo?.position ?? null,
@@ -1024,7 +1191,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           variant_name: snapFrozen?.variant_name ?? qlInfo?.variant_name ?? null,
           drive_type: snapFrozen?.drive_type ?? qlInfo?.drive_type ?? null,
           drive_system_label: snapFrozen?.drive_system_label ?? qlInfo?.drive_system_label ?? null,
-          description: snapFrozen?.name || snapFrozen?.sku || qlInfo?.name || qlInfo?.sku || null,
+          description: catalogDescription ?? draperyTrackDescription ?? baseName,
           sku: snapFrozen?.sku ?? qlInfo?.sku ?? null,
           dimensions: dimensions ?? null,
           panel_count,
@@ -1114,20 +1281,32 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
 
   const handlePreviewPDF = useCallback(
     async (variant: 'internal' | 'customer') => {
+      const previewWindow = window.open('', '_blank');
+      if (!previewWindow) {
+        useUIStore.getState().addNotification({
+          type: 'error',
+          title: 'Popup blocked',
+          message: 'Please allow popups for this site to preview the PDF.',
+        });
+        return;
+      }
       try {
         const result = await buildProposalPDFDoc(variant);
         if (result) {
           const blob = result.doc.output('blob');
           const url = URL.createObjectURL(blob);
-          window.open(url, '_blank');
+          previewWindow.location.href = url;
           setTimeout(() => URL.revokeObjectURL(url), 60000);
           useUIStore.getState().addNotification({
             type: 'success',
             title: 'Preview',
             message: `PDF abierto en nueva pestaña (${result.fileName}). Descárgalo desde el botón de descarga del navegador cuando quieras.`,
           });
+        } else {
+          previewWindow.close();
         }
       } catch (err: any) {
+        previewWindow.close();
         console.error('Error generating PDF:', err);
         useUIStore.getState().addNotification({
           type: 'error',
@@ -1222,7 +1401,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           aria-haspopup="true"
         >
           <Printer className="w-4 h-4 shrink-0 text-gray-600" />
-          <ChevronDown className="w-4 h-4 shrink-0 text-gray-500" />
+          <ChevronDown className={`w-4 h-4 shrink-0 text-gray-500 transition-transform ${printDropdownOpen ? 'rotate-180' : ''}`} />
         </button>
         {printDropdownOpen && (
           <div
@@ -1560,33 +1739,34 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                 </div>
                 {showAdjSubtotal && !contentReadOnly && (
                   <div className="flex justify-end pb-2">
-                    <div>
-                      <Label className="text-xs text-gray-500">Target subtotal</Label>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        className="w-32 mt-0.5"
-                        defaultValue=""
-                        placeholder={String(Math.round((totals.subtotal ?? 0) * 100) / 100)}
-                        onBlur={(e) => {
-                          const target = parseFloat(e.target.value);
-                          if (Number.isNaN(target) || target < 0) return;
-                          const installNet = totals.installationNet ?? 0;
-                          const tp = totals.totalProduct ?? 0;
-                          if (tp <= 0) return;
-                          const targetProductNet = target - installNet;
-                          if (targetProductNet <= 0) {
-                            setHeaderForm((f) => ({ ...f, global_discount_pct: '100' }));
-                          } else if (targetProductNet < tp) {
-                            const disc = Math.round(((tp - targetProductNet) / tp) * 1000000) / 10000;
-                            setHeaderForm((f) => ({ ...f, global_discount_pct: String(disc) }));
-                          } else {
-                            setHeaderForm((f) => ({ ...f, global_discount_pct: '0' }));
-                          }
-                          setHeaderDirty(true);
-                        }}
-                      />
+                    <div className="flex items-end gap-2">
+                      <div>
+                        <Label className="text-xs text-gray-500">Target subtotal</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          className="w-32 mt-0.5"
+                          value={targetSubtotalInput}
+                          placeholder={String(Math.round((totals.subtotal ?? 0) * 100) / 100)}
+                          onChange={(e) => setTargetSubtotalInput(e.target.value)}
+                          onBlur={() => applyTargetSubtotal(targetSubtotalInput)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              applyTargetSubtotal(targetSubtotalInput);
+                              (e.target as HTMLInputElement).blur();
+                            }
+                          }}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => applyTargetSubtotal(targetSubtotalInput)}
+                        className="px-2 py-1 text-xs rounded border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+                      >
+                        Apply
+                      </button>
                     </div>
                   </div>
                 )}
@@ -1611,35 +1791,34 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                 </div>
                 {showAdjTotal && !contentReadOnly && (
                   <div className="flex justify-end pb-2">
-                    <div>
-                      <Label className="text-xs text-gray-500">Target total (inc. tax)</Label>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        className="w-32 mt-0.5"
-                        defaultValue=""
-                        placeholder={String(Math.round((totals.total ?? 0) * 100) / 100)}
-                        onBlur={(e) => {
-                          const targetTotal = parseFloat(e.target.value);
-                          if (Number.isNaN(targetTotal) || targetTotal < 0) return;
-                          const taxPct = headerForm.exempt_tax ? 0 : (proposal?.tax_pct ?? 0.07);
-                          const targetSub = targetTotal / (1 + taxPct);
-                          const installNet = totals.installationNet ?? 0;
-                          const tp = totals.totalProduct ?? 0;
-                          if (tp <= 0) return;
-                          const targetProductNet = targetSub - installNet;
-                          if (targetProductNet <= 0) {
-                            setHeaderForm((f) => ({ ...f, global_discount_pct: '100' }));
-                          } else if (targetProductNet < tp) {
-                            const disc = Math.round(((tp - targetProductNet) / tp) * 1000000) / 10000;
-                            setHeaderForm((f) => ({ ...f, global_discount_pct: String(disc) }));
-                          } else {
-                            setHeaderForm((f) => ({ ...f, global_discount_pct: '0' }));
-                          }
-                          setHeaderDirty(true);
-                        }}
-                      />
+                    <div className="flex items-end gap-2">
+                      <div>
+                        <Label className="text-xs text-gray-500">Target total (inc. tax)</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          className="w-32 mt-0.5"
+                          value={targetTotalInput}
+                          placeholder={String(Math.round((totals.total ?? 0) * 100) / 100)}
+                          onChange={(e) => setTargetTotalInput(e.target.value)}
+                          onBlur={() => applyTargetTotal(targetTotalInput)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              applyTargetTotal(targetTotalInput);
+                              (e.target as HTMLInputElement).blur();
+                            }
+                          }}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => applyTargetTotal(targetTotalInput)}
+                        className="px-2 py-1 text-xs rounded border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+                      >
+                        Apply
+                      </button>
                     </div>
                   </div>
                 )}
@@ -1754,6 +1933,20 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                   (qlInfo?.product_type_id && productTypeNameByCodeOrId.byId.get(qlInfo.product_type_id)) ??
                   (ptRawForOpening && productTypeNameByCodeOrId.byCode.get(ptRawForOpening.trim().toLowerCase())) ??
                   ptRawForOpening;
+                const styleCodeForDrapery =
+                  (snap as { style_code?: string; styleCode?: string } | null)?.style_code ??
+                  (snap as { style_code?: string; styleCode?: string } | null)?.styleCode ??
+                  (qlInfo?.config_snapshot as { style_code?: string; styleCode?: string } | null)?.style_code ??
+                  (qlInfo?.config_snapshot as { style_code?: string; styleCode?: string } | null)?.styleCode ??
+                  null;
+                const trackOnlyForDrapery =
+                  Boolean((snap as { track_only?: boolean } | null)?.track_only) ||
+                  Boolean((qlInfo?.config_snapshot as { track_only?: boolean } | null)?.track_only);
+                const draperyTrackDescription = getDraperyTrackDescription({
+                  productTypeName: ptNameForOpening ?? null,
+                  trackOnly: trackOnlyForDrapery,
+                  styleCode: styleCodeForDrapery,
+                });
                 const isDrapery = /drapery/i.test(ptNameForOpening ?? '');
                 const openingRaw =
                   snap?.opening_direction ??
@@ -1813,7 +2006,19 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                           <div className="min-h-[3.5rem] flex flex-col justify-center gap-0.5 flex-1 min-w-0">
                             <div className="break-words">
                               <span className="font-medium text-gray-900">
-                                {snap?.name ?? qlInfo.name ?? qlInfo.sku ?? '—'}
+                                {(() => {
+                                  const ptCode = String(
+                                    (line.quote_line_snapshot as { product_type?: string } | null)?.product_type
+                                      ?? qlInfo.product_type
+                                      ?? ''
+                                  ).trim().toLowerCase();
+                                  const isCatalogLine = ptCode === 'catalog';
+                                  const baseName = snap?.name ?? qlInfo.name ?? qlInfo.sku ?? '—';
+                                  if (isCatalogLine && qlInfo.catalog_color) {
+                                    return baseName === '—' ? baseName : `${baseName} — ${qlInfo.catalog_color}`;
+                                  }
+                                  return draperyTrackDescription ?? baseName;
+                                })()}
                               </span>
                               {(snap?.sku ?? qlInfo.sku) && (snap?.sku ?? qlInfo.sku) !== (snap?.name ?? qlInfo.name ?? qlInfo.sku) && (
                                 <span className="block text-gray-500 text-xs">{snap?.sku ?? qlInfo.sku}</span>
@@ -1866,7 +2071,21 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                         qlInfo?.quantity ?? '—'
                       )}
                     </td>
-                    <td className="w-[16px] min-w-[16px] py-4" aria-hidden></td>
+                    <td className="w-[16px] min-w-[16px] py-4 align-middle">
+                      {line.line_type === 'custom' && !contentReadOnly ? (
+                        <button
+                          type="button"
+                          onClick={() => removeCustomLine(line.id)}
+                          className="inline-flex items-center justify-center rounded p-1 text-red-600 hover:bg-red-50"
+                          title="Delete custom line"
+                          aria-label="Delete custom line"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      ) : (
+                        <span className="inline-block w-4 h-4" aria-hidden />
+                      )}
+                    </td>
                     <td className="py-4 pl-2 pr-2 text-right align-middle w-[108px] max-w-[108px] whitespace-nowrap tabular-nums">
                       {line.line_type === 'custom' ? (
                         <span className="text-sm text-gray-900" title={`Unit: ${formatCurrency(Number(line.unit_price) ?? 0, currency)}`}>
@@ -2037,10 +2256,36 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                                       step="0.01"
                                       min="0"
                                       className="w-24"
-                                      value={installationAddon.cost_amount ?? ''}
+                                      value={installationFieldDraft[line.id]?.cost ?? (installationAddon.cost_amount != null ? String(installationAddon.cost_amount) : '')}
                                       onChange={(e) => {
-                                        const cost = Math.max(0, parseFloat(e.target.value) || 0);
-                                        upsertAddOn(line.id, { addon_type: 'installation', cost_amount: cost, markup_pct: installationAddon.markup_pct ?? 100, pricing_mode: 'markup_pct' });
+                                        const raw = e.target.value;
+                                        setInstallationFieldDraft((prev) => ({
+                                          ...prev,
+                                          [line.id]: { ...prev[line.id], cost: raw },
+                                        }));
+                                        if (raw === '') return;
+                                        const cost = Math.max(0, parseFloat(raw) || 0);
+                                        upsertAddOn(line.id, {
+                                          addon_type: 'installation',
+                                          cost_amount: cost,
+                                          markup_pct: installationAddon.markup_pct ?? 100,
+                                          pricing_mode: 'markup_pct',
+                                        });
+                                      }}
+                                      onBlur={() => {
+                                        const raw = installationFieldDraft[line.id]?.cost;
+                                        if (raw == null) return;
+                                        const cost = raw === '' ? 0 : Math.max(0, parseFloat(raw) || 0);
+                                        upsertAddOn(line.id, {
+                                          addon_type: 'installation',
+                                          cost_amount: cost,
+                                          markup_pct: installationAddon.markup_pct ?? 100,
+                                          pricing_mode: 'markup_pct',
+                                        });
+                                        setInstallationFieldDraft((prev) => ({
+                                          ...prev,
+                                          [line.id]: { ...prev[line.id], cost: undefined },
+                                        }));
                                       }}
                                       disabled={contentReadOnly}
                                     />
@@ -2052,10 +2297,36 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                                       step="0.01"
                                       min="0"
                                       className="w-20"
-                                      value={installationAddon.markup_pct ?? ''}
+                                      value={installationFieldDraft[line.id]?.markup ?? (installationAddon.markup_pct != null ? String(installationAddon.markup_pct) : '')}
                                       onChange={(e) => {
-                                        const markup = Math.max(0, parseFloat(e.target.value) || 0);
-                                        upsertAddOn(line.id, { addon_type: 'installation', cost_amount: installationAddon.cost_amount ?? 0, markup_pct: markup, pricing_mode: 'markup_pct' });
+                                        const raw = e.target.value;
+                                        setInstallationFieldDraft((prev) => ({
+                                          ...prev,
+                                          [line.id]: { ...prev[line.id], markup: raw },
+                                        }));
+                                        if (raw === '') return;
+                                        const markup = Math.max(0, parseFloat(raw) || 0);
+                                        upsertAddOn(line.id, {
+                                          addon_type: 'installation',
+                                          cost_amount: installationAddon.cost_amount ?? 0,
+                                          markup_pct: markup,
+                                          pricing_mode: 'markup_pct',
+                                        });
+                                      }}
+                                      onBlur={() => {
+                                        const raw = installationFieldDraft[line.id]?.markup;
+                                        if (raw == null) return;
+                                        const markup = raw === '' ? 0 : Math.max(0, parseFloat(raw) || 0);
+                                        upsertAddOn(line.id, {
+                                          addon_type: 'installation',
+                                          cost_amount: installationAddon.cost_amount ?? 0,
+                                          markup_pct: markup,
+                                          pricing_mode: 'markup_pct',
+                                        });
+                                        setInstallationFieldDraft((prev) => ({
+                                          ...prev,
+                                          [line.id]: { ...prev[line.id], markup: undefined },
+                                        }));
                                       }}
                                       disabled={contentReadOnly}
                                     />

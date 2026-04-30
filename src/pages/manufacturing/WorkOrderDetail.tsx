@@ -57,9 +57,10 @@ function deriveStatus(tasks: WorkOrderTask[]): 'pending' | 'in_progress' | 'comp
 }
 
 /* ─── Station Card (unchanged core logic) ─── */
-function StationCard({ task, onToggleLine, onStatusChange, moMeta, siblingTasks }: {
+function StationCard({ task, onToggleLine, onBulkToggleLines, onStatusChange, moMeta, siblingTasks }: {
   task: WorkOrderTask;
   onToggleLine: (lineId: string, completed: boolean) => void;
+  onBulkToggleLines?: (lineIds: string[], completed: boolean) => Promise<void> | void;
   onStatusChange: (taskId: string, status: 'pending' | 'in_progress' | 'completed') => void;
   moMeta: MOInfo;
   siblingTasks?: WorkOrderTask[];
@@ -75,6 +76,40 @@ function StationCard({ task, onToggleLine, onStatusChange, moMeta, siblingTasks 
   const isAssembly = stationCode === 'ASSEMBLY';
   const upstreamTasks = isAssembly && siblingTasks ? siblingTasks.filter(t => t.work_center?.code !== 'ASSEMBLY') : [];
   const allUpstreamReady = upstreamTasks.length === 0 || upstreamTasks.every(t => t.status === 'completed');
+
+  /**
+   * Memoize the lines payload passed to <AssemblyDetail/> so its reference only
+   * changes when actual line data changes (id, completed, cut sizes, etc.) —
+   * NOT on every parent re-render. This is what stops the flicker, since the
+   * structural fetch in AssemblyDetail keys off this stable reference.
+   */
+  const assemblyLines = useMemo(
+    () => task.lines.map((l) => ({
+      id: l.id,
+      sku: l.sku,
+      item_name: l.item_name,
+      component_role: l.component_role,
+      qty: l.qty,
+      uom: l.uom,
+      cut_length_mm: l.cut_length_mm != null ? Number(l.cut_length_mm) : null,
+      cut_width_mm: l.cut_width_mm != null ? Number(l.cut_width_mm) : null,
+      completed: l.completed,
+      bom_instance_line_id: l.bom_instance_line_id,
+    })),
+    // Stable identity: only update when the line fingerprint changes.
+    // Includes `completed` so toggles propagate, but skips re-creating the array
+    // on unrelated parent re-renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [task.lines.map((l) => `${l.id}:${l.completed ? 1 : 0}:${l.cut_length_mm ?? ''}:${l.cut_width_mm ?? ''}`).join('|')],
+  );
+
+  const assemblySiblings = useMemo(
+    () => siblingTasks?.map((t) => ({
+      code: t.work_center?.code ?? '',
+      status: t.status,
+    })).filter((t) => t.code !== 'ASSEMBLY'),
+    [siblingTasks],
+  );
 
   const depIds = task.depends_on_task_ids ?? [];
   const depsBlocked = depIds.length > 0 && siblingTasks ? !depIds.every(depId => siblingTasks.find(s => s.id === depId)?.status === 'completed') : false;
@@ -183,10 +218,15 @@ function StationCard({ task, onToggleLine, onStatusChange, moMeta, siblingTasks 
 
       {expanded && isAssembly && (
         <div className="p-3">
-          <AssemblyDetail manufacturingOrderId={task.manufacturing_order_id} moNumber={moMeta.mo_number} productName={moMeta.product_name}
-            lines={task.lines.map(l => ({ id: l.id, sku: l.sku, item_name: l.item_name, component_role: l.component_role, qty: l.qty, uom: l.uom, cut_length_mm: l.cut_length_mm != null ? Number(l.cut_length_mm) : null, cut_width_mm: l.cut_width_mm != null ? Number(l.cut_width_mm) : null, completed: l.completed, bom_instance_line_id: l.bom_instance_line_id }))}
+          <AssemblyDetail
+            manufacturingOrderId={task.manufacturing_order_id}
+            moNumber={moMeta.mo_number}
+            productName={moMeta.product_name}
+            lines={assemblyLines}
             onToggleLine={onToggleLine}
-            siblingTasks={siblingTasks?.map(t => ({ code: t.work_center?.code ?? '', status: t.status })).filter(t => t.code !== 'ASSEMBLY')} />
+            onBulkToggleLines={onBulkToggleLines}
+            siblingTasks={assemblySiblings}
+          />
         </div>
       )}
 
@@ -245,10 +285,11 @@ function StationCard({ task, onToggleLine, onStatusChange, moMeta, siblingTasks 
 }
 
 /* ─── Line Accordion ─── */
-function LineAccordion({ group, allTasks, onToggleLine, onStatusChange, moMeta }: {
+function LineAccordion({ group, allTasks, onToggleLine, onBulkToggleLines, onStatusChange, moMeta }: {
   group: LineGroup;
   allTasks: WorkOrderTask[];
   onToggleLine: (lineId: string, completed: boolean) => void;
+  onBulkToggleLines?: (lineIds: string[], completed: boolean) => Promise<void> | void;
   onStatusChange: (taskId: string, status: 'pending' | 'in_progress' | 'completed') => void;
   moMeta: MOInfo;
 }) {
@@ -308,7 +349,7 @@ function LineAccordion({ group, allTasks, onToggleLine, onStatusChange, moMeta }
       {expanded && (
         <div className="p-4 space-y-3">
           {group.tasks.map(task => (
-            <StationCard key={task.id} task={task} onToggleLine={onToggleLine} onStatusChange={onStatusChange} moMeta={moMeta} siblingTasks={group.tasks} />
+            <StationCard key={task.id} task={task} onToggleLine={onToggleLine} onBulkToggleLines={onBulkToggleLines} onStatusChange={onStatusChange} moMeta={moMeta} siblingTasks={group.tasks} />
           ))}
         </div>
       )}
@@ -320,7 +361,7 @@ function LineAccordion({ group, allTasks, onToggleLine, onStatusChange, moMeta }
 export default function WorkOrderDetail({ moId }: WorkOrderDetailProps) {
   const filteredSubmodules = useFilteredMfgSubmodules();
   const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
-  const { tasks, loading: tasksLoading, toggleLineCompleted, updateTaskStatus } = useWorkOrderTasks(moId);
+  const { tasks, loading: tasksLoading, toggleLineCompleted, bulkToggleAssemblyLines, updateTaskStatus } = useWorkOrderTasks(moId);
   const [moInfo, setMoInfo] = useState<MOInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [solDescriptions, setSolDescriptions] = useState<Record<string, string>>({});
@@ -532,7 +573,7 @@ export default function WorkOrderDetail({ moId }: WorkOrderDetailProps) {
       {/* Lines grouped by SOL */}
       <div className="space-y-4">
         {lineGroups.map(group => (
-          <LineAccordion key={group.solId ?? '__no_line__'} group={group} allTasks={tasks} onToggleLine={toggleLineCompleted} onStatusChange={updateTaskStatus} moMeta={moInfo} />
+          <LineAccordion key={group.solId ?? '__no_line__'} group={group} allTasks={tasks} onToggleLine={toggleLineCompleted} onBulkToggleLines={bulkToggleAssemblyLines} onStatusChange={updateTaskStatus} moMeta={moInfo} />
         ))}
         {lineGroups.length === 0 && (
           <div className="bg-white border border-gray-200 rounded-lg p-8 text-center">

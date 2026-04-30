@@ -1,14 +1,6 @@
 import { useEffect, useState, useMemo, useImperativeHandle, forwardRef, useRef } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../../components/ui/SelectShadcn';
-
 export interface ManufacturersRef {
   openNewModal: () => void;
 }
@@ -67,13 +59,14 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [showNewModal, setShowNewModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [formData, setFormData] = useState({ name: '', code: '', notes: '', logo_url: '', vendor_id: '' });
+  const [formData, setFormData] = useState({ name: '', code: '', notes: '', logo_url: '', vendor_ids: [] as string[] });
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
+  const [vendorSearchTerm, setVendorSearchTerm] = useState('');
 
-  // Vendors for dropdown + vendor map for table column
+  // Vendors + vendor map for table column
   const [vendors, setVendors] = useState<{ id: string; name: string }[]>([]);
-  const [mfrVendorMap, setMfrVendorMap] = useState<Map<string, { vendor_id: string; vendor_name: string }>>(new Map());
+  const [mfrVendorsMap, setMfrVendorsMap] = useState<Map<string, { vendor_id: string; vendor_name: string }[]>>(new Map());
 
   useEffect(() => {
     if (!activeOrganizationId) return;
@@ -93,13 +86,17 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
         .eq('organization_id', activeOrganizationId);
       if (mounted && vmRows && dvRows) {
         const vNameMap = new Map(dvRows.map((v: any) => [v.id, v.name]));
-        const map = new Map<string, { vendor_id: string; vendor_name: string }>();
+        const map = new Map<string, { vendor_id: string; vendor_name: string }[]>();
         vmRows.forEach((r: any) => {
-          if (!map.has(r.manufacturer_id)) {
-            map.set(r.manufacturer_id, { vendor_id: r.vendor_id, vendor_name: String(vNameMap.get(r.vendor_id) ?? '') });
-          }
+          const vendorName = String(vNameMap.get(r.vendor_id) ?? '');
+          const prev = map.get(r.manufacturer_id) ?? [];
+          prev.push({ vendor_id: r.vendor_id, vendor_name: vendorName });
+          map.set(r.manufacturer_id, prev);
         });
-        setMfrVendorMap(map);
+        map.forEach((list, key) => {
+          map.set(key, list.sort((a, b) => a.vendor_name.localeCompare(b.vendor_name)));
+        });
+        setMfrVendorsMap(map);
       }
     })();
     return () => { mounted = false; };
@@ -152,7 +149,8 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
       router.navigate('/partners/manufacturers');
       return;
     }
-    setFormData({ name: '', code: '', notes: '', logo_url: '', vendor_id: '' });
+    setFormData({ name: '', code: '', notes: '', logo_url: '', vendor_ids: [] });
+    setVendorSearchTerm('');
     setEditingId(null);
     setShowNewModal(true);
   };
@@ -164,14 +162,15 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
       router.navigate('/partners/manufacturers');
       return;
     }
-    const linked = mfrVendorMap.get(manufacturer.id);
+    const linked = mfrVendorsMap.get(manufacturer.id) ?? [];
     setFormData({
       name: manufacturer.name,
       code: manufacturer.code || '',
       notes: manufacturer.notes || '',
       logo_url: manufacturer.logo_url || '',
-      vendor_id: linked?.vendor_id || '',
+      vendor_ids: linked.map((v) => v.vendor_id),
     });
+    setVendorSearchTerm('');
     setEditingId(manufacturer.id);
     setShowNewModal(true);
   };
@@ -197,7 +196,7 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
 
   const handleSave = async () => {
     try {
-      const { vendor_id, ...mfrData } = formData;
+      const { vendor_ids, ...mfrData } = formData;
       let savedId = editingId;
 
       if (editingId) {
@@ -225,29 +224,24 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
           .eq('manufacturer_id', savedId)
           .eq('organization_id', activeOrganizationId);
 
-        if (vendor_id?.trim()) {
+        const cleanVendorIds = Array.from(new Set((vendor_ids ?? []).filter(Boolean)));
+        if (cleanVendorIds.length > 0) {
           await supabase
             .from('VendorManufacturers')
-            .insert({
-              vendor_id: vendor_id.trim(),
-              manufacturer_id: savedId,
-              organization_id: activeOrganizationId,
-              is_primary: true,
-            });
-        }
-
-        // Also update legacy DirectoryVendors.manufacturer_id
-        if (vendor_id?.trim()) {
-          await supabase
-            .from('DirectoryVendors')
-            .update({ manufacturer_id: savedId })
-            .eq('id', vendor_id.trim())
-            .eq('organization_id', activeOrganizationId);
+            .insert(
+              cleanVendorIds.map((vendorId) => ({
+                vendor_id: vendorId,
+                manufacturer_id: savedId,
+                organization_id: activeOrganizationId,
+                is_primary: false,
+              }))
+            );
         }
       }
 
       setShowNewModal(false);
-      setFormData({ name: '', code: '', notes: '', logo_url: '', vendor_id: '' });
+      setFormData({ name: '', code: '', notes: '', logo_url: '', vendor_ids: [] });
+      setVendorSearchTerm('');
       setEditingId(null);
     } catch (error) {
       useUIStore.getState().addNotification({
@@ -356,7 +350,7 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
                       {sortBy === 'code' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                     </button>
                   </th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Vendor</th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Vendors</th>
                   <th className="text-left py-3 px-4 font-medium text-gray-900 text-xs">Notes</th>
                   <th className="text-right py-3 px-4 font-medium text-gray-900 text-xs">Actions</th>
                 </tr>
@@ -396,10 +390,12 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
                         {manufacturer.code || 'N/A'}
                       </td>
                       <td className="py-3 px-4 text-xs">
-                        {mfrVendorMap.get(manufacturer.id)?.vendor_name
-                          ? <span className="text-gray-900">{mfrVendorMap.get(manufacturer.id)!.vendor_name}</span>
-                          : <span className="text-gray-400 italic">Not assigned</span>
-                        }
+                        {(() => {
+                          const linked = mfrVendorsMap.get(manufacturer.id) ?? [];
+                          if (linked.length === 0) return <span className="text-gray-400 italic">Not assigned</span>;
+                          const label = linked.map((v) => v.vendor_name).join(', ');
+                          return <span className="text-gray-900" title={label}>{label}</span>;
+                        })()}
                       </td>
                       <td className="py-3 px-4 text-gray-700 text-xs">
                         {manufacturer.notes || 'N/A'}
@@ -487,7 +483,8 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
             <button
               onClick={() => {
                 setShowNewModal(false);
-                setFormData({ name: '', code: '', notes: '', logo_url: '', vendor_id: '' });
+                setFormData({ name: '', code: '', notes: '', logo_url: '', vendor_ids: [] });
+                setVendorSearchTerm('');
                 setEditingId(null);
               }}
               className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
@@ -592,23 +589,47 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Vendor (Supplier)
+                  Related Vendors (Suppliers)
                 </label>
-                <Select
-                  value={formData.vendor_id || '__none__'}
-                  onValueChange={(v) => setFormData({ ...formData, vendor_id: v === '__none__' ? '' : v })}
-                >
-                  <SelectTrigger className="py-1 text-sm">
-                    <SelectValue placeholder="No vendor assigned" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">No vendor assigned</SelectItem>
-                    {vendors.map((v) => (
-                      <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-[10px] text-gray-400 mt-1">Which vendor supplies products from this manufacturer?</p>
+                <input
+                  type="text"
+                  value={vendorSearchTerm}
+                  onChange={(e) => setVendorSearchTerm(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                  placeholder="Search vendors by name..."
+                />
+                <div className="mt-2 max-h-40 overflow-auto border border-gray-200 rounded-lg">
+                  {vendors
+                    .filter((v) => !vendorSearchTerm.trim() || v.name.toLowerCase().includes(vendorSearchTerm.toLowerCase()))
+                    .map((v) => {
+                      const checked = formData.vendor_ids.includes(v.id);
+                      return (
+                        <label
+                          key={v.id}
+                          className="flex items-center gap-2 px-3 py-2 text-xs border-b border-gray-100 last:border-b-0 hover:bg-gray-50 cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => {
+                              setFormData((prev) => ({
+                                ...prev,
+                                vendor_ids: e.target.checked
+                                  ? [...prev.vendor_ids, v.id]
+                                  : prev.vendor_ids.filter((id) => id !== v.id),
+                              }));
+                            }}
+                            className="rounded border-gray-300"
+                          />
+                          <span className="text-gray-800">{v.name}</span>
+                        </label>
+                      );
+                    })}
+                  {vendors.filter((v) => !vendorSearchTerm.trim() || v.name.toLowerCase().includes(vendorSearchTerm.toLowerCase())).length === 0 && (
+                    <p className="text-xs text-gray-500 p-3">No vendors found.</p>
+                  )}
+                </div>
+                <p className="text-[10px] text-gray-400 mt-1">You can link multiple vendors to the same manufacturer.</p>
               </div>
             </div>
 
@@ -616,7 +637,8 @@ const Manufacturers = forwardRef<ManufacturersRef, ManufacturersProps>(function 
               <button
                 onClick={() => {
                   setShowNewModal(false);
-                  setFormData({ name: '', code: '', notes: '', logo_url: '', vendor_id: '' });
+                  setFormData({ name: '', code: '', notes: '', logo_url: '', vendor_ids: [] });
+                  setVendorSearchTerm('');
                   setEditingId(null);
                 }}
                 className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"

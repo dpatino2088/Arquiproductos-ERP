@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { Eye, EyeOff, Mail, Lock, ArrowRight, Box } from "lucide-react";
+import { Eye, EyeOff, Mail, Lock, ArrowRight } from "lucide-react";
+import AdaptioMark from "../../components/AdaptioMark";
 import { supabase, getUserProfile } from "../../lib/supabase/client";
 import { useAuthStore } from "../../stores/auth-store";
 import { router } from "../../lib/router";
@@ -171,7 +172,7 @@ export default function Login() {
         <div className="w-full max-w-md">
           <div className="lg:hidden text-center mb-8">
             <div className="mx-auto mb-4 flex items-center justify-center gap-2">
-              <Box size={32} style={{ color: "#404a63" }} />
+              <AdaptioMark size={48} color="var(--primary-brand-hex)" />
               <span className="text-2xl font-semibold text-gray-900">Adaptio</span>
             </div>
           </div>
@@ -305,7 +306,7 @@ export default function Login() {
         <div className="max-w-md text-center text-white">
           <div className="mb-8">
             <div className="mx-auto mb-6 flex items-center justify-center gap-3">
-              <Box size={48} style={{ color: "#ffffff" }} />
+              <AdaptioMark size={72} color="var(--primary-brand-hex)" />
               <span className="text-4xl font-semibold text-white">Adaptio</span>
             </div>
           </div>

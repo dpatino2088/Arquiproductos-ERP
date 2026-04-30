@@ -28,6 +28,7 @@ import {
   getSettingsButtonState,
   createNavItemContent,
 } from '../utils/viewModeStyles';
+import AdaptioMark from './AdaptioMark';
 import { 
   Users, 
   User,
@@ -41,7 +42,6 @@ import {
   Building2,
   Printer,
   CalendarCheck,
-  Box,
   Check,
   BookOpen,
   ShoppingBag,
@@ -1016,7 +1016,7 @@ function Layout({ children }: LayoutProps) {
               }}
             >
               <div className="flex items-center justify-center" style={{ width: '27px', height: '27px', flexShrink: 0 }}>
-                <Box size={27} style={{ color: 'var(--gray-500)' }} />
+                <AdaptioMark size={27} color="var(--primary-brand-hex)" />
               </div>
                           <span
               className="absolute transition-opacity duration-300 whitespace-nowrap font-normal"

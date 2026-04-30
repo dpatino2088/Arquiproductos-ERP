@@ -284,6 +284,202 @@ export function useWorkOrderTasks(moId: string | null | undefined) {
     }
   }, [patchLine, ensureTaskAssigned, ensureLineMaterialsReady, addNotification]);
 
+  /**
+   * Bulk toggle a set of assembly lines belonging to the same task.
+   * - Single DB UPDATE for all lines (no N round-trips).
+   * - Auto-transitions the task to 'in_progress' BEFORE touching lines, since
+   *   a DB trigger forbids updating WorkOrderTaskLines.completed when the task
+   *   is not in_progress. This handles both the "pending" path and the broken
+   *   "completed-with-uncompleted-lines" recovery path.
+   * - Auto-completes the task if every line in it is completed after the update.
+   * Optimistic UI: one setTasks call per DB step -> no flicker, no race conditions.
+   */
+  const bulkToggleAssemblyLines = useCallback(
+    async (lineIds: string[], completed: boolean) => {
+      if (lineIds.length === 0) return;
+
+      // Find the task that owns these lines from local state.
+      let task = tasks.find((t) => t.lines.some((l) => lineIds.includes(l.id)));
+      if (!task) {
+        const { data: lineRow } = await supabase
+          .from('WorkOrderTaskLines')
+          .select('task_id')
+          .eq('id', lineIds[0])
+          .single();
+        if (!lineRow?.task_id) return;
+        task = tasks.find((t) => t.id === lineRow.task_id);
+        if (!task) return;
+      }
+      const taskId = task.id;
+      const prevTask = task;
+
+      const canAdvance = await ensureTaskAssigned(
+        taskId,
+        completed ? 'completing line items' : 'undoing line items',
+      );
+      if (!canAdvance) return;
+
+      const now = new Date().toISOString();
+      const lineSet = new Set(lineIds);
+      const effectiveMoId = moId ?? prevTask.manufacturing_order_id;
+
+      // ─── Phase A: ensure task is in_progress before touching lines ────────
+      // The DB trigger trg_woline_completed_requires_task_in_progress enforces
+      // that lines can only be (un)completed while the task is in_progress.
+      const taskMustBeInProgress = prevTask.status !== 'in_progress';
+      if (taskMustBeInProgress) {
+        const dbStartUpdates: Record<string, unknown> = {
+          status: 'in_progress',
+          updated_at: now,
+        };
+        if (!prevTask.started_at) dbStartUpdates.started_at = now;
+        // If we're recovering from 'completed', clear completed_at.
+        if (prevTask.status === 'completed') dbStartUpdates.completed_at = null;
+
+        // Optimistic: flip task to in_progress.
+        setTasks((prev) =>
+          prev.map((t) =>
+            t.id !== taskId
+              ? t
+              : {
+                  ...t,
+                  status: 'in_progress',
+                  started_at: t.started_at ?? now,
+                  completed_at: prevTask.status === 'completed' ? null : t.completed_at,
+                },
+          ),
+        );
+
+        const { error: startErr } = await supabase
+          .from('WorkOrderTasks')
+          .update(dbStartUpdates)
+          .eq('id', taskId);
+        if (startErr) {
+          // Rollback to original task snapshot.
+          setTasks((prev) => prev.map((t) => (t.id !== taskId ? t : prevTask)));
+          throw new Error(startErr.message);
+        }
+
+        if (prevTask.status === 'pending' && effectiveMoId) {
+          await advanceMOOnTaskStart(effectiveMoId).catch(() => {});
+        }
+      }
+
+      // ─── Phase B: bulk update line completion ─────────────────────────────
+      const nextLines = prevTask.lines.map((l) =>
+        lineSet.has(l.id) ? { ...l, completed, completed_at: completed ? now : null } : l,
+      );
+
+      // Optimistic: apply line changes.
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.id !== taskId
+            ? t
+            : {
+                ...t,
+                lines: nextLines,
+              },
+        ),
+      );
+
+      const { error: linesErr } = await supabase
+        .from('WorkOrderTaskLines')
+        .update({ completed, completed_at: completed ? now : null })
+        .in('id', lineIds);
+      if (linesErr) {
+        // Roll back lines to previous; leave task as in_progress (safe state).
+        setTasks((prev) =>
+          prev.map((t) => (t.id !== taskId ? t : { ...t, lines: prevTask.lines })),
+        );
+        throw new Error(linesErr.message);
+      }
+
+      // ─── Phase C: maybe auto-complete the task ───────────────────────────
+      const allCompletedAfter = nextLines.every((l) => l.completed);
+      if (completed && allCompletedAfter) {
+        const dbCompleteUpdates: Record<string, unknown> = {
+          status: 'completed',
+          completed_at: now,
+          updated_at: now,
+        };
+
+        setTasks((prev) =>
+          prev.map((t) =>
+            t.id !== taskId
+              ? t
+              : { ...t, status: 'completed', completed_at: now },
+          ),
+        );
+
+        const { error: completeErr } = await supabase
+          .from('WorkOrderTasks')
+          .update(dbCompleteUpdates)
+          .eq('id', taskId);
+        if (completeErr) {
+          // Soft-fail: lines are saved, but task didn't auto-complete.
+          // Don't rollback line state since lines are correctly persisted.
+          setTasks((prev) =>
+            prev.map((t) =>
+              t.id !== taskId ? t : { ...t, status: 'in_progress', completed_at: null },
+            ),
+          );
+          // eslint-disable-next-line no-console
+          console.warn('[useWorkOrderTasks] task auto-complete failed:', completeErr);
+          return;
+        }
+
+        if (effectiveMoId) {
+          // Auto-start downstream tasks whose deps are now met.
+          const { data: allTasks } = await supabase
+            .from('WorkOrderTasks')
+            .select('id, status, depends_on_task_ids, assigned_to_user_id, planned_start_at')
+            .eq('manufacturing_order_id', effectiveMoId)
+            .eq('deleted', false);
+          if (allTasks) {
+            const completedIds = new Set(
+              allTasks
+                .filter((t: any) => t.id === taskId || t.status === 'completed')
+                .map((t: any) => t.id),
+            );
+            const toAutoStart = allTasks.filter((t: any) => {
+              if (t.id === taskId) return false;
+              if (t.status !== 'pending') return false;
+              if (!t.assigned_to_user_id) return false;
+              if (!t.planned_start_at || new Date(t.planned_start_at).getTime() > Date.now()) {
+                return false;
+              }
+              const deps = t.depends_on_task_ids ?? [];
+              if (deps.length === 0) return false;
+              return deps.every((depId: string) => completedIds.has(depId));
+            });
+            if (toAutoStart.length > 0) {
+              const autoStartIds = toAutoStart.map((t: any) => t.id);
+              setTasks((prev) =>
+                prev.map((t) =>
+                  autoStartIds.includes(t.id)
+                    ? { ...t, status: 'in_progress', started_at: now }
+                    : t,
+                ),
+              );
+              await supabase
+                .from('WorkOrderTasks')
+                .update({ status: 'in_progress', started_at: now, updated_at: now })
+                .in('id', autoStartIds)
+                .then(() => {}, () => {});
+            }
+            const allCompleted = allTasks.every((t: any) =>
+              t.id === taskId ? true : t.status === 'completed',
+            );
+            if (allCompleted) {
+              await advanceMOOnAllTasksComplete(effectiveMoId).catch(() => {});
+            }
+          }
+        }
+      }
+    },
+    [tasks, ensureTaskAssigned, moId],
+  );
+
   const updateTaskStatusInternal = useCallback(async (taskId: string, status: 'pending' | 'in_progress' | 'completed') => {
     const { data: currentTask } = await supabase
       .from('WorkOrderTasks')
@@ -395,9 +591,11 @@ export function useWorkOrderTasks(moId: string | null | undefined) {
         }
       }
 
-      await fetchAll();
+      // No fetchAll() here: optimistic patches already reflect the new state.
+      // Refetching wipes references and re-triggers structural fetches in
+      // children (e.g. AssemblyDetail), which causes the visible flicker.
     }
-  }, [patchTask, moId, fetchAll, ensureTaskAssigned, addNotification]);
+  }, [patchTask, moId, ensureTaskAssigned, addNotification]);
 
   const updateTaskStatus = updateTaskStatusInternal;
 
@@ -489,7 +687,8 @@ export function useWorkOrderTasks(moId: string | null | undefined) {
 
   return {
     tasks, loading, error, refetch: fetchAll,
-    toggleLineCompleted, updateTaskStatus, updateTaskScheduling,
+    toggleLineCompleted, bulkToggleAssemblyLines,
+    updateTaskStatus, updateTaskScheduling,
     bulkUpdatePlannedDates, updateTaskPlannedDates, generateWorkOrders,
   };
 }
