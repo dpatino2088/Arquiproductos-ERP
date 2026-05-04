@@ -19,7 +19,8 @@ export interface Proposal {
   id: string;
   organization_id: string;
   dealer_id: string;
-  quote_id: string;
+  /** Null for standalone proposals (one-off cotizaciones with no parent Quote). */
+  quote_id: string | null;
   customer_id: string | null;
   contact_id: string | null;
   status: ProposalStatus;
@@ -145,7 +146,7 @@ export interface ProposalLineAddOn {
 /** QuoteLine fields needed for proposal line display and base amount */
 export interface QuoteLineForProposal {
   id: string;
-  quote_id: string;
+  quote_id: string | null;
   quantity: number;
   name: string | null;
   sku: string | null;

@@ -3,12 +3,13 @@ import { useQueryClient } from '@tanstack/react-query';
 import { router } from '../../lib/router';
 import { withReturnTo } from '../../lib/navigation/returnTo';
 
-import { useProposalsList, fetchProposalDetailData } from '../../hooks/useProposals';
+import { useProposalsList, fetchProposalDetailData, createStandaloneProposal } from '../../hooks/useProposals';
 import { useUIStore } from '../../stores/ui-store';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useActiveDealer } from '../../hooks/useActiveDealer';
 import { useAccessContext } from '../../hooks/useAccessContext';
 import { useGranularAccess } from '../../hooks/usePermissions';
+import { useDealerConfiguratorPolicy } from '../../hooks/useDealerConfiguratorPolicy';
 import { buildDirectoryScopeKey } from '../../lib/directoryScopeKey';
 import { proposalDetailKey } from '../../lib/queryKeys';
 import { warmDetailIfNeeded } from '../../lib/zeroLoading';
@@ -51,7 +52,10 @@ export default function Proposals() {
   const { activeDealerId } = useActiveDealer();
   const { userType } = useAccessContext();
   const { canCreate: canCreateProp, canArchive: canArchiveProp, canDelete: canDeleteProp } = useGranularAccess('proposals');
+  const { policy: dealerPolicy } = useDealerConfiguratorPolicy();
+  const allowStandalone = Boolean(dealerPolicy?.allow_custom_only_proposals);
   const queryClient = useQueryClient();
+  const [creatingStandalone, setCreatingStandalone] = useState(false);
 
   const scopeKey = useMemo(
     () =>
@@ -373,13 +377,35 @@ export default function Proposals() {
         <div className="flex items-center gap-3 ml-auto">
           {canCreateProp && (
             <button
-              onClick={() => router.navigate(withReturnTo('/sales/quotes'))}
-              className="flex items-center gap-2 px-3 py-1.5 rounded text-white text-sm transition-colors hover:opacity-90"
+              onClick={async () => {
+                if (!allowStandalone) {
+                  router.navigate(withReturnTo('/sales/quotes'));
+                  return;
+                }
+                if (creatingStandalone) return;
+                setCreatingStandalone(true);
+                try {
+                  const result = await createStandaloneProposal({ actingDealerId: activeDealerId ?? null });
+                  if ('error' in result) {
+                    addNotification({ type: 'error', title: 'Cannot create proposal', message: result.error });
+                    return;
+                  }
+                  router.navigate(withReturnTo(`/sales/proposals/${result.proposalId}`));
+                } finally {
+                  setCreatingStandalone(false);
+                }
+              }}
+              disabled={creatingStandalone}
+              className="flex items-center gap-2 px-3 py-1.5 rounded text-white text-sm transition-colors hover:opacity-90 disabled:opacity-60"
               style={{ backgroundColor: 'var(--primary-brand-hex)' }}
-              title="Create proposal from a quote"
+              title={
+                allowStandalone
+                  ? 'Create a standalone proposal (no parent quote)'
+                  : 'Create proposal from a quote'
+              }
             >
               <Plus className="w-4 h-4" />
-              Create Proposal
+              {creatingStandalone ? 'Creating…' : 'Create Proposal'}
             </button>
           )}
           {canDeleteProp && selectedIds.size > 0 && (

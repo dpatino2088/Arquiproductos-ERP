@@ -22,7 +22,8 @@ export interface ProposalListItem {
   id: string;
   proposal_no: string | null;
   status: Proposal['status'];
-  quote_id: string;
+  /** Null for standalone proposals (one-off cotizaciones with no parent Quote). */
+  quote_id: string | null;
   dealer_id: string;
   customer_id: string | null;
   updated_at: string;
@@ -103,7 +104,8 @@ export function useProposalsList() {
       if (signal?.aborted) return;
 
       const rows = (data || []) as ProposalListItem[];
-      const quoteIds = [...new Set(rows.map((r) => r.quote_id))];
+      // Standalone proposals have quote_id=null and skip the Quote join.
+      const quoteIds = [...new Set(rows.map((r) => r.quote_id).filter((id): id is string => !!id))];
 
       const quotesRes = quoteIds.length
         ? await supabase.from('Quotes').select('id, quote_no, status, created_at, created_by_user_id, customer_id, contact_id, total_amount').in('id', quoteIds).or('deleted.is.false,deleted.is.null')
@@ -139,8 +141,10 @@ export function useProposalsList() {
       const customerIds = new Set<string>();
       rows.forEach((r) => {
         if (r.customer_id) customerIds.add(r.customer_id);
-        const q = quoteMap.get(r.quote_id);
-        if (q?.customer_id) customerIds.add(q.customer_id);
+        if (r.quote_id) {
+          const q = quoteMap.get(r.quote_id);
+          if (q?.customer_id) customerIds.add(q.customer_id);
+        }
       });
 
       const customersRes =
@@ -157,24 +161,29 @@ export function useProposalsList() {
       const appUserIds: string[] = [];
       rows.forEach((r) => {
         if ((r as any).created_by_user_id) appUserIds.push((r as any).created_by_user_id);
-        const q = quoteMap.get(r.quote_id);
-        if (q?.created_by_user_id) appUserIds.push(q.created_by_user_id);
+        if (r.quote_id) {
+          const q = quoteMap.get(r.quote_id);
+          if (q?.created_by_user_id) appUserIds.push(q.created_by_user_id);
+        }
       });
       const appUsersMap = await getAppUsersDisplayNames(appUserIds);
       if (signal?.aborted) return;
 
       rows.forEach((r) => {
-        const q = quoteMap.get(r.quote_id);
+        const q = r.quote_id ? quoteMap.get(r.quote_id) : undefined;
         r.quote_no = q?.quote_no;
         r.quote_status = q?.status;
         r.quote_created_at = q?.created_at ?? undefined;
         r.proposal_created_by = (r as any).created_by_user_id
           ? (appUsersMap.get((r as any).created_by_user_id) ?? 'Legacy / Imported')
           : 'Legacy / Imported';
-        r.quote_created_by = q?.created_by_user_id
-          ? (appUsersMap.get(q.created_by_user_id) ?? 'Legacy / Imported')
-          : 'Legacy / Imported';
-        r.quote_total_amount = quoteDealerTotalMap.get(r.quote_id) ?? null;
+        // Standalone proposals: there is no quote, so "Quote created by" is N/A (em-dash).
+        r.quote_created_by = r.quote_id === null
+          ? '—'
+          : (q?.created_by_user_id
+              ? (appUsersMap.get(q.created_by_user_id) ?? 'Legacy / Imported')
+              : 'Legacy / Imported');
+        r.quote_total_amount = r.quote_id ? (quoteDealerTotalMap.get(r.quote_id) ?? null) : null;
         const customerId = r.customer_id ?? q?.customer_id;
         r.customer_name = customerId ? customerMap.get(customerId) : undefined;
       });
@@ -944,6 +953,88 @@ export async function createProposalFromQuote(
   }
 
   return { proposalId };
+}
+
+export interface CreateStandaloneProposalOptions {
+  /** When internal user is "acting as dealer", pass the selected dealer id so the proposal has a dealer. */
+  actingDealerId?: string | null;
+  /** Optional currency override. Defaults to 'USD'. */
+  currency?: string | null;
+}
+
+/**
+ * Create a standalone (no parent Quote) Proposal.
+ *
+ * Standalone proposals are pure quoting documents: they do NOT generate
+ * Sales Orders, manufacturing or accounting entries. Numbering shares the
+ * same per-dealer PR- series as quote-based proposals.
+ *
+ * Requires that the dealer's DealerConfiguratorPolicies.allow_custom_only_proposals
+ * is true; the caller must check this before invoking.
+ */
+export async function createStandaloneProposal(
+  options?: CreateStandaloneProposalOptions
+): Promise<{ proposalId: string } | { error: string }> {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const userId = sessionData?.session?.user?.id;
+  if (!userId) {
+    return { error: 'Not authenticated' };
+  }
+
+  let createdByUserId: string | null = userId;
+  let portalDealerId: string | null = null;
+  let orgId: string | null = null;
+
+  try {
+    const authContext = await fetchAuthContext(supabase);
+    orgId = authContext.organization_id ?? null;
+    if (authContext.is_portal_user && authContext.dealer_id) {
+      portalDealerId = authContext.dealer_id;
+    }
+    createdByUserId = userId;
+  } catch {
+    // ignore: fall back to userId, orgId remains null and we will resolve below
+  }
+
+  if (!orgId) {
+    return { error: 'Could not resolve organization context. Please refresh and try again.' };
+  }
+
+  const dealerId = options?.actingDealerId ?? portalDealerId ?? null;
+  if (!dealerId) {
+    return {
+      error:
+        'No se puede crear una propuesta sin dealer. Selecciona "Actuar como" un dealer antes de crear la propuesta.',
+    };
+  }
+
+  // Reuse the per-dealer PR- sequence so reports stay unfragmented.
+  const proposalNo = await generateNextProposalNumber(orgId, dealerId);
+
+  const insertProposal: Record<string, unknown> = {
+    organization_id: orgId,
+    dealer_id: dealerId,
+    quote_id: null,
+    customer_id: null,
+    contact_id: null,
+    status: 'draft',
+    proposal_no: proposalNo,
+    version_no: 1,
+    currency: options?.currency ?? 'USD',
+    created_by_user_id: createdByUserId,
+  };
+
+  const { data: newProposal, error: insertErr } = await supabase
+    .from('Proposals')
+    .insert(insertProposal)
+    .select('id')
+    .single();
+
+  if (insertErr || !newProposal) {
+    return { error: insertErr?.message || 'Error creating proposal' };
+  }
+
+  return { proposalId: newProposal.id };
 }
 
 export function useProposalsByQuote(quoteId: string | null) {
