@@ -96,6 +96,7 @@ export default function DealerProfileForm({ basePath = '/settings/dealer-profile
     allow_accessories_only: boolean;
     allow_hardware: boolean;
     allow_operating_system: boolean;
+    allow_custom_only_proposals: boolean;
   } | null>(null);
 
   // Editable form state for Configurator Permissions (synced from policy or defaults when no policy)
@@ -105,12 +106,14 @@ export default function DealerProfileForm({ basePath = '/settings/dealer-profile
     allow_accessories_only: boolean;
     allow_hardware: boolean;
     allow_operating_system: boolean;
+    allow_custom_only_proposals: boolean;
   }>({
     allowed_product_type_codes: [],
     allow_variants_catalog: true,
     allow_accessories_only: false,
     allow_hardware: true,
     allow_operating_system: true,
+    allow_custom_only_proposals: false,
   });
 
   // Dealer users from AppUsers (source of truth); only when editing a dealer
@@ -197,7 +200,7 @@ export default function DealerProfileForm({ basePath = '/settings/dealer-profile
     (async () => {
       const { data, error } = await supabase
         .from('DealerConfiguratorPolicies')
-        .select('allowed_product_type_codes, allow_variants_catalog, allow_accessories_only, allow_hardware, allow_operating_system')
+        .select('allowed_product_type_codes, allow_variants_catalog, allow_accessories_only, allow_hardware, allow_operating_system, allow_custom_only_proposals')
         .eq('organization_id', activeOrganizationId)
         .eq('dealer_id', dealerId)
         .maybeSingle();
@@ -216,6 +219,7 @@ export default function DealerProfileForm({ basePath = '/settings/dealer-profile
           allow_accessories_only: data.allow_accessories_only ?? false,
           allow_hardware: data.allow_hardware ?? true,
           allow_operating_system: data.allow_operating_system ?? true,
+          allow_custom_only_proposals: data.allow_custom_only_proposals ?? false,
         };
         setConfiguratorPolicy(policy);
         setConfiguratorForm(policy);
@@ -229,6 +233,7 @@ export default function DealerProfileForm({ basePath = '/settings/dealer-profile
           allow_accessories_only: false,
           allow_hardware: true,
           allow_operating_system: true,
+          allow_custom_only_proposals: false,
         }));
       }
     })();
@@ -449,6 +454,7 @@ export default function DealerProfileForm({ basePath = '/settings/dealer-profile
           p_allow_accessories_only: configuratorForm.allow_accessories_only,
           p_allow_hardware: configuratorForm.allow_hardware,
           p_allow_operating_system: configuratorForm.allow_operating_system,
+          p_allow_custom_only_proposals: configuratorForm.allow_custom_only_proposals,
         });
         if (rpcError) {
           console.error('[DealerProfileForm] Configurator policy save failed', rpcError);
@@ -1025,6 +1031,16 @@ export default function DealerProfileForm({ basePath = '/settings/dealer-profile
                           disabled={isReadOnly}
                         />
                         <span className="text-sm text-gray-800">Catalog Items Mode</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={configuratorForm.allow_custom_only_proposals}
+                          onChange={(e) => setConfiguratorForm(prev => ({ ...prev, allow_custom_only_proposals: e.target.checked }))}
+                          className="h-4 w-4 rounded border-gray-300"
+                          disabled={isReadOnly}
+                        />
+                        <span className="text-sm text-gray-800">Allow Custom-Only Proposals</span>
                       </label>
                     </div>
                   </div>

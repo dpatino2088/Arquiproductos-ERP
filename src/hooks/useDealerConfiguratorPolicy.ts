@@ -12,6 +12,7 @@ export interface DealerConfiguratorPolicy {
   allow_accessories_only: boolean;
   allow_hardware: boolean;
   allow_operating_system: boolean;
+  allow_custom_only_proposals: boolean;
   created_at?: string;
   updated_at?: string;
 }
@@ -53,13 +54,16 @@ export function useDealerConfiguratorPolicy(overrideDealerId?: string | null): U
         .eq('dealer_id', effectiveDealerId)
         .maybeSingle();
 
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       if (!error && data) {
         const raw = Array.isArray(data.allowed_product_type_codes) ? data.allowed_product_type_codes : [];
         const normalized = raw.map((x: unknown) => String(x).trim().toLowerCase()).filter(Boolean);
         setPolicy({
           ...data,
           allowed_product_type_codes: normalized,
+          allow_custom_only_proposals: data.allow_custom_only_proposals ?? false,
         } as DealerConfiguratorPolicy);
       } else {
         setPolicy(null);
