@@ -47,6 +47,7 @@ import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAuth } from '../../hooks/useAuth';
 import { useAccessContext } from '../../hooks/useAccessContext';
 import { useProductTypes } from '../../hooks/useProductTypes';
+import { useDirectoryCustomers } from '../../hooks/useDirectoryCustomers';
 import { getAppUsersDisplayNames } from '../../lib/appUsersDisplayNames';
 import ProposalProfitabilityTab from '../../components/sales/ProposalProfitabilityTab';
 
@@ -277,6 +278,10 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     global_installation_discount_pct: string;
     global_installation_fee_pct: string;
     exempt_tax: boolean;
+    /** Empty string represents "no customer". */
+    customer_id: string;
+    /** Empty string represents "no contact". */
+    contact_id: string;
   }>({
     proposal_no: '',
     status: 'draft',
@@ -290,7 +295,13 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     global_installation_discount_pct: '0',
     global_installation_fee_pct: '0',
     exempt_tax: false,
+    customer_id: '',
+    contact_id: '',
   });
+  // Customers for the picker (filtered by org/dealer scope, same as Quote).
+  const { customers: directoryCustomers } = useDirectoryCustomers({ organizationId: activeOrganizationId });
+  // Contacts filtered by selected customer (loaded on customer change).
+  const [proposalContacts, setProposalContacts] = useState<{ id: string; contact_name: string }[]>([]);
 
   const [showAdjSubtotal, setShowAdjSubtotal] = useState(false);
   const [showAdjTotal, setShowAdjTotal] = useState(false);
@@ -323,8 +334,52 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
       global_installation_discount_pct: proposal.global_installation_discount_pct != null ? String(proposal.global_installation_discount_pct) : '0',
       global_installation_fee_pct: proposal.global_installation_fee_pct != null ? String(proposal.global_installation_fee_pct) : '0',
       exempt_tax: proposal.exempt_tax ?? false,
+      customer_id: proposal.customer_id ?? '',
+      contact_id: proposal.contact_id ?? '',
     });
   }, [proposal]);
+
+  // Load contacts for the currently selected customer (mirrors QuoteNew pattern).
+  useEffect(() => {
+    const customerId = headerForm.customer_id;
+    if (!customerId || !activeOrganizationId) {
+      setProposalContacts([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from('DirectoryContacts')
+        .select('id, contact_name')
+        .eq('customer_id', customerId)
+        .eq('organization_id', activeOrganizationId)
+        .eq('deleted', false)
+        .order('contact_name');
+      if (cancelled) return;
+      if (error) {
+        setProposalContacts([]);
+        return;
+      }
+      setProposalContacts(
+        (data ?? []).map((row: { id: string; contact_name: string | null }) => ({
+          id: row.id,
+          contact_name: row.contact_name ?? '',
+        }))
+      );
+    })();
+    return () => { cancelled = true; };
+  }, [headerForm.customer_id, activeOrganizationId]);
+
+  // If the selected contact does not belong to the new customer, clear it.
+  useEffect(() => {
+    if (!headerForm.contact_id) return;
+    if (proposalContacts.length === 0) return;
+    const stillValid = proposalContacts.some((c) => c.id === headerForm.contact_id);
+    if (!stillValid) {
+      setHeaderForm((f) => ({ ...f, contact_id: '' }));
+      setHeaderDirty(true);
+    }
+  }, [proposalContacts, headerForm.contact_id]);
 
   // Load Terms from default template when proposal has no terms_content
   useEffect(() => {
@@ -355,6 +410,10 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     setSaving(true);
     try {
       const parsePct = (v: string) => { const n = parseFloat(v); return Number.isNaN(n) ? 0 : n; };
+      const nextCustomerId = headerForm.customer_id ? headerForm.customer_id : null;
+      const nextContactId = headerForm.contact_id ? headerForm.contact_id : null;
+      const customerChanged = (proposal.customer_id ?? null) !== nextCustomerId;
+      const contactChanged = (proposal.contact_id ?? null) !== nextContactId;
       const payload: Record<string, unknown> = {
         proposal_no: headerForm.proposal_no || null,
         status: headerForm.status,
@@ -368,6 +427,8 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
         global_installation_discount_pct: parsePct(headerForm.global_installation_discount_pct),
         global_installation_fee_pct: parsePct(headerForm.global_installation_fee_pct),
         exempt_tax: headerForm.exempt_tax,
+        customer_id: nextCustomerId,
+        contact_id: nextContactId,
       };
       const prevStatus = proposal.status;
       const nextStatus = headerForm.status;
@@ -378,8 +439,9 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
         !!proposal.contact_snapshot_name ||
         !!proposal.customer_snapshot_address;
       if (nowFrozen && (!wasFrozen || !hasSnapshot)) {
-        let customerIdToUse = proposal.customer_id;
-        let contactIdToUse = proposal.contact_id;
+        // Use the form values (latest in-memory) instead of stale proposal fields.
+        let customerIdToUse = nextCustomerId;
+        let contactIdToUse = nextContactId;
         if ((!customerIdToUse || !contactIdToUse) && proposal.quote_id) {
           const { data: quoteRow } = await supabase
             .from('Quotes')
@@ -436,6 +498,32 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: getSupabaseErrorMessage(e) });
         }
         return false;
+      }
+      // Bidirectional sync: when the proposal has a parent Quote, propagate the
+      // customer/contact changes to the Quote so both sides stay aligned.
+      if ((customerChanged || contactChanged) && proposal.quote_id) {
+        const quotePayload: Record<string, unknown> = {};
+        if (customerChanged) {
+          quotePayload.customer_id = nextCustomerId;
+          // If the customer changed, drop the contact on the Quote too — it may
+          // belong to the previous customer.
+          quotePayload.contact_id = nextContactId;
+        } else if (contactChanged) {
+          quotePayload.contact_id = nextContactId;
+        }
+        const { error: qe } = await supabase
+          .from('Quotes')
+          .update(quotePayload)
+          .eq('id', proposal.quote_id);
+        if (qe) {
+          // Don't fail the whole save: log a non-blocking warning so the user
+          // knows the Quote wasn't updated (RLS, soft-deleted, etc).
+          useUIStore.getState().addNotification({
+            type: 'warning',
+            title: 'Customer not synced to Quote',
+            message: getSupabaseErrorMessage(qe),
+          });
+        }
       }
       setHeaderDirty(false);
       return true;
@@ -1519,52 +1607,129 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
         <div className="space-y-6 w-full max-w-full">
           {/* Header cards (2 columns: Left = names/details, Right = discounts + summary) */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-            {/* LEFT CARD: Customer Info + Proposal Details */}
+            {/* LEFT CARD: Customer Info + Proposal Details (mirrors QuoteNew layout) */}
             <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
               <h3 className="text-sm font-semibold text-gray-900 mb-3">Customer Info</h3>
-              <dl className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <dt className="text-gray-500">Quote</dt>
-                  <dd>
+              <div className="space-y-3">
+                {/* Customer + Contact side-by-side, matching QuoteNew's grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <Label htmlFor="proposal-customer">Customer (optional)</Label>
+                    {contentReadOnly ? (
+                      <div className="h-9 px-2.5 py-1.5 border border-gray-200 rounded text-sm bg-gray-50 text-gray-700 flex items-center">
+                        {customer?.customer_name ?? '—'}
+                      </div>
+                    ) : (
+                      <SelectShadcn
+                        value={headerForm.customer_id || 'none'}
+                        onValueChange={(v) => {
+                          setHeaderForm((f) => ({ ...f, customer_id: v === 'none' ? '' : v }));
+                          setHeaderDirty(true);
+                        }}
+                      >
+                        <SelectTrigger id="proposal-customer">
+                          <SelectValue placeholder="Select customer (optional)" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">None</SelectItem>
+                          {directoryCustomers.map((c) => (
+                            <SelectItem key={c.id} value={c.id}>{c.customer_name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </SelectShadcn>
+                    )}
+                  </div>
+                  <div>
+                    <Label htmlFor="proposal-contact">Contact (optional)</Label>
+                    {contentReadOnly ? (
+                      <div className="h-9 px-2.5 py-1.5 border border-gray-200 rounded text-sm bg-gray-50 text-gray-700 flex items-center">
+                        {contactDisplay || '—'}
+                      </div>
+                    ) : (
+                      <SelectShadcn
+                        value={headerForm.contact_id || 'none'}
+                        onValueChange={(v) => {
+                          setHeaderForm((f) => ({ ...f, contact_id: v === 'none' ? '' : v }));
+                          setHeaderDirty(true);
+                        }}
+                        disabled={!headerForm.customer_id}
+                      >
+                        <SelectTrigger id="proposal-contact">
+                          <SelectValue
+                            placeholder={headerForm.customer_id ? 'Select contact (optional)' : 'Pick a customer first'}
+                          />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">None</SelectItem>
+                          {proposalContacts.map((c) => (
+                            <SelectItem key={c.id} value={c.id}>{c.contact_name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </SelectShadcn>
+                    )}
+                  </div>
+                </div>
+                {!contentReadOnly && (quote || proposal.quote_id) && (
+                  <p className="text-xs text-gray-500">
                     {quote ? (
-                      <button onClick={() => router.navigate(withReturnTo(`/sales/quotes/${quote.id}`))} className="text-primary hover:underline font-medium">
-                        {quote.quote_no}
-                      </button>
-                    ) : '—'}
-                  </dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-gray-500">Customer</dt>
-                  <dd className="text-gray-900 font-medium">{customer?.customer_name ?? '—'}</dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-gray-500">Contact</dt>
-                  <dd className="text-gray-900 text-right">{contactDisplay || '—'}</dd>
-                </div>
-                {customer?.address && (
-                  <div className="border-t pt-2">
-                    <dt className="text-gray-500 text-xs mb-0.5">Address</dt>
-                    <dd className="text-gray-700 text-xs whitespace-pre-line">{customer.address}</dd>
+                      <>
+                        Linked Quote:{' '}
+                        <button
+                          type="button"
+                          onClick={() => router.navigate(withReturnTo(`/sales/quotes/${quote.id}`))}
+                          className="text-primary hover:underline font-medium"
+                        >
+                          {quote.quote_no}
+                        </button>
+                        . Customer/Contact changes sync to the Quote.
+                      </>
+                    ) : (
+                      'Linked to a parent Quote — changes sync both ways.'
+                    )}
+                  </p>
+                )}
+
+                {(customer?.address || contact?.contact_email || customer?.customer_email || customer?.customer_phone) && (
+                  <div className="border-t border-gray-100 pt-3 space-y-1.5 text-xs">
+                    {customer?.address && (
+                      <div className="flex justify-between gap-3">
+                        <dt className="text-gray-500 shrink-0">Address</dt>
+                        <dd className="text-gray-700 text-right">{customer.address}</dd>
+                      </div>
+                    )}
+                    {(contact?.contact_email || customer?.customer_email) && (
+                      <div className="flex justify-between gap-3">
+                        <dt className="text-gray-500 shrink-0">Email</dt>
+                        <dd className="text-gray-700">{contact?.contact_email ?? customer?.customer_email}</dd>
+                      </div>
+                    )}
+                    {customer?.customer_phone && (
+                      <div className="flex justify-between gap-3">
+                        <dt className="text-gray-500 shrink-0">Phone</dt>
+                        <dd className="text-gray-700">{customer.customer_phone}</dd>
+                      </div>
+                    )}
                   </div>
                 )}
-                {(contact?.contact_email || customer?.customer_email) && (
-                  <div className="flex justify-between">
-                    <dt className="text-gray-500">Email</dt>
-                    <dd className="text-gray-900">{contact?.contact_email ?? customer?.customer_email}</dd>
-                  </div>
-                )}
-                {customer?.customer_phone && (
-                  <div className="flex justify-between">
-                    <dt className="text-gray-500">Phone</dt>
-                    <dd className="text-gray-900">{customer.customer_phone}</dd>
-                  </div>
-                )}
-              </dl>
+
+                <div>
+                  <Label htmlFor="proposal-description">Description</Label>
+                  <textarea
+                    id="proposal-description"
+                    rows={1}
+                    className="w-full h-9 min-h-9 resize-none px-2.5 py-1.5 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                    value={headerForm.description}
+                    onChange={(e) => { setHeaderForm((f) => ({ ...f, description: e.target.value })); setHeaderDirty(true); }}
+                    disabled={contentReadOnly}
+                    placeholder="Short proposal description"
+                  />
+                </div>
+              </div>
 
               <div className="border-t border-gray-200 mt-4 pt-4">
                 <h3 className="text-sm font-semibold text-gray-900 mb-3">Details</h3>
                 <div className="space-y-3">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <div>
                       <Label>Proposal No</Label>
                       <Input
@@ -1590,8 +1755,6 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                         </SelectContent>
                       </SelectShadcn>
                     </div>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div>
                       <Label>Valid until</Label>
                       <Input
@@ -1601,17 +1764,6 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                         disabled={contentReadOnly}
                       />
                     </div>
-                  </div>
-                  <div>
-                    <Label>Description</Label>
-                    <textarea
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
-                      rows={2}
-                      value={headerForm.description}
-                      onChange={(e) => { setHeaderForm((f) => ({ ...f, description: e.target.value })); setHeaderDirty(true); }}
-                      disabled={contentReadOnly}
-                      placeholder="Short proposal description"
-                    />
                   </div>
                 </div>
               </div>

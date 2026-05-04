@@ -375,13 +375,9 @@ export default function Proposals() {
           <h1 className="text-xl font-semibold text-foreground">Proposals</h1>
         </div>
         <div className="flex items-center gap-3 ml-auto">
-          {canCreateProp && (
+          {canCreateProp && allowStandalone && (
             <button
               onClick={async () => {
-                if (!allowStandalone) {
-                  router.navigate(withReturnTo('/sales/quotes'));
-                  return;
-                }
                 if (creatingStandalone) return;
                 setCreatingStandalone(true);
                 try {
@@ -398,11 +394,7 @@ export default function Proposals() {
               disabled={creatingStandalone}
               className="flex items-center gap-2 px-3 py-1.5 rounded text-white text-sm transition-colors hover:opacity-90 disabled:opacity-60"
               style={{ backgroundColor: 'var(--primary-brand-hex)' }}
-              title={
-                allowStandalone
-                  ? 'Create a standalone proposal (no parent quote)'
-                  : 'Create proposal from a quote'
-              }
+              title="Create a standalone proposal (no parent quote)"
             >
               <Plus className="w-4 h-4" />
               {creatingStandalone ? 'Creating…' : 'Create Proposal'}
