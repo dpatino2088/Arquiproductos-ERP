@@ -18,6 +18,7 @@ import {
   RefreshCw,
   SortAsc,
   SortDesc,
+  Plus,
   Edit,
   ExternalLink,
   Trash2,
@@ -370,6 +371,17 @@ export default function Proposals() {
           <h1 className="text-xl font-semibold text-foreground">Proposals</h1>
         </div>
         <div className="flex items-center gap-3 ml-auto">
+          {canCreateProp && (
+            <button
+              onClick={() => router.navigate(withReturnTo('/sales/quotes'))}
+              className="flex items-center gap-2 px-3 py-1.5 rounded text-white text-sm transition-colors hover:opacity-90"
+              style={{ backgroundColor: 'var(--primary-brand-hex)' }}
+              title="Create proposal from a quote"
+            >
+              <Plus className="w-4 h-4" />
+              Create Proposal
+            </button>
+          )}
           {canDeleteProp && selectedIds.size > 0 && (
             <button
               onClick={handleDeleteSelected}
