@@ -13,6 +13,7 @@ export type ManufacturingOrderStatus =
   | 'draft'
   | 'confirmed'
   | 'procurement'
+  | 'material_available'
   | 'materials_ready'
   | 'in_production'
   | 'quality_check'

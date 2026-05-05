@@ -522,7 +522,7 @@ export default function ManufacturingOrders() {
             <tbody>
               {paginated.map((mo) => {
                 const moStatus = (mo.status || 'draft').toString();
-                const showMaterials = ['draft', 'confirmed', 'procurement', 'materials_ready', 'in_production', 'completed', 'quality_check', 'ready_for_pickup'].includes(moStatus);
+                const showMaterials = ['draft', 'confirmed', 'procurement', 'material_available', 'materials_ready', 'in_production', 'completed', 'quality_check', 'ready_for_pickup'].includes(moStatus);
                 const readiness = materialReadinessMap[mo.id];
                 const lineCount = moLineCountMap[mo.id] ?? 0;
 

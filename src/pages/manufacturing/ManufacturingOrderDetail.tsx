@@ -753,7 +753,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
         title: deliveryBlocked ? deliveryBlockedMessage : undefined,
       });
     }
-    if (['draft', 'confirmed', 'procurement', 'materials_ready'].includes(status)) {
+    if (['draft', 'confirmed', 'procurement', 'material_available', 'materials_ready'].includes(status)) {
       actionItems.push({ label: 'Cancel MO', onClick: () => setShowCancelDialog(true), danger: true });
     }
   }

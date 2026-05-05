@@ -109,7 +109,7 @@ export default function MaterialsTab({
   const [expandedSkuId, setExpandedSkuId] = useState<string | null>(null);
   const [materialSubTab, setMaterialSubTab] = useState<'materials' | 'allocation'>('materials');
 
-  const canModifyAllocations = !readOnly && ['draft', 'confirmed', 'procurement', 'materials_ready'].includes(moStatus);
+  const canModifyAllocations = !readOnly && ['draft', 'confirmed', 'procurement', 'material_available', 'materials_ready'].includes(moStatus);
 
   const allocationMap = useMemo(() => {
     const map = new Map<string, number>();
@@ -231,7 +231,7 @@ export default function MaterialsTab({
 
   const handleAllocateAll = useCallback(async () => {
     if (!canModifyAllocations) {
-      addNotification({ type: 'error', title: 'Blocked', message: 'Cannot allocate materials after Material Ready.' });
+      addNotification({ type: 'error', title: 'Blocked', message: 'Cannot allocate materials after Materials Ready.' });
       return;
     }
     if (!activeOrganizationId || !defaultWarehouse) return;

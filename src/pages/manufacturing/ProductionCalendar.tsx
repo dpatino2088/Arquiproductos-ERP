@@ -236,7 +236,7 @@ function DroppableDay({
 
 type StatusFilterOpt = { key: string; label: string; statuses?: readonly string[]; virtual?: boolean };
 const STATUS_FILTER_OPTIONS: StatusFilterOpt[] = [
-  { key: 'planned', label: 'Pre-Production', statuses: ['draft', 'confirmed', 'procurement', 'materials_ready'] },
+  { key: 'planned', label: 'Pre-Production', statuses: ['draft', 'confirmed', 'procurement', 'material_available', 'materials_ready'] },
   { key: 'in_production', label: 'In Production', statuses: ['in_production', 'quality_check', 'ready_for_pickup'] },
   { key: 'completed', label: 'Completed', statuses: ['delivered', 'completed'] },
   { key: 'late', label: 'Late', virtual: true },
@@ -623,7 +623,7 @@ export default function ProductionCalendar() {
   const goNext = () => setMonthCursor((d) => new Date(d.getFullYear(), d.getMonth() + 1, 1));
 
   const handleAutoSchedule = useCallback(async () => {
-    const schedulableStatuses = new Set(['draft', 'confirmed', 'procurement', 'materials_ready']);
+    const schedulableStatuses = new Set(['draft', 'confirmed', 'procurement', 'material_available', 'materials_ready']);
     const toSchedule = manufacturingOrders.filter((mo) => {
       if (!schedulableStatuses.has(mo.status)) return false;
       const readiness = materialReadinessMap[mo.id];

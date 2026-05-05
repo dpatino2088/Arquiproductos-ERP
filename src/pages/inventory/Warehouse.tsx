@@ -162,7 +162,7 @@ export default function Warehouse() {
           .select('catalog_item_id, required_qty')
           .eq('organization_id', activeOrganizationId)
           .in('catalog_item_id', catalogIds)
-          .in('mo_status', ['draft', 'confirmed', 'procurement', 'materials_ready', 'in_production', 'quality_check']);
+          .in('mo_status', ['draft', 'confirmed', 'procurement', 'material_available', 'materials_ready', 'in_production', 'quality_check']);
         if (demandError) throw demandError;
 
         (demandRows ?? []).forEach((r: any) => {

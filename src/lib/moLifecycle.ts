@@ -25,13 +25,14 @@ export async function advanceMOOnTaskStart(
     if (!mo) return;
 
     const current = mo.status as string;
-    const preProductionStates = ['draft', 'confirmed', 'procurement', 'materials_ready'];
+    const preProductionStates = ['draft', 'confirmed', 'procurement', 'material_available', 'materials_ready'];
     if (!preProductionStates.includes(current)) return;
 
     const stepsToProduction: string[] = [];
     if (current === 'draft') stepsToProduction.push('confirmed', 'materials_ready', 'in_production');
     else if (current === 'confirmed') stepsToProduction.push('materials_ready', 'in_production');
     else if (current === 'procurement') stepsToProduction.push('materials_ready', 'in_production');
+    else if (current === 'material_available') stepsToProduction.push('materials_ready', 'in_production');
     else if (current === 'materials_ready') stepsToProduction.push('in_production');
 
     for (const step of stepsToProduction) {
@@ -91,7 +92,7 @@ export async function advanceMOOnAllTasksComplete(
 
     if (mo.status !== 'in_production') {
       // MO is not in production — try to advance it first
-      if (['draft', 'confirmed', 'procurement', 'materials_ready'].includes(mo.status)) {
+      if (['draft', 'confirmed', 'procurement', 'material_available', 'materials_ready'].includes(mo.status)) {
         await advanceMOOnTaskStart(moId, onError);
       }
     }

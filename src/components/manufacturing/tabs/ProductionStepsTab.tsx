@@ -10,12 +10,13 @@ interface ProductionStepsTabProps {
   moId: string;
 }
 
-const STATUS_STEPS: ManufacturingOrderStatus[] = ['draft', 'confirmed', 'procurement', 'materials_ready', 'in_production', 'quality_check', 'ready_for_pickup', 'delivered'];
+const STATUS_STEPS: ManufacturingOrderStatus[] = ['draft', 'confirmed', 'procurement', 'material_available', 'materials_ready', 'in_production', 'quality_check', 'ready_for_pickup', 'delivered'];
 
 const STATUS_LABELS: Record<string, string> = {
   draft: 'Draft',
   confirmed: 'Reviewed',
   procurement: 'Procurement',
+  material_available: 'Material Available',
   materials_ready: 'Material Ready',
   in_production: 'In Production',
   quality_check: 'Quality Check',

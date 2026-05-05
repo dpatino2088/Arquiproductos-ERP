@@ -229,7 +229,7 @@ export default function InventoryItemDetail({ itemId: propItemId }: InventoryIte
         .select('required_qty')
         .eq('organization_id', activeOrganizationId)
         .eq('catalog_item_id', itemId)
-        .in('mo_status', ['draft', 'confirmed', 'procurement', 'materials_ready', 'in_production', 'quality_check']);
+        .in('mo_status', ['draft', 'confirmed', 'procurement', 'material_available', 'materials_ready', 'in_production', 'quality_check']);
       if (demandError) throw demandError;
       const required = (demandRows ?? []).reduce((acc: number, r: any) => acc + Number(r.required_qty ?? 0), 0);
       const assigned = required;
@@ -319,7 +319,7 @@ export default function InventoryItemDetail({ itemId: propItemId }: InventoryIte
         .select('manufacturing_order_id, manufacturing_order_no, mo_status, required_qty')
         .eq('organization_id', activeOrganizationId)
         .eq('catalog_item_id', itemId)
-        .in('mo_status', ['draft', 'confirmed', 'procurement', 'materials_ready', 'in_production', 'quality_check'])
+        .in('mo_status', ['draft', 'confirmed', 'procurement', 'material_available', 'materials_ready', 'in_production', 'quality_check'])
         .order('manufacturing_order_no', { ascending: true });
       if (error) throw error;
 
