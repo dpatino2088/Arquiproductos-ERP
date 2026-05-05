@@ -53,7 +53,8 @@ import {
   FileText,
   RefreshCw,
   Handshake,
-  LifeBuoy
+  LifeBuoy,
+  Calculator
 } from 'lucide-react';
 import { useDirectoryLoadStore } from '../stores/directory-load-store';
 
@@ -133,6 +134,26 @@ const MODULE_TABS: Record<string, { label: string; href: string }[]> = {
   '/financials/vendor-payments': [
     { label: 'Accounts Receivable', href: '/financials/accounts' },
     { label: 'Accounts Payable', href: '/financials/vendor-accounts' },
+  ],
+  '/accounting': [
+    { label: 'Chart of Accounts', href: '/accounting/chart' },
+    { label: 'Journal Entries', href: '/accounting/journal' },
+    { label: 'Reports', href: '/accounting/reports' },
+  ],
+  '/accounting/chart': [
+    { label: 'Chart of Accounts', href: '/accounting/chart' },
+    { label: 'Journal Entries', href: '/accounting/journal' },
+    { label: 'Reports', href: '/accounting/reports' },
+  ],
+  '/accounting/journal': [
+    { label: 'Chart of Accounts', href: '/accounting/chart' },
+    { label: 'Journal Entries', href: '/accounting/journal' },
+    { label: 'Reports', href: '/accounting/reports' },
+  ],
+  '/accounting/reports': [
+    { label: 'Chart of Accounts', href: '/accounting/chart' },
+    { label: 'Journal Entries', href: '/accounting/journal' },
+    { label: 'Reports', href: '/accounting/reports' },
   ],
   '/my-financials': [
     { label: 'Invoices', href: '/my-financials/invoices' },
@@ -444,6 +465,8 @@ function Layout({ children }: LayoutProps) {
       setLastRouteForModule('/manufacturing', route);
     } else if (route.startsWith('/financials')) {
       setLastRouteForModule('/financials', route);
+    } else if (route.startsWith('/accounting')) {
+      setLastRouteForModule('/accounting', route);
     } else if (route.startsWith('/partners')) {
       setLastRouteForModule('/partners', route);
     }
@@ -570,6 +593,8 @@ function Layout({ children }: LayoutProps) {
         return currentRoute.includes('/financials') && !currentRoute.startsWith('/my-financials');
       case 'My Financials':
         return currentRoute.startsWith('/my-financials');
+      case 'Accounting':
+        return currentRoute.startsWith('/accounting');
       case 'Partners':
         return currentRoute.includes('/partners');
       case 'Branches':
@@ -609,6 +634,9 @@ function Layout({ children }: LayoutProps) {
       { name: 'Manufacturing', href: '/manufacturing', icon: Wrench, module: 'manufacturing' },
       ...(userType === 'internal'
         ? [{ name: 'Financials', href: '/financials', icon: DollarSign, module: 'financials' as const }]
+        : []),
+      ...(userType === 'internal'
+        ? [{ name: 'Accounting', href: '/accounting', icon: Calculator, module: 'financials' as const }]
         : []),
       { name: 'Partners', href: '/partners', icon: Handshake, module: 'partners' },
     ];
@@ -847,6 +875,11 @@ function Layout({ children }: LayoutProps) {
     } else if (path === '/my-financials') {
       const portalDefault = portalRole === 'dealer_manager' ? '/my-financials/statement' : '/my-financials/invoices';
       const actualPath = userType === 'portal' ? portalDefault : '/my-financials/invoices';
+      router.navigate(actualPath);
+      setCurrentRoute(actualPath);
+    } else if (path === '/accounting') {
+      const lastRoute = getLastRouteForModule('/accounting');
+      const actualPath = lastRoute || '/accounting/chart';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else if (path === '/partners') {

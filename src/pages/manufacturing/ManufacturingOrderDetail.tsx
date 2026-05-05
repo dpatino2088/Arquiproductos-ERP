@@ -567,10 +567,12 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   }, [refetchMaterialReadiness, fetchMOLines]);
 
   const LINE_STATUS_FLOW: Record<string, { next: string; label: string }> = {
-    draft:           { next: 'reviewed',        label: 'Review' },
-    reviewed:        { next: 'materials_ready', label: 'Mat. Ready' },
-    confirmed:       { next: 'materials_ready', label: 'Mat. Ready' },
-    in_production:   { next: 'completed',       label: 'Complete' },
+    draft:              { next: 'reviewed',        label: 'Reviewed' },
+    reviewed:           { next: 'materials_ready', label: 'Mat. Ready' },
+    confirmed:          { next: 'materials_ready', label: 'Mat. Ready' },
+    procurement:        { next: 'materials_ready', label: 'Mat. Ready' },
+    material_available: { next: 'materials_ready', label: 'Allocate' },
+    in_production:      { next: 'completed',       label: 'Complete' },
   };
 
   const handleAdvanceLine = useCallback(async (lineId: string, lineStatus: string) => {

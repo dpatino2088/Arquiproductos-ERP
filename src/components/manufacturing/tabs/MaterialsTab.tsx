@@ -67,6 +67,8 @@ interface AggregatedMaterial {
   totalMsrp: number;
   excluded?: boolean;
   bomInstanceLineIds: string[];
+  /** Primary storage location code (auto-derived "Zone-Rack-Level-Bin"). */
+  location_code: string | null;
 }
 
 const TABLE_HEAD_CELL = 'py-3 px-6 font-medium text-xs';
@@ -140,6 +142,7 @@ export default function MaterialsTab({
           totalMsrp: m.total_msrp || 0,
           excluded: !!m.excluded,
           bomInstanceLineIds: [m.bom_instance_line_id],
+          location_code: m.location_code ?? null,
         });
       }
     }
@@ -558,6 +561,7 @@ export default function MaterialsTab({
                   <th className={`text-left text-gray-900 ${TABLE_HEAD_CELL} w-[160px]`}>SKU</th>
                   <th className={`text-left text-gray-900 ${TABLE_HEAD_CELL}`}>Description</th>
                   <th className={`text-left text-gray-900 ${TABLE_HEAD_CELL} w-[140px]`}>Role</th>
+                  <th className={`text-left text-gray-900 ${TABLE_HEAD_CELL} w-[120px]`} title="Primary storage location">Location</th>
                   <th className={`text-right text-gray-900 ${TABLE_HEAD_CELL} w-[120px]`}>Total Qty</th>
                   <th className={`text-right text-gray-900 ${TABLE_HEAD_CELL} w-[90px]`}>UoM</th>
                   <th className={`text-left text-gray-900 ${TABLE_HEAD_CELL} w-[140px]`}>Availability</th>
@@ -591,6 +595,15 @@ export default function MaterialsTab({
                     <td className={`${TABLE_BODY_CELL} text-gray-900 font-mono w-[160px]`}>{agg.sku}</td>
                     <td className={`${TABLE_BODY_CELL} text-gray-700 truncate`}>{agg.item_name}</td>
                     <td className={`${TABLE_BODY_CELL} text-gray-700 w-[140px]`}>{agg.part_role}</td>
+                    <td className={`${TABLE_BODY_CELL} w-[120px]`}>
+                      {agg.location_code ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded bg-gray-50 border border-gray-200 text-[11px] font-mono text-gray-700">
+                          {agg.location_code}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400 text-xs">—</span>
+                      )}
+                    </td>
                     <td className={`${TABLE_BODY_CELL} text-gray-900 text-right font-semibold w-[120px]`}>
                       {agg.uom === 'm' ? agg.totalQty.toFixed(2) : agg.totalQty.toFixed(0)}
                     </td>
@@ -661,6 +674,7 @@ export default function MaterialsTab({
                         <th className={`text-left text-gray-900 ${TABLE_HEAD_CELL} w-[160px]`}>SKU</th>
                         <th className={`text-left text-gray-900 ${TABLE_HEAD_CELL}`}>Description</th>
                         <th className={`text-left text-gray-900 ${TABLE_HEAD_CELL} w-[140px]`}>Role</th>
+                        <th className={`text-left text-gray-900 ${TABLE_HEAD_CELL} w-[120px]`} title="Primary storage location">Location</th>
                         <th className={`text-right text-gray-900 ${TABLE_HEAD_CELL} w-[120px]`}>Total Qty</th>
                         <th className={`text-right text-gray-900 ${TABLE_HEAD_CELL} w-[90px]`}>UoM</th>
                         <th className={`text-left text-gray-900 ${TABLE_HEAD_CELL} w-[140px]`}>Availability</th>
@@ -694,6 +708,15 @@ export default function MaterialsTab({
                           <td className={`${TABLE_BODY_CELL} text-gray-900 font-mono w-[160px]`}>{material.sku || 'N/A'}</td>
                           <td className={`${TABLE_BODY_CELL} text-gray-700 truncate`}>{material.item_name || 'N/A'}</td>
                           <td className={`${TABLE_BODY_CELL} text-gray-700 w-[140px]`}>{material.part_role || 'N/A'}</td>
+                          <td className={`${TABLE_BODY_CELL} w-[120px]`}>
+                            {material.location_code ? (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded bg-gray-50 border border-gray-200 text-[11px] font-mono text-gray-700">
+                                {material.location_code}
+                              </span>
+                            ) : (
+                              <span className="text-gray-400 text-xs">—</span>
+                            )}
+                          </td>
                           <td className={`${TABLE_BODY_CELL} text-gray-900 text-right font-semibold w-[120px]`}>
                             {material.uom === 'm' ? material.totalQty.toFixed(2) : material.totalQty.toFixed(0)}
                           </td>

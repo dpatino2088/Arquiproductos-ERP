@@ -101,6 +101,31 @@ function defaultValidUntilFromCreatedAt(createdAt: string): string {
   return d.toISOString().slice(0, 10);
 }
 
+function normalizeAddressText(address: string | null | undefined): string {
+  if (!address) return '';
+  const seen = new Set<string>();
+  const parts = address
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .filter((p) => {
+      const key = p.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  return parts.join(', ');
+}
+
+function composeAddress(parts: Array<string | null | undefined>): string | null {
+  const joined = parts
+    .map((p) => (p ?? '').trim())
+    .filter(Boolean)
+    .join(', ');
+  const normalized = normalizeAddressText(joined);
+  return normalized || null;
+}
+
 /** Compute base amount (line total) for a quote line: unit_msrp * quantity when both exist, else msrp as line total */
 function getQuoteLineBase(ql: { quantity: number; msrp: number | null; unit_msrp: number | null }): number {
   const qty = Number(ql.quantity) || 0;
@@ -463,14 +488,17 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
             .maybeSingle();
           if (custData) {
             const c = custData as any;
-            const addressParts = [
+            const cityStateZip = [c.city, c.state, c.zip_code]
+              .map((p: string | null | undefined) => (p ?? '').trim())
+              .filter(Boolean)
+              .join(', ');
+            payload.customer_snapshot_name = c.customer_name ?? null;
+            payload.customer_snapshot_address = composeAddress([
               c.street_address_line_1,
               c.street_address_line_2,
-              [c.city, c.state, c.zip_code].filter(Boolean).join(', '),
+              cityStateZip,
               c.country,
-            ].filter(Boolean);
-            payload.customer_snapshot_name = c.customer_name ?? null;
-            payload.customer_snapshot_address = addressParts.length > 0 ? addressParts.join(', ') : null;
+            ]);
             payload.customer_snapshot_email = c.customer_email ?? null;
             payload.customer_snapshot_phone = c.customer_phone ?? c.alt_phone ?? null;
           }
@@ -1339,7 +1367,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           logoWidthPx,
           logoHeightPx,
           sellerName,
-          customerAddress: customer?.address ?? undefined,
+          customerAddress: customerAddressDisplay || undefined,
           customerEmail: contact?.contact_email ?? customer?.customer_email ?? undefined,
           customerPhone: customer?.customer_phone ?? undefined,
           overrideTotals: {
@@ -1474,9 +1502,8 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
   const contentReadOnly = readOnly || !!isAccepted;
   const statusDropdownDisabled = contentReadOnly && !canRevertStatus;
 
-  const contactDisplay = contact
-    ? [contact.contact_name, contact.contact_email].filter(Boolean).join(' · ')
-    : '';
+  const contactDisplay = (contact?.contact_name ?? '').trim();
+  const customerAddressDisplay = normalizeAddressText(customer?.address ?? null);
   const actionButtons = (
     <div className="flex items-center gap-2">
       <div className="relative" ref={printDropdownRef}>
@@ -1689,12 +1716,12 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                   </p>
                 )}
 
-                {(customer?.address || contact?.contact_email || customer?.customer_email || customer?.customer_phone) && (
+                {(customerAddressDisplay || contact?.contact_email || customer?.customer_email || customer?.customer_phone) && (
                   <div className="border-t border-gray-100 pt-3 space-y-1.5 text-xs">
-                    {customer?.address && (
+                    {customerAddressDisplay && (
                       <div className="flex justify-between gap-3">
                         <dt className="text-gray-500 shrink-0">Address</dt>
-                        <dd className="text-gray-700 text-right">{customer.address}</dd>
+                        <dd className="text-gray-700 text-right">{customerAddressDisplay}</dd>
                       </div>
                     )}
                     {(contact?.contact_email || customer?.customer_email) && (

@@ -19,6 +19,7 @@ import { ArrowLeft, CheckCircle, Plus, Trash2, Save, Search, FileDown, Eye, Chev
 
 const INVENTORY_SUBMODULES = [
   { id: 'warehouse', label: 'Warehouse', href: '/inventory/warehouse' },
+  { id: 'locations', label: 'Locations', href: '/inventory/locations' },
   { id: 'purchase-orders', label: 'Purchase Orders', href: '/inventory/purchase-orders' },
   { id: 'receipts', label: 'Receipts', href: '/inventory/receipts' },
   { id: 'transactions', label: 'Transactions', href: '/inventory/transactions' },

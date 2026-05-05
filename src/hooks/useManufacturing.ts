@@ -91,6 +91,8 @@ export interface ManufacturingMaterial {
   product_width_mm?: number | null;
   product_height_mm?: number | null;
   excluded?: boolean;
+  /** Primary storage location code for this SKU (e.g. "A-R3-L2-B1"). */
+  location_code?: string | null;
 }
 
 export interface CutJob {
@@ -515,7 +517,7 @@ export function useManufacturingMaterials(manufacturingOrderId: string): UseManu
         if (catalogItemIds.length > 0) {
           const { data: catalogItems } = await supabase
             .from('CatalogItems')
-            .select('id, sku, name')
+            .select('id, sku, name, primary_location_id, WarehouseLocations(location_code)')
             .in('id', catalogItemIds)
             .eq('organization_id', activeOrganizationId);
 
@@ -536,6 +538,7 @@ export function useManufacturingMaterials(manufacturingOrderId: string): UseManu
             catalog_item_id: line.resolved_part_id || '',
             sku: catalogItem?.sku || 'N/A',
             item_name: catalogItem?.name || 'N/A',
+            location_code: catalogItem?.WarehouseLocations?.location_code ?? null,
             part_role: line.part_role || 'accessory',
             uom: line.uom || 'ea',
             qty: perUnitQty * moQty,

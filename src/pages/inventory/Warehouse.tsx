@@ -19,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 
 const INVENTORY_SUBMODULES = [
   { id: 'warehouse', label: 'Warehouse', href: '/inventory/warehouse' },
+  { id: 'locations', label: 'Locations', href: '/inventory/locations' },
   { id: 'purchase-orders', label: 'Purchase Orders', href: '/inventory/purchase-orders' },
   { id: 'receipts', label: 'Receipts', href: '/inventory/receipts' },
   { id: 'transactions', label: 'Transactions', href: '/inventory/transactions' },
@@ -64,6 +65,8 @@ interface StockRow {
   /** The manufacturer's unit label (e.g. 'yd'). */
   displayUom: string | null;
   warehouseName: string;
+  /** Primary storage location code (auto-derived "Zone-Rack-Level-Bin"). */
+  locationCode: string | null;
   onOrder: number;
   assigned: number;
   required: number;
@@ -127,7 +130,7 @@ export default function Warehouse() {
 
       let balanceQuery = supabase
         .from('InventoryBalances')
-        .select('catalog_item_id, quantity, warehouse_id, Warehouses(name), CatalogItems(sku, name, unit_of_measure, measure_basis, is_roll, roll_length_value, roll_length_uom, roll_width_value, roll_width_uom, roll_width_m, CatalogCategories(name))')
+        .select('catalog_item_id, quantity, warehouse_id, Warehouses(name), CatalogItems(sku, name, unit_of_measure, measure_basis, is_roll, roll_length_value, roll_length_uom, roll_width_value, roll_width_uom, roll_width_m, primary_location_id, CatalogCategories(name), WarehouseLocations(location_code))')
         .eq('organization_id', activeOrganizationId);
 
       if (effectiveWarehouseId) {
@@ -209,6 +212,7 @@ export default function Warehouse() {
           onHandDisplay,
           displayUom,
           warehouseName: b.Warehouses?.name ?? '—',
+          locationCode: b.CatalogItems?.WarehouseLocations?.location_code ?? null,
           onOrder: onOrderMap.get(b.catalog_item_id) ?? 0,
           assigned: assignedMap.get(b.catalog_item_id) ?? 0,
           required: requiredMap.get(b.catalog_item_id) ?? 0,
@@ -334,6 +338,7 @@ export default function Warehouse() {
                 </th>
                 <th className="px-4 py-3 text-left font-medium text-gray-700">Category</th>
                 <th className="px-4 py-3 text-left font-medium text-gray-700">Warehouse</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700 whitespace-nowrap" title="Primary storage location (bin)">Location</th>
                 <th className="px-4 py-3 text-right font-medium text-gray-700 whitespace-nowrap cursor-pointer min-w-[90px]" onClick={() => handleSort('onHand')}>
                   On Hand <SortIcon col="onHand" />
                 </th>
@@ -378,6 +383,15 @@ export default function Warehouse() {
                   <td className="px-4 py-3 text-gray-700">{row.itemName}</td>
                   <td className="px-4 py-3 text-gray-600">{row.category ?? '—'}</td>
                   <td className="px-4 py-3 text-gray-600">{row.warehouseName}</td>
+                  <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
+                    {row.locationCode ? (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded bg-gray-50 border border-gray-200 text-[11px] font-mono">
+                        {row.locationCode}
+                      </span>
+                    ) : (
+                      <span className="text-gray-400">—</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">
                     {row.onHandDisplay != null ? (
                       <>{Number(row.onHandDisplay).toFixed(2)}<span className="text-[10px] text-gray-400 ml-0.5">{row.displayUom}</span></>

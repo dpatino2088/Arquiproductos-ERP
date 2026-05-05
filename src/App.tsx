@@ -80,6 +80,7 @@ const DeliveryNoteDetail = lazy(() => import('./pages/manufacturing/DeliveryNote
 const CatalogItemNew = lazy(() => import('./pages/catalog/CatalogItemNew'));
 const Inventory = lazy(() => import('./pages/inventory/Inventory'));
 const Warehouse = lazy(() => import('./pages/inventory/Warehouse'));
+const Locations = lazy(() => import('./pages/inventory/Locations'));
 const InventoryItemDetail = lazy(() => import('./pages/inventory/InventoryItemDetail'));
 const PurchaseOrders = lazy(() => import('./pages/inventory/PurchaseOrders'));
 const PurchaseOrderDetail = lazy(() => import('./pages/inventory/PurchaseOrderDetail'));
@@ -108,6 +109,12 @@ const BillDetail = lazy(() => import('./pages/financials/BillDetail'));
 const PurchaseOrdersAP = lazy(() => import('./pages/financials/PurchaseOrdersAP'));
 const VendorPaymentsList = lazy(() => import('./pages/financials/VendorPaymentsList'));
 const VendorPaymentDetail = lazy(() => import('./pages/financials/VendorPaymentDetail'));
+
+// Accounting module
+const ChartOfAccounts = lazy(() => import('./pages/accounting/ChartOfAccounts'));
+const JournalEntries = lazy(() => import('./pages/accounting/JournalEntries'));
+const JournalEntryNew = lazy(() => import('./pages/accounting/JournalEntryNew'));
+const AccountingReports = lazy(() => import('./pages/accounting/AccountingReports'));
 const Partners = lazy(() => import('./pages/partners/Partners'));
 const PartnerDealers = lazy(() => import('./pages/partners/PartnerDealers'));
 const DealerDetail = lazy(() => import('./pages/partners/DealerDetail'));
@@ -594,6 +601,13 @@ function App() {
         setCurrentPage('login');
       }
     });
+    router.addRoute('/inventory/locations', () => {
+      if (isAuthenticated) {
+        setCurrentPage('inventory-locations');
+      } else {
+        setCurrentPage('login');
+      }
+    });
     router.addRoute('/inventory/items/:catalog_item_id', () => {
       if (isAuthenticated) {
         const path = window.location.pathname;
@@ -949,6 +963,27 @@ function App() {
     });
     router.addRoute('/financials/vendor-payments/:id', () => {
       if (isAuthenticated) { setCurrentPage('financials-vendor-payment-detail'); } else { setCurrentPage('login'); }
+    });
+
+    // Accounting routes
+    router.addRoute('/accounting', () => {
+      if (isAuthenticated) {
+        router.navigate('/accounting/chart', false);
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/accounting/chart', () => {
+      if (isAuthenticated) { setCurrentPage('accounting-chart'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/accounting/journal', () => {
+      if (isAuthenticated) { setCurrentPage('accounting-journal'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/accounting/journal/new', () => {
+      if (isAuthenticated) { setCurrentPage('accounting-journal-new'); } else { setCurrentPage('login'); }
+    });
+    router.addRoute('/accounting/reports', () => {
+      if (isAuthenticated) { setCurrentPage('accounting-reports'); } else { setCurrentPage('login'); }
     });
 
     // Partners routes
@@ -1351,6 +1386,8 @@ function App() {
         return <Inventory />;
       case 'warehouse':
         return <Warehouse />;
+      case 'inventory-locations':
+        return <Locations />;
       case 'inventory-item-detail': {
         const itemId = sessionStorage.getItem('currentInventoryItemId');
         return itemId ? <InventoryItemDetail itemId={itemId} /> : <Warehouse />;
@@ -1452,6 +1489,17 @@ function App() {
         return <RequireModule module="financials"><VendorPaymentsList /></RequireModule>;
       case 'financials-vendor-payment-detail':
         return <RequireModule module="financials"><VendorPaymentDetail /></RequireModule>;
+
+      // Accounting (gated by financials permission for now)
+      case 'accounting-chart':
+        return <RequireModule module="financials"><ChartOfAccounts /></RequireModule>;
+      case 'accounting-journal':
+        return <RequireModule module="financials"><JournalEntries /></RequireModule>;
+      case 'accounting-journal-new':
+        return <RequireModule module="financials"><JournalEntryNew /></RequireModule>;
+      case 'accounting-reports':
+        return <RequireModule module="financials"><AccountingReports /></RequireModule>;
+
       case 'partners':
         return <RequireModule module="partners"><Partners /></RequireModule>;
       case 'partners-dealers':

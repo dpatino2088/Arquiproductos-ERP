@@ -4375,6 +4375,10 @@ export default function QuoteNew() {
     : rawPersistedStatus;
   const isStatusLocked = Boolean(quoteId && rawPersistedStatus === 'approved');
   const isOrdered = persistedStatus === 'ordered';
+  const formStatus = normalizeStatus(watch('status'));
+  const actionsQuoteStatus = isOrdered
+    ? 'ordered'
+    : (isStatusLocked ? persistedStatus : (formStatus || persistedStatus || 'draft'));
 
   return (
     <div className="py-6 px-6 min-w-0 max-w-full">
@@ -4599,7 +4603,7 @@ export default function QuoteNew() {
                 </div>
                 {quoteId && (
                   <div className="flex-shrink-0">
-                    <QuoteActionsDropdown quoteId={quoteId} quoteLineCount={quoteLines.length} quoteStatus={persistedStatus || 'draft'} onCreateOrder={() => setApproveConfirmOpen(true)} />
+                    <QuoteActionsDropdown quoteId={quoteId} quoteLineCount={quoteLines.length} quoteStatus={actionsQuoteStatus} onCreateOrder={() => setApproveConfirmOpen(true)} />
                   </div>
                 )}
               </div>

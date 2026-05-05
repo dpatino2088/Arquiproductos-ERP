@@ -122,6 +122,11 @@ export function inventoryItemDetailKey(scopeKey: string, itemId: string): unknow
   return ['inventory', 'items', 'detail', DETAIL_QUERY_VERSION, scopeKey, itemId ?? ''];
 }
 
+/** Warehouse locations (bins) list, scoped to org and (optional) warehouse */
+export function warehouseLocationsListKey(scopeKey: string, warehouseId: string | null): unknown[] {
+  return ['inventory', 'warehouse-locations', 'list', LIST_QUERY_VERSION, scopeKey, warehouseId ?? 'all'];
+}
+
 /** Dealer financial cockpit list */
 export function dealerFinancialAccountsListKey(
   scopeKey: string,
@@ -271,4 +276,57 @@ export function serviceClaimDetailKey(scopeKey: string, claimId: string): unknow
 /** Organization Address Directory list */
 export function organizationAddressesListKey(scopeKey: string): unknown[] {
   return ['settings', 'organization-addresses', 'list', LIST_QUERY_VERSION, scopeKey];
+}
+
+/** Accounting: chart of accounts list */
+export function accountingAccountsListKey(orgId: string): unknown[] {
+  return ['accounting', 'accounts', 'list', LIST_QUERY_VERSION, orgId];
+}
+
+/** Accounting: journal entries list */
+export function accountingJournalEntriesListKey(
+  orgId: string,
+  filters: { q: string; status: string; sourceType: string; from: string; to: string; page: number; pageSize: number }
+): unknown[] {
+  return [
+    'accounting',
+    'journal-entries',
+    'list',
+    LIST_QUERY_VERSION,
+    orgId,
+    filters.q,
+    filters.status,
+    filters.sourceType,
+    filters.from,
+    filters.to,
+    filters.page,
+    filters.pageSize,
+  ];
+}
+
+/** Accounting: journal entry detail */
+export function accountingJournalEntryDetailKey(orgId: string, entryId: string): unknown[] {
+  return ['accounting', 'journal-entries', 'detail', DETAIL_QUERY_VERSION, orgId, entryId];
+}
+
+/** Accounting reports */
+export function accountingTrialBalanceKey(orgId: string, asOf: string): unknown[] {
+  return ['accounting', 'reports', 'trial-balance', LIST_QUERY_VERSION, orgId, asOf];
+}
+
+export function accountingGeneralLedgerKey(
+  orgId: string,
+  accountId: string | null,
+  from: string | null,
+  to: string
+): unknown[] {
+  return ['accounting', 'reports', 'general-ledger', LIST_QUERY_VERSION, orgId, accountId ?? '', from ?? '', to];
+}
+
+export function accountingProfitLossKey(orgId: string, from: string, to: string): unknown[] {
+  return ['accounting', 'reports', 'profit-loss', LIST_QUERY_VERSION, orgId, from, to];
+}
+
+export function accountingBalanceSheetKey(orgId: string, asOf: string): unknown[] {
+  return ['accounting', 'reports', 'balance-sheet', LIST_QUERY_VERSION, orgId, asOf];
 }

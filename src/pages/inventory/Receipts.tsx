@@ -12,6 +12,7 @@ import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, Selec
 
 const INVENTORY_SUBMODULES = [
   { id: 'warehouse', label: 'Warehouse', href: '/inventory/warehouse' },
+  { id: 'locations', label: 'Locations', href: '/inventory/locations' },
   { id: 'purchase-orders', label: 'Purchase Orders', href: '/inventory/purchase-orders' },
   { id: 'receipts', label: 'Receipts', href: '/inventory/receipts' },
   { id: 'transactions', label: 'Transactions', href: '/inventory/transactions' },
@@ -35,6 +36,8 @@ interface POLineForReceipt {
   is_roll_snapshot?: boolean | null;
   roll_length_value_snapshot?: number | null;
   roll_length_uom_snapshot?: string | null;
+  /** Suggested putaway: primary storage location code for this SKU, if defined. */
+  putaway_location_code?: string | null;
 }
 
 function formatPurchaseSuffix(purchaseUnit: string | null | undefined, unitsPerPurchase: number | null | undefined): string {
@@ -127,7 +130,7 @@ export default function Receipts() {
 
       const { data, error } = await supabase
         .from('PurchaseOrderLines')
-        .select('*, CatalogItems(sku, name)')
+        .select('*, CatalogItems(sku, name, primary_location_id, WarehouseLocations(location_code))')
         .eq('purchase_order_id', poId)
         .order('created_at', { ascending: true });
       if (error) throw error;
@@ -149,6 +152,7 @@ export default function Receipts() {
           is_roll_snapshot: Boolean(l.is_roll_snapshot),
           roll_length_value_snapshot: l.roll_length_value_snapshot != null ? Number(l.roll_length_value_snapshot) : null,
           roll_length_uom_snapshot: l.roll_length_uom_snapshot ?? null,
+          putaway_location_code: l.CatalogItems?.WarehouseLocations?.location_code ?? null,
         } as POLineForReceipt;
       }).filter((l: POLineForReceipt) => l.remaining > 0);
 
@@ -396,6 +400,7 @@ export default function Receipts() {
                     <thead className="bg-gray-50 border-b">
                       <tr>
                         <th className="px-4 py-3 text-left font-medium text-gray-700">Item</th>
+                        <th className="px-4 py-3 text-left font-medium text-gray-700 whitespace-nowrap" title="Suggested storage bin (primary location of SKU)">Putaway</th>
                         <th className="px-4 py-3 text-right font-medium text-gray-700">Ordered</th>
                         <th className="px-4 py-3 text-right font-medium text-gray-700">Already Rcvd</th>
                         <th className="px-4 py-3 text-right font-medium text-gray-700">Remaining</th>
@@ -430,6 +435,15 @@ export default function Receipts() {
                                   </span>
                                 )}
                               </>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            {l.putaway_location_code ? (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded bg-gray-50 border border-gray-200 text-[11px] font-mono text-gray-700">
+                                {l.putaway_location_code}
+                              </span>
+                            ) : (
+                              <span className="text-gray-400 text-xs">—</span>
                             )}
                           </td>
                           <td className="px-4 py-3 text-right tabular-nums">{Number(l.ordered_qty).toFixed(2)}</td>

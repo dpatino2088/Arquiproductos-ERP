@@ -14,6 +14,7 @@ import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 
 const INVENTORY_SUBMODULES = [
   { id: 'warehouse', label: 'Warehouse', href: '/inventory/warehouse' },
+  { id: 'locations', label: 'Locations', href: '/inventory/locations' },
   { id: 'purchase-orders', label: 'Purchase Orders', href: '/inventory/purchase-orders' },
   { id: 'receipts', label: 'Receipts', href: '/inventory/receipts' },
   { id: 'transactions', label: 'Transactions', href: '/inventory/transactions' },
@@ -42,6 +43,8 @@ type InventoryHeaderData = {
   estimatedRolls: number | null;
   /** When linear_m and width known, reference area in m². */
   m2Reference: number | null;
+  /** Primary storage location code (auto-derived "Zone-Rack-Level-Bin"). */
+  locationCode: string | null;
 };
 
 type PurchaseHistoryRow = {
@@ -178,6 +181,7 @@ export default function InventoryItemDetail({ itemId: propItemId }: InventoryIte
         onHandM: row.onHandM ?? null,
         estimatedRolls: row.estimatedRolls ?? null,
         m2Reference: row.m2Reference ?? null,
+        locationCode: (row as WarehouseSeedRow & { locationCode?: string | null }).locationCode ?? null,
       } as InventoryHeaderData;
     }
     return undefined;
@@ -190,7 +194,7 @@ export default function InventoryItemDetail({ itemId: propItemId }: InventoryIte
 
       const { data: item, error: itemError } = await supabase
         .from('CatalogItems')
-        .select('id, sku, name, unit_of_measure, is_roll, stock_basis, roll_length_value, roll_length_uom, roll_width_value, roll_width_uom, roll_width_m, CatalogCategories(name)')
+        .select('id, sku, name, unit_of_measure, is_roll, stock_basis, roll_length_value, roll_length_uom, roll_width_value, roll_width_uom, roll_width_m, primary_location_id, CatalogCategories(name), WarehouseLocations(location_code)')
         .eq('id', itemId)
         .single();
       if (itemError) throw itemError;
@@ -244,6 +248,7 @@ export default function InventoryItemDetail({ itemId: propItemId }: InventoryIte
         onHandM,
         estimatedRolls,
         m2Reference,
+        locationCode: (item as { WarehouseLocations?: { location_code: string | null } | null }).WarehouseLocations?.location_code ?? null,
       };
     },
     enabled: !!activeOrganizationId && !!itemId,
@@ -387,6 +392,18 @@ export default function InventoryItemDetail({ itemId: propItemId }: InventoryIte
             <div><p className="text-gray-500">Item Name</p><p className="font-medium">{header?.name ?? '—'}</p></div>
             <div><p className="text-gray-500">Category</p><p className="font-medium">{header?.category ?? '—'}</p></div>
             <div><p className="text-gray-500">UOM</p><p className="font-medium">{header?.uom ?? 'ea'}</p></div>
+            <div>
+              <p className="text-gray-500">Location</p>
+              <p className="font-medium">
+                {header?.locationCode ? (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded bg-gray-50 border border-gray-200 text-[11px] font-mono">
+                    {header.locationCode}
+                  </span>
+                ) : (
+                  <span className="text-gray-400">—</span>
+                )}
+              </p>
+            </div>
             <div><p className="text-gray-500">On Hand</p><p className="font-medium tabular-nums">{fmtQty(header?.onHand)}</p></div>
             <div><p className="text-gray-500">On Order</p><p className="font-medium tabular-nums">{fmtQty(header?.onOrder)}</p></div>
             <div><p className="text-gray-500">Assigned</p><p className="font-medium tabular-nums">{fmtQty(header?.assigned)}</p></div>

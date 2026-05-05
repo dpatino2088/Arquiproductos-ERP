@@ -30,7 +30,6 @@ function fmt(amount: number, currency = 'USD') {
 const COLORS = {
   materials: '#3b82f6',
   otherCosts: '#f59e0b',
-  discounts: '#ef4444',
   profit: '#22c55e',
 };
 
@@ -144,15 +143,15 @@ export default function ProposalProfitabilityTab({
   }, [lines, quoteLinesMap, addonsMap, lineTotals, globalDiscountAmount, installationDiscountAmount, subtotal]);
 
   const donutData = useMemo(() => {
+    // Donut must reconcile with center "Sale (before tax)" amount.
+    // Since margin is computed on NET sale (subtotal), discounts are shown in
+    // the breakdown table only and are excluded from donut composition.
     const segments = [];
     if (analysis.materialsCost > 0) {
       segments.push({ name: 'Materials', value: analysis.materialsCost, color: COLORS.materials });
     }
     if (analysis.customCost > 0) {
       segments.push({ name: 'Other Costs', value: analysis.customCost, color: COLORS.otherCosts });
-    }
-    if (analysis.totalDiscounts > 0) {
-      segments.push({ name: 'Discounts', value: analysis.totalDiscounts, color: COLORS.discounts });
     }
     if (analysis.grossProfit > 0) {
       segments.push({ name: 'Profit', value: analysis.grossProfit, color: COLORS.profit });
@@ -201,7 +200,7 @@ export default function ProposalProfitabilityTab({
                 </ResponsiveContainer>
                 {/* Center label */}
                 <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                  <span className="text-xs text-gray-500 uppercase tracking-wide">Sale</span>
+                  <span className="text-xs text-gray-500 uppercase tracking-wide">Net Sale</span>
                   <span className="text-lg font-bold text-gray-900">{fmt(analysis.saleBeforeTax, currency)}</span>
                 </div>
               </div>
@@ -239,7 +238,7 @@ export default function ProposalProfitabilityTab({
                 </div>
               </div>
               <BreakdownRow
-                color={COLORS.discounts}
+                color="#ef4444"
                 label="Discounts Given"
                 sublabel={[
                   globalDiscountPct > 0 ? `Global ${globalDiscountPct}%` : null,

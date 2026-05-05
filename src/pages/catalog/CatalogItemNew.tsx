@@ -24,6 +24,7 @@ import { supabase } from '../../lib/supabase/client';
 import ImageUpload, { deleteStorageImage } from '../../components/ui/ImageUpload';
 import { syncCatalogItemProductTypes } from '../../lib/catalog-item-helpers';
 import { useProductTypes } from '../../hooks/useProductTypes';
+import { useWarehouseLocations } from '../../hooks/useWarehouseLocations';
 import { useOnVisibilityChange } from '../../lib/app-persistence';
 import { ArrowLeft, Info } from 'lucide-react';
 import { getAllRoleOptions } from '../../lib/bom/roles';
@@ -251,6 +252,13 @@ export default function CatalogItemNew() {
     () => ({ q: '', categoryId: '', status: 'all', sortKey: 'sku', page: 1, pageSize: 500 }),
     []
   );
+  // Bin locations across all warehouses (active only) for primary location selector
+  const { locations: warehouseLocations } = useWarehouseLocations({
+    organizationId: activeOrganizationId,
+    warehouseId: null,
+    scopeKey,
+    includeInactive: false,
+  });
   const queryReturnTo = useMemo(() => getReturnToFromCurrentQuery(), [routeSearch]);
   const returnTo = useMemo(() => {
     return resolveReturnTo({
@@ -310,6 +318,9 @@ export default function CatalogItemNew() {
   // Supply (Supply Type + Origin) — only when editing; stored in CatalogItemSupply
   const [supplyType, setSupplyType] = useState<SupplyType>('stock');
   const [supplyOrigin, setSupplyOrigin] = useState<SupplyOrigin>('local');
+  const [leadTimeMinDays, setLeadTimeMinDays] = useState<number>(8);
+  const [leadTimeMaxDays, setLeadTimeMaxDays] = useState<number>(15);
+  const [primaryLocationId, setPrimaryLocationId] = useState<string | null>(null);
   const shouldCloseAfterSaveRef = useRef(false);
   
   // CatalogItemsMSRP: read-only for Rates tab (computed in backend; UI only displays)
@@ -744,6 +755,8 @@ export default function CatalogItemNew() {
           roll_width_m: data.roll_width_m ? Number(data.roll_width_m) : null,
           roll_length_m: data.roll_length_m ? Number(data.roll_length_m) : null,
         });
+
+        setPrimaryLocationId((data.primary_location_id as string | null) ?? null);
         
         const rawSessionData = sessionKey ? window.sessionStorage.getItem(sessionKey) : null;
         let sessionData: string | null = null;
@@ -911,7 +924,7 @@ export default function CatalogItemNew() {
     loadItem();
   }, [itemId, activeOrganizationId, setValue, sessionKey, reset, returnTo]);
 
-  // Load Supply (Supply Type + Origin) when editing
+  // Load Supply (Supply Type + Origin + Lead Time) when editing
   useEffect(() => {
     if (!itemId || !activeOrganizationId) return;
     fetchCatalogItemSupply(itemId, activeOrganizationId)
@@ -919,6 +932,8 @@ export default function CatalogItemNew() {
         if (data) {
           setSupplyType(data.supply_type);
           setSupplyOrigin(data.supply_origin);
+          setLeadTimeMinDays(Number(data.lead_time_min_days ?? 0));
+          setLeadTimeMaxDays(Number(data.lead_time_max_days ?? 0));
         }
       })
       .catch(() => {});
@@ -1152,6 +1167,16 @@ export default function CatalogItemNew() {
     setSaveError(null);
     
     try {
+      const rawLeadMin = Number(leadTimeMinDays ?? 0);
+      const rawLeadMax = Number(leadTimeMaxDays ?? 0);
+      const safeLeadMin = Number.isFinite(rawLeadMin) ? Math.max(0, Math.round(rawLeadMin)) : 0;
+      const safeLeadMax = Number.isFinite(rawLeadMax) ? Math.max(0, Math.round(rawLeadMax)) : 0;
+      if (safeLeadMin > safeLeadMax) {
+        setSaveError('Lead time min days must be <= max days.');
+        setIsSaving(false);
+        return;
+      }
+
       const resolveRollUnitOfMeasure = (vals: CatalogItemFormValues): string => {
         const candidate = vals.roll_length_uom || vals.roll_width_uom || 'm';
         return ['m', 'yd', 'ft'].includes(candidate) ? candidate : 'm';
@@ -1192,6 +1217,7 @@ export default function CatalogItemNew() {
         is_active: values.is_active,
         delta_x_mm: values.delta_x_mm != null ? Number(values.delta_x_mm) : null,
         delta_y_mm: values.delta_y_mm != null ? Number(values.delta_y_mm) : null,
+        primary_location_id: primaryLocationId || null,
         updated_at: new Date().toISOString(),
       };
       
@@ -1234,6 +1260,9 @@ export default function CatalogItemNew() {
         if (values.is_roll) {
           payload.name = fullPayload.name;
         }
+        // primary_location_id is tracked outside react-hook-form, so it never
+        // appears in dirtyFields. Always include it on update.
+        payload.primary_location_id = fullPayload.primary_location_id;
         await updateItem(effectiveItemId, payload);
         finalItemId = effectiveItemId;
         const updatedItem =
@@ -1295,8 +1324,8 @@ export default function CatalogItemNew() {
             organization_id: activeOrganizationId,
             supply_type: supplyType,
             supply_origin: supplyOrigin,
-            lead_time_min_days: existing?.lead_time_min_days ?? (supplyOrigin === 'import' ? 45 : 8),
-            lead_time_max_days: existing?.lead_time_max_days ?? (supplyOrigin === 'import' ? 60 : 15),
+            lead_time_min_days: safeLeadMin,
+            lead_time_max_days: safeLeadMax,
             notes: existing?.notes ?? null,
           });
         } catch (supplyErr) {
@@ -2150,7 +2179,7 @@ export default function CatalogItemNew() {
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Purchasing</p>
           </div>
 
-          {/* Supply Type | Origin | Purchase Unit | Units per Purchase */}
+          {/* Supply Type | Origin | Lead Time | Purchase Unit | Units per Purchase */}
           {(itemId && activeOrganizationId) || (measureBasis === 'unit' || measureBasis === 'linear' || isRoll) ? (
             <>
               {/* 1. Supply Type */}
@@ -2199,7 +2228,76 @@ export default function CatalogItemNew() {
                   <Label className="text-xs text-gray-400">Origin</Label>
                 )}
               </div>
-              {/* 3. Purchase Unit */}
+              {/* 3. Lead Time Min (days) */}
+              <div className="col-span-3">
+                {itemId && activeOrganizationId ? (
+                  <>
+                    <Label className="text-xs">Lead Time Min (days)</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={leadTimeMinDays}
+                      onChange={(e) => setLeadTimeMinDays(Number(e.target.value))}
+                      className="h-auto py-1 text-xs w-full"
+                      disabled={isReadOnly}
+                    />
+                  </>
+                ) : (
+                  <Label className="text-xs text-gray-400">Lead Time Min (days)</Label>
+                )}
+              </div>
+              {/* 4. Lead Time Max (days) */}
+              <div className="col-span-3">
+                {itemId && activeOrganizationId ? (
+                  <>
+                    <Label className="text-xs">Lead Time Max (days)</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={leadTimeMaxDays}
+                      onChange={(e) => setLeadTimeMaxDays(Number(e.target.value))}
+                      className="h-auto py-1 text-xs w-full"
+                      disabled={isReadOnly}
+                    />
+                  </>
+                ) : (
+                  <Label className="text-xs text-gray-400">Lead Time Max (days)</Label>
+                )}
+              </div>
+              {/* 4b. Primary Storage Location (bin) */}
+              <div className="col-span-6">
+                {itemId && activeOrganizationId ? (
+                  <>
+                    <Label className="text-xs">Primary Storage Location</Label>
+                    <SelectShadcn
+                      value={primaryLocationId ?? '__none__'}
+                      onValueChange={(v) => setPrimaryLocationId(v === '__none__' ? null : v)}
+                      disabled={isReadOnly}
+                    >
+                      <SelectTrigger className="h-auto py-1 text-xs w-full">
+                        <SelectValue placeholder="No location" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">No location</SelectItem>
+                        {warehouseLocations.map((loc) => (
+                          <SelectItem key={loc.id} value={loc.id}>
+                            {loc.warehouse_name ? `${loc.warehouse_name} · ` : ''}
+                            {loc.location_code}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </SelectShadcn>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Default bin shown in Picklists & Putaway. Manage bins in Inventory ▸ Locations.
+                    </p>
+                  </>
+                ) : (
+                  <Label className="text-xs text-gray-400">Primary Storage Location</Label>
+                )}
+              </div>
+              {/* 5. Purchase Unit */}
               <div className="col-span-3">
                 {(measureBasis === 'unit' || measureBasis === 'linear' || isRoll) ? (
                   <>
@@ -2232,7 +2330,7 @@ export default function CatalogItemNew() {
                   <Label className="text-xs text-gray-400">Purchase Unit</Label>
                 )}
               </div>
-              {/* 4. Units per Purchase */}
+              {/* 6. Units per Purchase */}
               <div className="col-span-3">
                 {(measureBasis === 'unit' || measureBasis === 'linear' || isRoll) ? (
                   <>

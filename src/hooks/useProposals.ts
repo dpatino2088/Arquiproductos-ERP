@@ -292,6 +292,31 @@ export interface ProposalDetailState {
 
 export type ProposalDetailData = Omit<ProposalDetailState, 'loading' | 'error' | 'canWrite'>;
 
+function normalizeAddressText(address: string | null | undefined): string {
+  if (!address) return '';
+  const seen = new Set<string>();
+  const parts = address
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .filter((p) => {
+      const key = p.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  return parts.join(', ');
+}
+
+function composeAddress(parts: Array<string | null | undefined>): string | null {
+  const joined = parts
+    .map((p) => (p ?? '').trim())
+    .filter(Boolean)
+    .join(', ');
+  const normalized = normalizeAddressText(joined);
+  return normalized || null;
+}
+
 /** Fetcher for proposal detail; throws on error. Used by useProposalDetail and by warmDetailIfNeeded. */
 export async function fetchProposalDetailData(proposalId: string): Promise<ProposalDetailData> {
   const { data: proposalData, error: proposalError } = await supabase
@@ -557,7 +582,7 @@ export async function fetchProposalDetailData(proposalId: string): Promise<Propo
   if (isFrozenProposal && proposal.customer_snapshot_name) {
     customer = {
       customer_name: proposal.customer_snapshot_name || 'N/A',
-      address: proposal.customer_snapshot_address ?? null,
+      address: composeAddress([proposal.customer_snapshot_address]),
       customer_email: proposal.customer_snapshot_email ?? null,
       customer_phone: proposal.customer_snapshot_phone ?? null,
     };
@@ -601,15 +626,18 @@ export async function fetchProposalDetailData(proposalId: string): Promise<Propo
           customer_phone?: string | null;
           alt_phone?: string | null;
         };
-        const parts = [
-          c.street_address_line_1,
-          c.street_address_line_2,
-          [c.city, c.state, c.zip_code].filter(Boolean).join(', '),
-          c.country,
-        ].filter(Boolean) as string[];
+        const cityStateZip = [c.city, c.state, c.zip_code]
+          .map((p) => (p ?? '').trim())
+          .filter(Boolean)
+          .join(', ');
         customer = {
           customer_name: c.customer_name || 'N/A',
-          address: parts.length > 0 ? parts.join(', ') : null,
+          address: composeAddress([
+            c.street_address_line_1,
+            c.street_address_line_2,
+            cityStateZip,
+            c.country,
+          ]),
           customer_email: c.customer_email ?? null,
           customer_phone: c.customer_phone ?? c.alt_phone ?? null,
         };

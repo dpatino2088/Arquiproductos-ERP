@@ -81,6 +81,7 @@ export interface CatalogItem {
   is_active: boolean; // NEW SCHEMA: 'is_active'
   active?: boolean; // Legacy: kept for backward compatibility
   discontinued: boolean;
+  primary_location_id?: string | null;
   image_url?: string | null; // Image URL from Supabase Storage or external URL
   deleted?: boolean; // Optional for backward compatibility
   archived?: boolean; // Optional for backward compatibility
