@@ -50,7 +50,7 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
   const [draftPermissionsFromParent, setDraftPermissionsFromParent] = useState<Set<string> | null>(null);
   const { activeOrganizationId, hasOrganizations, loading: orgLoading } = useOrganizationContext();
   const { user } = useAuthStore();
-  const { isSuperAdmin, loading: roleLoading } = useCurrentOrgRole();
+  const { isSuperAdmin, isAdmin, loading: roleLoading } = useCurrentOrgRole();
   const { showConfirm, dialogState, closeDialog, handleConfirm } = useConfirmDialog();
   const previousRoleRef = useRef<string | null>(null);
   const permissionsComponentRef = useRef<{ applyRolePreset: (role: OrgRole, allPermissionCodes?: string[]) => Promise<void> } | null>(null);
@@ -83,9 +83,15 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
       return;
     }
 
-    // Solo Superadmin puede crear usuarios
-    if (!isSuperAdmin) {
-      setSaveError('Only Superadmins can create users.');
+    // Admin y Superadmin pueden crear usuarios
+    if (!isSuperAdmin && !isAdmin) {
+      setSaveError('Only admins and superadmins can create users.');
+      return;
+    }
+
+    // Solo superadmin puede asignar rol superadmin
+    if (data.role === 'superadmin' && !isSuperAdmin) {
+      setSaveError('Only superadmins can assign the superadmin role.');
       return;
     }
 
@@ -179,13 +185,13 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
     );
   }
 
-  // No permissions (only Superadmin can create users)
-  if (!isSuperAdmin) {
+  // No permissions (only Admin/Superadmin can create users)
+  if (!isSuperAdmin && !isAdmin) {
     return (
       <div className="py-6 px-6">
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
           <p className="text-sm text-yellow-800 font-medium">No permissions</p>
-          <p className="text-sm text-yellow-700 mt-1">Only Superadmins can create users.</p>
+          <p className="text-sm text-yellow-700 mt-1">Only admins and superadmins can create users.</p>
         </div>
       </div>
     );
@@ -482,7 +488,9 @@ export default function OrganizationUserNew({ embedded = false }: OrganizationUs
                   form.formState.errors.role ? 'border-red-300 bg-red-50' : 'border-gray-200'
                 }`}
               >
-                <option value="superadmin">{getRoleLabel('superadmin')}</option>
+                {isSuperAdmin && (
+                  <option value="superadmin">{getRoleLabel('superadmin')}</option>
+                )}
                 <option value="admin">{getRoleLabel('admin')}</option>
                 <option value="sales_coordinator">{getRoleLabel('sales_coordinator')}</option>
                 <option value="operator_admin">{getRoleLabel('operator_admin')}</option>
