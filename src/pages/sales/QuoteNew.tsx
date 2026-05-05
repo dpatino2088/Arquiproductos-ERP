@@ -4355,7 +4355,7 @@ export default function QuoteNew() {
     if (!quoteId) return;
     setIsSaving(true);
     try {
-      await updateQuote(quoteId, { status: 'cancelled' });
+      await updateQuote(quoteId, { status: 'canceled' });
       useUIStore.getState().addNotification({ type: 'success', title: 'Cancelled', message: 'Quote has been cancelled.' });
       setCancelConfirmOpen(false);
       router.navigate('/sales/quotes');

@@ -455,7 +455,7 @@ export default function Quotes() {
       // StatusTabs filter (primary)
       if (statusTab !== 'all') {
         if (statusTab === 'cancelled') {
-          result = result.filter((q) => q.status === 'cancelled' || q.status === ('canceled' as any));
+          result = result.filter((q) => q.status === 'canceled' || q.status === ('cancelled' as any));
         } else {
           result = result.filter((q) => q.status === statusTab);
         }

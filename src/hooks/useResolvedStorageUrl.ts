@@ -6,6 +6,17 @@ function isSupabasePublicStorageUrl(url: string): boolean {
   return /^https?:\/\/[^/]*\/storage\/v1\/object\/public\//i.test(url.trim());
 }
 
+/** Local static assets served by Vite/public (must NOT be rewritten to Supabase Storage). */
+function isLocalStaticAssetPath(path: string): boolean {
+  const normalized = path.trim().toLowerCase();
+  return (
+    normalized.startsWith('/images/') ||
+    normalized.startsWith('images/') ||
+    normalized.startsWith('/assets/') ||
+    normalized.startsWith('assets/')
+  );
+}
+
 /**
  * Resolves a logo_url for display in UI (Proposal, Print).
  * - If already a Supabase public URL (/storage/v1/object/public/...): return it as-is.
@@ -25,6 +36,20 @@ export function useResolvedStorageUrl(url: string | null | undefined): string | 
     // Already a public storage URL → use as-is (no signing)
     if (isSupabasePublicStorageUrl(trimmed)) {
       setResolved(trimmed);
+      return;
+    }
+
+    // Local static image in /public (e.g. /images/DR_2.0.png)
+    if (isLocalStaticAssetPath(trimmed)) {
+      // Respect Vite BASE_URL for deployments under subpaths.
+      if (trimmed.startsWith('/')) {
+        const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+        const localPath = trimmed.replace(/^\/+/, '');
+        setResolved(`${base}/${localPath}`);
+      } else {
+        const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+        setResolved(`${base}/${trimmed}`);
+      }
       return;
     }
 
