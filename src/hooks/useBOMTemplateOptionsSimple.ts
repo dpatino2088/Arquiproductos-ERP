@@ -44,6 +44,12 @@ export interface RoleOption {
   gear_ratio?: 'standard' | '1:1.5' | '1:3' | null;
   /** IDs de templates que tienen este componente */
   templateIds?: string[];
+  /**
+   * IDs de templates donde este componente está marcado como REQUERIDO (is_required=true).
+   * Subset de templateIds. Usado para filtrar correctamente en NONE: si un template
+   * solo tiene el rol como OPCIONAL, NO debe ser excluido al elegir NONE.
+   */
+  requiredTemplateIds?: string[];
   virtual?: boolean;
 }
 
@@ -275,7 +281,7 @@ export function useProgressiveTemplateFilter(
       // Filter by role - we need to query again with role filter
       const { data: roleComponents, error: roleError } = await supabase
         .from('BOMComponents')
-        .select('component_item_id, bom_template_id, component_role')
+        .select('component_item_id, bom_template_id, component_role, is_required')
         .eq('organization_id', activeOrganizationId)
         .in('bom_template_id', templateIds)
         .is('parent_component_id', null)
@@ -294,14 +300,21 @@ export function useProgressiveTemplateFilter(
       // Collect unique component_item_ids and track which templates have each
       const componentItemIds = new Set<string>();
       const itemToTemplates = new Map<string, string[]>();
+      const itemToRequiredTemplates = new Map<string, string[]>();
 
-      filteredComponents.forEach((c: { component_item_id: string; component_role: string; bom_template_id: string }) => {
+      filteredComponents.forEach((c: { component_item_id: string; component_role: string; bom_template_id: string; is_required?: boolean | null }) => {
         if (c.component_item_id) {
           componentItemIds.add(c.component_item_id);
           if (!itemToTemplates.has(c.component_item_id)) {
             itemToTemplates.set(c.component_item_id, []);
           }
           itemToTemplates.get(c.component_item_id)!.push(c.bom_template_id);
+          if (c.is_required !== false) {
+            if (!itemToRequiredTemplates.has(c.component_item_id)) {
+              itemToRequiredTemplates.set(c.component_item_id, []);
+            }
+            itemToRequiredTemplates.get(c.component_item_id)!.push(c.bom_template_id);
+          }
         }
       });
 
@@ -332,6 +345,7 @@ export function useProgressiveTemplateFilter(
         
         const key = item.id;
         const templateIds = itemToTemplates.get(item.id) || [];
+        const requiredTemplateIds = itemToRequiredTemplates.get(item.id) || [];
 
         if (!itemMap.has(key)) {
           itemMap.set(key, {
@@ -344,12 +358,14 @@ export function useProgressiveTemplateFilter(
             category_id: item.category_id ?? null,
             gear_ratio: inferGearRatio(item.sku, item.name, (item as any).description),
             templateIds,
+            requiredTemplateIds,
             virtual: false,
           });
         } else {
           // Merge template IDs (por si acaso)
           const existing = itemMap.get(key)!;
           existing.templateIds = [...new Set([...(existing.templateIds || []), ...templateIds])];
+          existing.requiredTemplateIds = [...new Set([...(existing.requiredTemplateIds || []), ...requiredTemplateIds])];
         }
       });
 
@@ -559,13 +575,24 @@ export function useBOMTemplateOptionsSimple(
           (c.component_role || '').toLowerCase().trim() === normalizedRole
         );
 
-        setRoleRequired(components.some((c: any) => c.is_required !== false));
+        // roleRequired = true ONLY when every template in the current set requires this role.
+        // If some templates have no component for this role at all, those templates don't require
+        // it — meaning the user can take a path without it, so it's optional.
+        const templateIdsWithRole = new Set(components.map((c: any) => c.bom_template_id));
+        const allTemplatesRequireRole = templateIds.length > 0 && templateIds.every((tid: string) => {
+          if (!templateIdsWithRole.has(tid)) return false; // template has no component for this role → doesn't require it
+          return components
+            .filter((c: any) => c.bom_template_id === tid)
+            .some((c: any) => c.is_required !== false);
+        });
+        setRoleRequired(allTemplatesRequireRole);
 
         // Collect unique component_item_ids and track templates
         const componentItemIds = new Set<string>();
         const itemToTemplates = new Map<string, Set<string>>();
+        const itemToRequiredTemplates = new Map<string, Set<string>>();
 
-        components.forEach((c: { component_item_id: string; component_role: string; bom_template_id: string }) => {
+        components.forEach((c: { component_item_id: string; component_role: string; bom_template_id: string; is_required?: boolean | null }) => {
           if (c.component_item_id) {
             componentItemIds.add(c.component_item_id);
             if (!itemToTemplates.has(c.component_item_id)) {
@@ -573,6 +600,12 @@ export function useBOMTemplateOptionsSimple(
             }
             if (c.bom_template_id) {
               itemToTemplates.get(c.component_item_id)!.add(c.bom_template_id);
+              if (c.is_required !== false) {
+                if (!itemToRequiredTemplates.has(c.component_item_id)) {
+                  itemToRequiredTemplates.set(c.component_item_id, new Set());
+                }
+                itemToRequiredTemplates.get(c.component_item_id)!.add(c.bom_template_id);
+              }
             }
           }
         });
@@ -620,6 +653,7 @@ export function useBOMTemplateOptionsSimple(
           // Usar el ID del item como key único (garantiza no duplicados)
           const key = item.id;
           const templateIds = Array.from(itemToTemplates.get(item.id) || []);
+          const requiredTemplateIds = Array.from(itemToRequiredTemplates.get(item.id) || []);
           
           if (!itemMap.has(key)) {
             itemMap.set(key, {
@@ -632,12 +666,14 @@ export function useBOMTemplateOptionsSimple(
               category_id: item.category_id ?? null,
               gear_ratio: inferGearRatio(item.sku, item.name, (item as any).description),
               templateIds,
+              requiredTemplateIds,
               virtual: false,
             });
           } else {
             // Merge template IDs (por si acaso)
             const existing = itemMap.get(key)!;
             existing.templateIds = [...new Set([...(existing.templateIds || []), ...templateIds])];
+            existing.requiredTemplateIds = [...new Set([...(existing.requiredTemplateIds || []), ...requiredTemplateIds])];
           }
         });
 
@@ -774,7 +810,7 @@ export function useBOMTemplateAllRoleOptions(
 
         const { data: allComponents, error: componentsError } = await supabase
           .from('BOMComponents')
-          .select('component_item_id, component_role, bom_template_id')
+          .select('component_item_id, component_role, bom_template_id, is_required')
           .eq('organization_id', activeOrganizationId)
           .in('bom_template_id', templateIds)
           .is('parent_component_id', null)
@@ -787,17 +823,28 @@ export function useBOMTemplateAllRoleOptions(
 
         // Filter and group by role
         const componentIdsByRole = new Map<string, Map<string, Set<string>>>();
-        normalizedRoles.forEach((r: string) => componentIdsByRole.set(r, new Map()));
+        const requiredIdsByRole = new Map<string, Map<string, Set<string>>>();
+        normalizedRoles.forEach((r: string) => {
+          componentIdsByRole.set(r, new Map());
+          requiredIdsByRole.set(r, new Map());
+        });
 
-        (allComponents || []).forEach((c: { component_item_id?: string; bom_template_id: string; component_role?: string }) => {
+        (allComponents || []).forEach((c: { component_item_id?: string; bom_template_id: string; component_role?: string; is_required?: boolean | null }) => {
           const compRole = (c.component_role || '').toLowerCase().trim();
           if (normalizedRoles.includes(compRole) && c.component_item_id) {
             const roleMap = componentIdsByRole.get(compRole)!;
+            const reqMap = requiredIdsByRole.get(compRole)!;
             if (!roleMap.has(c.component_item_id)) {
               roleMap.set(c.component_item_id, new Set());
             }
             if (c.bom_template_id) {
               roleMap.get(c.component_item_id)!.add(c.bom_template_id);
+              if (c.is_required !== false) {
+                if (!reqMap.has(c.component_item_id)) {
+                  reqMap.set(c.component_item_id, new Set());
+                }
+                reqMap.get(c.component_item_id)!.add(c.bom_template_id);
+              }
             }
           }
         });
@@ -839,12 +886,14 @@ export function useBOMTemplateAllRoleOptions(
         const result = new Map<string, RoleOption[]>();
         normalizedRoles.forEach(role => {
           const roleMap = componentIdsByRole.get(role)!;
+          const reqMap = requiredIdsByRole.get(role)!;
           const itemMap = new Map<string, RoleOption>();
 
           roleMap.forEach((templateIdsSet, itemId) => {
             const item = itemById.get(itemId);
             if (item && item.id && item.sku) {
               const templateIds = Array.from(templateIdsSet);
+              const requiredTemplateIds = Array.from(reqMap.get(itemId) || []);
               if (!itemMap.has(itemId)) {
                 itemMap.set(itemId, {
                   id: item.id,
@@ -856,10 +905,12 @@ export function useBOMTemplateAllRoleOptions(
                   category_id: item.category_id,
                   gear_ratio: inferGearRatio(item.sku, item.name, (item as any).description),
                   templateIds,
+                  requiredTemplateIds,
                 });
               } else {
                 const existing = itemMap.get(itemId)!;
                 existing.templateIds = [...new Set([...(existing.templateIds || []), ...templateIds])];
+                existing.requiredTemplateIds = [...new Set([...(existing.requiredTemplateIds || []), ...requiredTemplateIds])];
               }
             }
           });

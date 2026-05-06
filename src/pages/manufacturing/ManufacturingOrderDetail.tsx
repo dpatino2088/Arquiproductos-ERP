@@ -1309,7 +1309,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
 
       {/* Attachments tab */}
       {activeTab === 'attachments' && moId && (
-        <AttachmentsTab moId={moId} organizationId={mo.organization_id} canEdit={canWriteAttachments && !isTerminal} />
+        <AttachmentsTab moId={moId} organizationId={mo.organization_id} canEdit={canWriteAttachments} />
       )}
     </DetailPageLayout>
   );

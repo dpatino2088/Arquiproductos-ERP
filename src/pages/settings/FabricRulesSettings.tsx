@@ -223,6 +223,19 @@ export default function FabricRulesSettings() {
 
     return (
       <div className="space-y-4 p-4 bg-gray-50 border border-gray-200 rounded">
+        {/* ── Deprecation notice for legacy labor-like fields ── */}
+        <div className="rounded border border-amber-300 bg-amber-50 p-3 text-[11px] text-amber-900">
+          <div className="font-semibold mb-1">Heads up — labor charges live in the Cost Engine</div>
+          <div>
+            <code className="px-1 bg-white/60 rounded">Heat Seal Price</code>,{' '}
+            <code className="px-1 bg-white/60 rounded">Bottom Bar Wrap %</code> and{' '}
+            <code className="px-1 bg-white/60 rounded">Confection %</code> have moved to <strong>Cost Engine → Labor Rules</strong>{' '}
+            (per product type, with size escalation). Values shown here are read-only legacy data and are no longer applied to pricing.
+            Configure the equivalent rates in <em>heatseal_rate_per_m</em>, <em>bottom_bar_wrap_rate_per_m</em>, and{' '}
+            <em>confection_base / confection_rate_per_m²</em>.
+          </div>
+        </div>
+
         {/* ── Drapery: Variant identification FIRST (required) ── */}
         {ptIsDrapery && (
           <div className="rounded border border-purple-100 bg-purple-50/40 p-3">
@@ -313,11 +326,14 @@ export default function FabricRulesSettings() {
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3 pt-3 border-t border-blue-100">
               <div>
-                <Label className="text-xs">Heat Seal Price ($/m)</Label>
-                <Input type="number" step={0.5} min={0} value={draft.heatseal_price_per_m ?? ''} onChange={e => {
-                  setDraft({ ...draft, heatseal_price_per_m: parseNumberOrUndefined(e.target.value) });
-                }} className="text-xs" />
-                <span className="text-[10px] text-gray-400">Per linear meter of splice</span>
+                <Label className="text-xs text-gray-500 line-through">Heat Seal Price ($/m)</Label>
+                <Input
+                  type="number" step={0.5} min={0}
+                  value={draft.heatseal_price_per_m ?? ''}
+                  readOnly disabled
+                  className="text-xs bg-gray-100 text-gray-500"
+                />
+                <span className="text-[10px] text-amber-700">Deprecated → Cost Engine / Labor Rules</span>
               </div>
               <div>
                 <Label className="text-xs">Heatseal Direction</Label>
@@ -326,23 +342,20 @@ export default function FabricRulesSettings() {
                   <option value="vertical">Vertical (Sew/Drapery)</option>
                   <option value="none">None (no join)</option>
                 </select>
-                <span className="text-[10px] text-gray-400">Join seam orientation</span>
+                <span className="text-[10px] text-gray-400">Join seam orientation (still active — drives seam count)</span>
               </div>
               <div>
-                <Label className="text-xs">Bottom Bar Wrap (%)</Label>
+                <Label className="text-xs text-gray-500 line-through">Bottom Bar Wrap (%)</Label>
                 <div className="relative">
                   <Input
                     type="number" step={1} min={0} max={100}
                     value={bottomBarWrapDisplay}
-                    onChange={e => {
-                      const n = parseNumberOrUndefined(e.target.value);
-                      setDraft({ ...draft, bottom_bar_wrap_pct: n == null ? undefined : n / 100 });
-                    }}
-                    className="text-xs pr-6"
+                    readOnly disabled
+                    className="text-xs pr-6 bg-gray-100 text-gray-500"
                   />
                   <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">%</span>
                 </div>
-                <span className="text-[10px] text-gray-400">Surcharge when forrado</span>
+                <span className="text-[10px] text-amber-700">Deprecated → Labor Rules: bottom_bar_wrap_rate_per_m</span>
               </div>
               <div className="flex items-center gap-2 pt-5">
                 <label className="flex items-center gap-1.5 text-xs">
@@ -400,8 +413,14 @@ export default function FabricRulesSettings() {
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3 pt-3 border-t border-purple-100">
               <div>
-                <Label className="text-xs">Heat Seal Price ($/m)</Label>
-                <Input type="number" step={0.5} min={0} value={draft.heatseal_price_per_m ?? ''} onChange={e => setDraft({ ...draft, heatseal_price_per_m: parseNumberOrUndefined(e.target.value) })} className="text-xs" />
+                <Label className="text-xs text-gray-500 line-through">Heat Seal Price ($/m)</Label>
+                <Input
+                  type="number" step={0.5} min={0}
+                  value={draft.heatseal_price_per_m ?? ''}
+                  readOnly disabled
+                  className="text-xs bg-gray-100 text-gray-500"
+                />
+                <span className="text-[10px] text-amber-700">Deprecated → Cost Engine / Labor Rules</span>
               </div>
               <div>
                 <Label className="text-xs">Heatseal Direction</Label>
@@ -410,6 +429,7 @@ export default function FabricRulesSettings() {
                   <option value="horizontal">Horizontal (Roller)</option>
                   <option value="none">None (no join)</option>
                 </select>
+                <span className="text-[10px] text-gray-400">Drives seam count (still active)</span>
               </div>
               <div className="flex items-center gap-2 pt-5">
                 <label className="flex items-center gap-1.5 text-xs">
@@ -439,20 +459,17 @@ export default function FabricRulesSettings() {
             </div>
           </div>
           <div>
-            <Label className="text-xs">Confection (%)</Label>
+            <Label className="text-xs text-gray-500 line-through">Confection (%)</Label>
             <div className="relative">
               <Input
                 type="number" step={1} min={0} max={100}
                 value={confectionDisplay}
-                onChange={e => {
-                  const n = parseNumberOrUndefined(e.target.value);
-                  setDraft({ ...draft, confection_pct: n == null ? undefined : n / 100 });
-                }}
-                className="text-xs pr-6"
+                readOnly disabled
+                className="text-xs pr-6 bg-gray-100 text-gray-500"
               />
               <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">%</span>
             </div>
-            <span className="text-[10px] text-gray-400">Surcharge on fabric cost</span>
+            <span className="text-[10px] text-amber-700">Deprecated → Labor Rules: confection_base + confection_rate_per_m²</span>
           </div>
           <div>
             <Label className="text-xs">Min Order Qty</Label>
@@ -561,8 +578,12 @@ export default function FabricRulesSettings() {
                                     <span>Panels: {rule.panel_multiplier}x</span>
                                     <span>Wraps: {rule.tube_wrap_mm}/{rule.bottom_wrap_mm} mm</span>
                                     {rule.safety_margin_mm > 0 && <span>Safety: {rule.safety_margin_mm}mm</span>}
-                                    {(rule.heatseal_price_per_m ?? 0) > 0 && <span>Heat Seal: ${rule.heatseal_price_per_m}/m</span>}
-                                    {(rule.bottom_bar_wrap_pct ?? 0) > 0 && <span>BB Wrap: {(rule.bottom_bar_wrap_pct * 100).toFixed(0)}%</span>}
+                                    {(rule.heatseal_price_per_m ?? 0) > 0 && (
+                                      <span className="text-amber-700 line-through" title="Deprecated — moved to Labor Rules">Heat Seal: ${rule.heatseal_price_per_m}/m</span>
+                                    )}
+                                    {(rule.bottom_bar_wrap_pct ?? 0) > 0 && (
+                                      <span className="text-amber-700 line-through" title="Deprecated — moved to Labor Rules">BB Wrap: {(rule.bottom_bar_wrap_pct * 100).toFixed(0)}%</span>
+                                    )}
                                   </>
                                 )}
                                 {isDrapery(rule.fabric_width_source) && (
@@ -575,7 +596,9 @@ export default function FabricRulesSettings() {
                                   </>
                                 )}
                                 <span>Waste: {(rule.waste_pct * 100).toFixed(0)}%</span>
-                                {(rule.confection_pct ?? 0) > 0 && <span>Confection: {(rule.confection_pct * 100).toFixed(0)}%</span>}
+                                {(rule.confection_pct ?? 0) > 0 && (
+                                  <span className="text-amber-700 line-through" title="Deprecated — moved to Labor Rules">Confection: {(rule.confection_pct * 100).toFixed(0)}%</span>
+                                )}
                                 <span>UOM: {rule.pricing_output_uom}</span>
                               </div>
                             </div>

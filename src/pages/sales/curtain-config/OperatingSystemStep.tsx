@@ -233,9 +233,14 @@ export default function OperatingSystemStep({
           .eq('is_active', true)
           .eq('archived', false);
 
+        // ✅ FASE 1b: Aplicar AMBOS filtros cuando estén disponibles.
+        // Antes: usaba else-if; si _manufacturer_filtered_templates estaba vacío
+        // durante la hidratación, se perdía el scope del manufacturer y
+        // aparecían motores de OTROS fabricantes (p.ej. Coulisse en escena Lutron).
         if (mfrFilteredTemplates && mfrFilteredTemplates.length > 0) {
           query = query.in('id', mfrFilteredTemplates);
-        } else if (configManufacturer) {
+        }
+        if (configManufacturer) {
           query = query.ilike('manufacturer', configManufacturer);
         }
 
@@ -444,14 +449,47 @@ export default function OperatingSystemStep({
     return base;
   }, [operationType, selectedMotor, selectedDrive, effectiveBaseTemplates, templatesForMotor, templatesForManual]);
   
+  // ✅ FASE 2: Bloquear carga de tubos hasta que selectedMotor/selectedDrive esté hidratado.
+  // Si motorItemId/driveItemId está seteado pero la opción todavía no se cargó, evitamos
+  // mostrar tubos del set amplio (LUT + LUT64) que permitirían seleccionar combinaciones
+  // inválidas (ej. EDU-64 + LUT-63). Cuando selectedMotor llega, templatesAfterOperation
+  // se reduce al template real del motor y los tubos correctos aparecen.
+  const isMotorReady = operationType !== 'motor' || !motorItemId || (!!selectedMotor && (selectedMotor.templateIds?.length ?? 0) > 0);
+  const isDriveReady = operationType !== 'manual' || !driveItemId || (!!selectedDrive && (selectedDrive.templateIds?.length ?? 0) > 0);
+  const operationCascadeReady = isMotorReady && isDriveReady;
+
   // ✅ Tube: desde templates filtrados por motor/drive (tube NO depende de color) — skip for drapery
-  const { options: tubeOptions, loading: loadingTube, error: tubeError } = useBOMTemplateOptionsSimple(
-    canLoadOptions && !isDrapery ? productTypeId : null,
+  const { options: tubeOptionsRaw, loading: loadingTube, error: tubeError } = useBOMTemplateOptionsSimple(
+    canLoadOptions && !isDrapery && operationCascadeReady ? productTypeId : null,
     null,
     'tube',
     isDrapery ? null : templatesAfterOperation,
     panelCount
   );
+
+  // ✅ FASE 2: Filtrado estricto de compatibilidad.
+  // Aún si templatesAfterOperation se ensanchó por algún edge case, garantizamos que
+  // SOLO se muestren tubos cuyos templateIds intersecten con los del motor/drive
+  // realmente seleccionado. Es la última línea de defensa contra combinaciones inválidas.
+  const tubeOptions = useMemo(() => {
+    if (operationType === 'motor' && motorItemId) {
+      const motorTemplates = selectedMotor?.templateIds || [];
+      if (motorTemplates.length === 0) return [];
+      const motorTids = new Set(motorTemplates);
+      return tubeOptionsRaw.filter(opt =>
+        (opt.templateIds || []).some(t => motorTids.has(t))
+      );
+    }
+    if (operationType === 'manual' && driveItemId) {
+      const driveTemplates = selectedDrive?.templateIds || [];
+      if (driveTemplates.length === 0) return [];
+      const driveTids = new Set(driveTemplates);
+      return tubeOptionsRaw.filter(opt =>
+        (opt.templateIds || []).some(t => driveTids.has(t))
+      );
+    }
+    return tubeOptionsRaw;
+  }, [tubeOptionsRaw, operationType, motorItemId, driveItemId, selectedMotor, selectedDrive]);
 
   const loading = loadingMotor || loadingDrive || loadingTube;
 
@@ -487,6 +525,29 @@ export default function OperatingSystemStep({
       }
     }
   }, [finalFilteredTemplates]);
+
+  // ✅ FASE 2: Auto-corregir tube_item_id stale cuando es incompatible con el motor/drive.
+  // Edge case: una línea fue guardada (en una versión previa sin esta validación) con un
+  // tube que NO existe en el template del motor/drive. Al detectar el mismatch, lo limpiamos
+  // para forzar al usuario a re-elegir un tube compatible y evitar instabilidad downstream.
+  useEffect(() => {
+    if (!tubeItemId) return;
+    if (loadingTube) return;
+    if (!operationCascadeReady) return;
+    if (tubeOptionsRaw.length === 0) return;
+    const stillExistsInRaw = tubeOptionsRaw.some(opt => opt.id === tubeItemId);
+    const isCompatible = tubeOptions.some(opt => opt.id === tubeItemId);
+    if (stillExistsInRaw && !isCompatible) {
+      if (import.meta.env.DEV) {
+        console.warn('[OperatingSystemStep] Auto-clearing stale tube_item_id (incompatible with motor/drive):', tubeItemId);
+      }
+      onUpdate({
+        tube_item_id: undefined,
+        tube_sku: null,
+        tube_type: undefined,
+      } as any);
+    }
+  }, [tubeItemId, loadingTube, operationCascadeReady, tubeOptions, tubeOptionsRaw]);
 
   // Debug logging for results
   useEffect(() => {
@@ -681,6 +742,27 @@ export default function OperatingSystemStep({
       notifyError('Invalid tube selection (virtual SKU).');
       return;
     }
+
+    // ✅ FASE 2: Validar compatibilidad motor/drive ↔ tube ANTES de aplicar.
+    // Bloquea selección de combinaciones inválidas (ej. EDU-64 + LUT-63 que no comparten template).
+    const tubeTids = item.templateIds || [];
+    if (operationType === 'motor' && motorItemId && selectedMotor) {
+      const motorTids = new Set(selectedMotor.templateIds || []);
+      const overlap = tubeTids.some(t => motorTids.has(t));
+      if (!overlap) {
+        notifyError(`Tube "${item.name || item.sku}" is not compatible with motor "${selectedMotor.name || selectedMotor.sku}". Please choose a tube available in the same template.`);
+        return;
+      }
+    }
+    if (operationType === 'manual' && driveItemId && selectedDrive) {
+      const driveTids = new Set(selectedDrive.templateIds || []);
+      const overlap = tubeTids.some(t => driveTids.has(t));
+      if (!overlap) {
+        notifyError(`Tube "${item.name || item.sku}" is not compatible with drive "${selectedDrive.name || selectedDrive.sku}". Please choose a tube available in the same template.`);
+        return;
+      }
+    }
+
     const ok = await persistSelection('tube', String(item.id));
     if (!ok) return;
     
@@ -884,7 +966,7 @@ export default function OperatingSystemStep({
               <div className="text-sm text-gray-500 mt-2">Loading motors...</div>
             ) : motorOptions.length > 0 ? (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                {motorOptions.map((item) => {
+                {motorOptions.filter(item => !motorItemId || item.id === motorItemId).map((item) => {
                   const isSelected = motorItemId === item.id;
                   return (
                     <div
@@ -999,7 +1081,7 @@ export default function OperatingSystemStep({
               <div className="text-sm text-gray-500 mt-2">Loading drive options...</div>
             ) : filteredDriveOptions.length > 0 ? (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                {filteredDriveOptions.map((item) => {
+                {filteredDriveOptions.filter(item => !driveItemId || item.id === driveItemId).map((item) => {
                   const isSelected = driveItemId === item.id;
                   return (
                     <div
@@ -1081,7 +1163,7 @@ export default function OperatingSystemStep({
               <div className="text-sm text-gray-500 mt-2">Loading tube options...</div>
             ) : tubeOptions.length > 0 ? (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                {tubeOptions.map((item) => {
+                {tubeOptions.filter(item => !tubeItemId || item.id === tubeItemId).map((item) => {
                   const isSelected = tubeItemId === item.id;
                   return (
                     <div

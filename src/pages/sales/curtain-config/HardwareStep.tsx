@@ -418,14 +418,16 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
   if (pinnedHeadbox) (pinnedHeadbox as any).__pinned = true;
   const headboxOptionsToRender: RoleOption[] = pinnedHeadbox ? [pinnedHeadbox, ...headboxOptions] : headboxOptions;
   
-  const templatesWithHeadbox = useMemo(() => {
-    const allTemplateIds = new Set<string>();
+  // ✅ Solo templates donde el rol es REQUERIDO (is_required=true).
+  // Usado al elegir NONE: si el rol es opcional, el template puede vivir sin él.
+  const templatesWithRequiredHeadbox = useMemo(() => {
+    const ids = new Set<string>();
     headboxOptions.forEach(opt => {
-      if (opt.templateIds) {
-        opt.templateIds.forEach(tid => allTemplateIds.add(tid));
+      if (opt.requiredTemplateIds) {
+        opt.requiredTemplateIds.forEach(tid => ids.add(tid));
       }
     });
-    return allTemplateIds;
+    return ids;
   }, [headboxOptions]);
   
   const templatesAfterHeadbox = useMemo(() => {
@@ -436,13 +438,14 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
       const set = new Set(selectedHeadbox.templateIds);
       return prev.filter(tid => set.has(tid));
     }
-    // NONE (explícito): solo templates que NO tienen headbox
+    // NONE (explícito): solo dropear templates que REQUIEREN headbox.
+    // Templates con headbox opcional permanecen (pueden configurarse sin headbox).
     if (headboxItemId === 'NONE') {
-      return filterTemplatesWithoutRole(prev, templatesWithHeadbox) ?? prev;
+      return filterTemplatesWithoutRole(prev, templatesWithRequiredHeadbox) ?? prev;
     }
     // UNSET (null/undefined): NO filtrar por headbox
     return prev;
-  }, [headboxItemId, selectedHeadbox, templatesAfterBottomBar, templatesWithHeadbox]);
+  }, [headboxItemId, selectedHeadbox, templatesAfterBottomBar, templatesWithRequiredHeadbox]);
   
   // ✅ Side Channel: desde templates filtrados
   const { options: sideChannelOptions, loading: loadingSideChannel, roleRequired: sideChannelIsRequired } = useBOMTemplateOptionsSimple(
@@ -474,14 +477,15 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
   if (pinnedSideChannel) (pinnedSideChannel as any).__pinned = true;
   const sideChannelOptionsToRender: RoleOption[] = pinnedSideChannel ? [pinnedSideChannel, ...sideChannelOptions] : sideChannelOptions;
   
-  const templatesWithSideChannel = useMemo(() => {
-    const allTemplateIds = new Set<string>();
+  // ✅ Solo templates donde side_channel es REQUERIDO. NONE no debe excluir templates con rol opcional.
+  const templatesWithRequiredSideChannel = useMemo(() => {
+    const ids = new Set<string>();
     sideChannelOptions.forEach(opt => {
-      if (opt.templateIds) {
-        opt.templateIds.forEach(tid => allTemplateIds.add(tid));
+      if (opt.requiredTemplateIds) {
+        opt.requiredTemplateIds.forEach(tid => ids.add(tid));
       }
     });
-    return allTemplateIds;
+    return ids;
   }, [sideChannelOptions]);
   
   const templatesAfterSideChannel = useMemo(() => {
@@ -492,10 +496,10 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
       return prev.filter(tid => set.has(tid));
     }
     if (sideChannelItemId === 'NONE') {
-      return filterTemplatesWithoutRole(prev, templatesWithSideChannel) ?? prev;
+      return filterTemplatesWithoutRole(prev, templatesWithRequiredSideChannel) ?? prev;
     }
     return prev;
-  }, [sideChannelItemId, selectedSideChannel, templatesAfterHeadbox, templatesWithSideChannel]);
+  }, [sideChannelItemId, selectedSideChannel, templatesAfterHeadbox, templatesWithRequiredSideChannel]);
   
   // ✅ Bottom Channel: desde templates filtrados
   const { options: bottomChannelOptions, loading: loadingBottomChannel, roleRequired: bottomChannelIsRequired } = useBOMTemplateOptionsSimple(
@@ -526,14 +530,15 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
   if (pinnedBottomChannel) (pinnedBottomChannel as any).__pinned = true;
   const bottomChannelOptionsToRender: RoleOption[] = pinnedBottomChannel ? [pinnedBottomChannel, ...bottomChannelOptions] : bottomChannelOptions;
   
-  const templatesWithBottomChannel = useMemo(() => {
-    const allTemplateIds = new Set<string>();
+  // ✅ Solo templates donde bottom_channel es REQUERIDO. NONE no debe excluir templates con rol opcional.
+  const templatesWithRequiredBottomChannel = useMemo(() => {
+    const ids = new Set<string>();
     bottomChannelOptions.forEach(opt => {
-      if (opt.templateIds) {
-        opt.templateIds.forEach(tid => allTemplateIds.add(tid));
+      if (opt.requiredTemplateIds) {
+        opt.requiredTemplateIds.forEach(tid => ids.add(tid));
       }
     });
-    return allTemplateIds;
+    return ids;
   }, [bottomChannelOptions]);
   
   const finalFilteredTemplates = useMemo(() => {
@@ -544,10 +549,10 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
       return prev.filter(tid => set.has(tid));
     }
     if (bottomChannelItemId === 'NONE') {
-      return filterTemplatesWithoutRole(prev, templatesWithBottomChannel) ?? prev;
+      return filterTemplatesWithoutRole(prev, templatesWithRequiredBottomChannel) ?? prev;
     }
     return prev;
-  }, [bottomChannelItemId, selectedBottomChannel, templatesAfterSideChannel, templatesWithBottomChannel]);
+  }, [bottomChannelItemId, selectedBottomChannel, templatesAfterSideChannel, templatesWithRequiredBottomChannel]);
   
   // ✅ Guardar templates filtrados en config para el siguiente step
   useEffect(() => {

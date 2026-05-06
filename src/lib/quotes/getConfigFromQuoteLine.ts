@@ -411,6 +411,29 @@ export async function getConfigFromQuoteLine(
     }
   }
 
+  // ✅ FASE 1c: Hidratar _manufacturer_filtered_templates desde manufacturer al editar/duplicar.
+  // Sin esto, al abrir una línea existente el OperatingSystemStep cae al fallback amplio
+  // y muestra motores de OTROS fabricantes hasta que el usuario re-visita ManufacturerStep.
+  if (
+    config.manufacturer &&
+    productTypeId &&
+    (!Array.isArray((config as any)._manufacturer_filtered_templates) ||
+      ((config as any)._manufacturer_filtered_templates || []).length === 0)
+  ) {
+    const { data: mfrTpls } = await supabase
+      .from('BOMTemplates')
+      .select('id')
+      .eq('organization_id', organizationId)
+      .eq('product_type_id', productTypeId)
+      .ilike('manufacturer', config.manufacturer)
+      .eq('is_active', true)
+      .eq('archived', false);
+    const ids = (mfrTpls || []).map((t: { id: string }) => t.id);
+    if (ids.length > 0) {
+      (config as any)._manufacturer_filtered_templates = ids;
+    }
+  }
+
   const needsDraperyRecovery = isDrapery && bomTemplateId && (
     (!config.productLine && !config.product_line) ||
     (!config.systemSize && !config.system_size) ||

@@ -179,8 +179,21 @@ export const ORG_ROLE_PRESETS: Record<OrgRole, string[]> = {
   ],
   operator_admin: [
     'dashboard.read',
+    // Catalog (read-only lookup)
     'catalog.read',
+    'catalog.items.read',
+    'catalog.bom.read',
+    // Inventory (full read + receive/move stock; no purchasing)
+    'inventory.read',
     'inventory.warehouse.read',
+    'inventory.warehouse.write',
+    'inventory.transactions.read',
+    'inventory.transactions.write',
+    'inventory.receipts.read',
+    'inventory.receipts.write',
+    'inventory.adjustments.read',
+    'inventory.material_demand.read',
+    // Manufacturing Orders (full management)
     'manufacturing.mo.read',
     'manufacturing.mo.write',
     'manufacturing.mo.overview.read',
@@ -195,19 +208,51 @@ export const ORG_ROLE_PRESETS: Record<OrgRole, string[]> = {
     'manufacturing.mo.timeline.read',
     'manufacturing.mo.attachments.read',
     'manufacturing.mo.attachments.write',
+    // Work Orders, Calendar, Cut Optimization, Workstation, Finished Goods
     'manufacturing.wo.read',
     'manufacturing.wo.write',
+    'manufacturing.workstation.read',
     'manufacturing.cutopt.read',
+    'manufacturing.cutopt.write',
     'manufacturing.calendar.read',
+    'manufacturing.calendar.write',
     'manufacturing.finished_goods.read',
+    'manufacturing.finished_goods.write',
+    // Partners (read-only: vendors, dealers, manufacturers)
+    'partners.read',
+    // Operator Admin does NOT get:
+    //  - manufacturing.costs.read (cost visibility is finance/admin only)
+    //  - inventory.purchase_orders.* (procurement role)
+    //  - sales.* / financials.* / settings.* / org.users.manage
   ],
   operator_member: [
     'dashboard.read',
+    // Catalog (read-only lookup of SKUs)
     'catalog.read',
+    'catalog.items.read',
+    // Inventory (read-only: look up stock & location)
+    'inventory.warehouse.read',
+    // Manufacturing Orders (read-only context for the WO being executed)
+    'manufacturing.mo.read',
+    'manufacturing.mo.lines.read',
+    'manufacturing.mo.materials.read',
+    'manufacturing.mo.work_orders.read',
+    'manufacturing.mo.timeline.read',
+    'manufacturing.mo.attachments.read',
+    // Work Orders & cutting (write to mark progress / cuts)
     'manufacturing.wo.read',
     'manufacturing.wo.write',
+    'manufacturing.workstation.read',
     'manufacturing.cutopt.read',
+    'manufacturing.cutopt.write',
+    'manufacturing.calendar.read',
+    // Finished goods (mark items ready for pickup)
     'manufacturing.finished_goods.read',
+    'manufacturing.finished_goods.write',
+    // Operator Member does NOT get:
+    //  - manufacturing.mo.write/overview.write/notes.write/schedule.write
+    //  - manufacturing.costs.read
+    //  - inventory write, purchasing, sales, financials, settings
   ],
   operator: [
     'dashboard.read',

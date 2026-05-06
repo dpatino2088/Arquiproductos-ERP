@@ -1757,6 +1757,8 @@ export default function QuoteNew() {
         // 4. Update QuoteLine — only structural fields, NO pricing
         const updatePayload: Record<string, any> = {
           configured_product_id: cpNewId,
+          product_type_id: productTypeId,
+          product_type: productConfig.productType ?? null,
           width_m,
           height_m,
           area: productConfig.area ?? null,
@@ -1766,11 +1768,12 @@ export default function QuoteNew() {
           installation_type: (productConfig as any).installationType ?? null,
           installation_location: (productConfig as any).installationLocation ?? null,
         };
-        if (cpNew?.roll_catalog_item_id) updatePayload.catalog_item_id = cpNew.roll_catalog_item_id;
-        if (rollItemName) updatePayload.name = rollItemName;
-        if (rollItemSku) updatePayload.sku = rollItemSku;
-        if (cpNew?.roll_collection_name) updatePayload.collection_name = cpNew.roll_collection_name;
-        if (cpNew?.roll_variant_name) updatePayload.variant_name = cpNew.roll_variant_name;
+        // Sync fabric/roll fields — always set (clear stale values from previous product type)
+        updatePayload.catalog_item_id = cpNew?.roll_catalog_item_id ?? null;
+        updatePayload.name = rollItemName ?? null;
+        updatePayload.sku = rollItemSku ?? null;
+        updatePayload.collection_name = cpNew?.roll_collection_name ?? null;
+        updatePayload.variant_name = cpNew?.roll_variant_name ?? null;
 
         const { error: updateError } = await supabase
           .from('QuoteLines')

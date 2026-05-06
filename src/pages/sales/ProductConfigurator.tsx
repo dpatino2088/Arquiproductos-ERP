@@ -482,62 +482,59 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
   // Handle product type selection
   const handleProductTypeSelect = (type: ProductType, productTypeId?: string) => {
     setProductType(type);
-    
-    // ✅ SOLUCIÓN DEFINITIVA: Reset auto-commit ref cuando cambia ProductType
     autoCommittedRef.current = null;
-    
-    // CRITICAL: When editing, don't reset config - just update productType and productTypeId
+
     setConfig(prev => {
-      const hasExistingConfig = prev && Object.keys(prev).length > 1;
-      const prevProductTypeId = (prev as any).product_type_id || (prev as any).productTypeId;
-      const isProductTypeChanging = prevProductTypeId && prevProductTypeId !== productTypeId;
-      
-      // If we already have a config with the same product type (editing scenario)
-      // preserve ALL existing values including bom_template_id
-      if (hasExistingConfig && prev.productType === type) {
+      const prevAny = prev as any;
+
+      // Same product type (editing scenario): preserve everything
+      if (prev.productType === type) {
         if (import.meta.env.DEV) {
-          console.log('ProductConfigurator: Preserving existing config (editing)', {
-            type,
-            productTypeId,
-            existingConfig: prev,
-            bom_template_id: (prev as any).bom_template_id,
-          });
+          console.log('[ProductConfigurator] Same product type — preserving full config', { type, productTypeId });
         }
         return {
           ...prev,
           productType: type,
           ...(productTypeId ? { productTypeId, product_type_id: productTypeId } : {}),
-          // Preserve bom_template_id if it exists
-          ...((prev as any).bom_template_id ? { bom_template_id: (prev as any).bom_template_id } : {}),
         } as Partial<ProductConfig>;
       }
-      
-      // New selection or ProductType changed - update productType but preserve bom_template_id
-      // if it was already set (auto-select might have set it before this runs)
-      const baseConfig: Partial<ProductConfig> = { 
-        productType: type as any, 
-        position: prev.position || '',
-        ...(productTypeId ? { productTypeId, product_type_id: productTypeId } : {}),
-        // CRITICAL: If ProductType is changing, clear bom_template_id
-        // Otherwise, preserve it if it exists (might have been set by auto-select)
-        ...(isProductTypeChanging ? { bom_template_id: null } : ((prev as any).bom_template_id ? { bom_template_id: (prev as any).bom_template_id } : {})),
-      };
-      
+
+      // Product type is changing: preserve ONLY neutral/measurement fields.
+      // All product-type-specific selections are cleared to avoid incompatible state.
       if (import.meta.env.DEV) {
-        console.log('ProductConfigurator: New product type selected', {
-          type,
-          productTypeId,
-          prevProductTypeId,
-          isProductTypeChanging,
-          newConfig: baseConfig,
-          preservedBomTemplateId: (prev as any).bom_template_id,
+        console.log('[ProductConfigurator] Product type changed — resetting to measurements only', {
+          from: prev.productType,
+          to: type,
+          preservedMeasurements: {
+            position: prevAny.position,
+            area: prevAny.area,
+            quantity: prevAny.quantity,
+            width_m: prevAny.width_m,
+            height_m: prevAny.height_m,
+            panels: prevAny.panels,
+          },
         });
       }
-      
-      return baseConfig as Partial<ProductConfig>;
+
+      return {
+        productType: type as any,
+        ...(productTypeId ? { productTypeId, product_type_id: productTypeId } : {}),
+        // Neutral fields preserved (both mm and m variants for compatibility)
+        position:     prevAny.position     ?? '',
+        area:         prevAny.area         ?? null,
+        quantity:     prevAny.quantity     ?? 1,
+        width_mm:     prevAny.width_mm     ?? null,
+        width_m:      prevAny.width_m      ?? null,
+        height_mm:    prevAny.height_mm    ?? null,
+        height_m:     prevAny.height_m     ?? null,
+        panels:       Array.isArray(prevAny.panels) ? prevAny.panels : null,
+        measurements: prevAny.measurements ?? null,
+        // All product-specific fields are intentionally omitted (cleared)
+        bom_template_id: null,
+      } as Partial<ProductConfig>;
     });
-    
-    setCurrentStepIndex(1); // Move to first step after product selection
+
+    setCurrentStepIndex(1);
   };
 
   // FASE 2: Handle step updates - preserve critical fields
@@ -802,35 +799,34 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
     }
   };
 
+  // ✅ FASE 1a: En edit/duplicate, navegar hacia atrás NO borra selecciones downstream.
+  // El usuario puede revisar steps anteriores sin perder lo configurado.
+  // Las selecciones que queden inválidas tras un cambio real las re-validan los propios steps.
   const handleBack = () => {
+    const isEditOrDuplicate = initialConfig && Object.keys(initialConfig).length > 0;
     if (currentStepIndex > 1) {
-      // Go back to previous product step
       const nextIndex = currentStepIndex - 1;
-      void clearSelectionsAfterStep(nextIndex);
+      if (!isEditOrDuplicate) {
+        void clearSelectionsAfterStep(nextIndex);
+      }
       setCurrentStepIndex(nextIndex);
     } else if (currentStepIndex === 1) {
-      // Go back to product selection (step 0)
-      void clearSelectionsAfterStep(0);
+      if (!isEditOrDuplicate) {
+        void clearSelectionsAfterStep(0);
+      }
       setCurrentStepIndex(0);
-      // Optionally clear product type to allow reselection
-      // setProductType(null);
-      // setConfig(prev => ({ ...prev, productType: undefined }));
     }
   };
 
   const handleStepClick = (index: number) => {
-    // When editing, allow navigation to any step (not just completed ones)
-    // This is because all data is already loaded from DB
     const hasInitialConfig = initialConfig && Object.keys(initialConfig).length > 0;
     
     if (hasInitialConfig) {
-      // When editing, allow free navigation to all steps
-      if (index < currentStepIndex) {
-        void clearSelectionsAfterStep(index);
-      }
+      // ✅ FASE 1a: En edit mode, navegación libre y NO destructiva.
+      // Saltar a un step anterior preserva todas las selecciones posteriores.
       setCurrentStepIndex(index);
     } else {
-      // When creating new, only allow navigation to completed steps
+      // En NEW mode, mantener cascada (volver atrás invalida lo que sigue)
       if (index <= currentStepIndex) {
         if (index < currentStepIndex) {
           void clearSelectionsAfterStep(index);
@@ -1179,7 +1175,28 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
             });
           }
 
-          // Agregar configured_product_id al config antes de pasar a onComplete
+          // STRICT MODE: if no LaborRule matched, block the line. Pricing is incomplete.
+          const totalsAny = (previewResult.totals || {}) as Record<string, any>;
+          const isLaborUnresolved = totalsAny.labor_unresolved === true
+            || (totalsAny.labor_engine_source === 'unresolved');
+          if (isLaborUnresolved) {
+            const ctx = (totalsAny.labor_calc_meta && totalsAny.labor_calc_meta.context) || {};
+            const ctxParts: string[] = [];
+            if (ctx.width_mm != null) ctxParts.push(`${Number(ctx.width_mm).toFixed(0)}mm wide`);
+            if (ctx.height_mm != null) ctxParts.push(`${Number(ctx.height_mm).toFixed(0)}mm tall`);
+            if (ctx.panel_count != null) ctxParts.push(`${ctx.panel_count} panel${ctx.panel_count === 1 ? '' : 's'}`);
+            if (ctx.drops != null) ctxParts.push(`${ctx.drops} drop${ctx.drops === 1 ? '' : 's'}`);
+            if (ctx.has_motor != null) ctxParts.push(ctx.has_motor ? 'motorized' : 'manual');
+            const ctxStr = ctxParts.length > 0 ? ctxParts.join(', ') : 'this configuration';
+            useUIStore.getState().addNotification({
+              type: 'error',
+              title: 'Labor cost is unresolved',
+              message: `No active LaborRule matches ${ctxStr}. Pricing is blocked. Open Settings → Cost Engine → Labor Rules and create a rule that covers this product before saving.`,
+            });
+            setIsSubmitting(false);
+            return;
+          }
+
           (finalNormalizedConfig as any).configured_product_id = previewResult.configured_product_id;
           (finalNormalizedConfig as any).configured_product_totals = previewResult.totals;
           // ✅ CRITICAL: bom_template_id viene del ConfiguredProduct (strict matching)

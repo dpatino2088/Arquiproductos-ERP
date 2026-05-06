@@ -34,8 +34,12 @@ const formatCurrency = (amount: number) => {
 
 export default function Quotes() {
   const { activeOrganizationId } = useOrganizationContext();
-  const { isInternal } = useAccessContext();
-  const { canCreate: canCreateQuote, canArchive: canArchiveQuote, canDelete: canDeleteQuote } = useGranularAccess('quotes');
+  const { isInternal, portalRole } = useAccessContext();
+  const { canCreate: _canCreate, canArchive: _canArchive, canDelete: _canDelete } = useGranularAccess('quotes');
+  const isDealerManager = portalRole === 'dealer_manager';
+  const canCreateQuote  = _canCreate  || isDealerManager;
+  const canArchiveQuote = _canArchive || isDealerManager;
+  const canDeleteQuote  = _canDelete  || isDealerManager;
   const { dialogState, showConfirm, closeDialog, setLoading: setDialogLoading, handleConfirm } = useConfirmDialog();
 
   // Una sola fuente de verdad: filtro por dealer y enriquecimiento en useQuotes
@@ -171,6 +175,16 @@ export default function Quotes() {
     return set;
   }, []);
 
+  /** Returns proposal IDs linked to a quote */
+  const getProposalIdsForQuote = useCallback(async (quoteId: string): Promise<string[]> => {
+    const { data } = await supabase
+      .from('Proposals')
+      .select('id, proposal_no')
+      .eq('quote_id', quoteId)
+      .or('deleted.is.false,deleted.is.null');
+    return (data || []).map((r: { id: string }) => r.id);
+  }, []);
+
   // ✅ registerSubmodules se maneja en SalesDirectory.tsx (wrapper)
 
   // Limpiar selección cuando los IDs ya no están en la lista (p. ej. tras borrar)
@@ -202,19 +216,17 @@ export default function Quotes() {
       return;
     }
 
-    const idsWithProposals = await getQuoteIdsWithProposals([quote.id]);
-    if (idsWithProposals.has(quote.id)) {
-      useUIStore.getState().addNotification({
-        type: 'error',
-        title: 'No se puede eliminar',
-        message: 'Esta cotización tiene propuestas asociadas. Elimine primero las propuestas desde la lista de Proposals.',
-      });
-      return;
-    }
+    // Check for linked proposals
+    const proposalIds = await getProposalIdsForQuote(quote.id);
+    const hasProposals = proposalIds.length > 0;
+
+    const confirmMessage = hasProposals
+      ? `La cotización ${quote.quote_no} tiene ${proposalIds.length} propuesta${proposalIds.length > 1 ? 's' : ''} asociada${proposalIds.length > 1 ? 's' : ''}. Se eliminarán en cascada junto con la cotización. ¿Deseas continuar?`
+      : `¿Eliminar la cotización ${quote.quote_no}?`;
 
     const confirmed = await showConfirm({
-      title: 'Eliminar Cotización',
-      message: `¿Eliminar la cotización ${quote.quote_no}?`,
+      title: hasProposals ? 'Eliminar cotización y propuestas' : 'Eliminar Cotización',
+      message: confirmMessage,
       variant: 'danger',
       confirmText: 'Eliminar',
       cancelText: 'Cancelar',
@@ -224,6 +236,12 @@ export default function Quotes() {
 
     try {
       setDialogLoading(true);
+
+      // Cascade: soft-delete proposals first
+      if (proposalIds.length > 0) {
+        const { error: propErr } = await supabase.rpc('soft_delete_proposals', { p_proposal_ids: proposalIds });
+        if (propErr) throw propErr;
+      }
 
       const { data, error } = await supabase.rpc('soft_delete_quotes', { p_quote_ids: [quote.id] });
       if (error) throw error;
@@ -245,7 +263,9 @@ export default function Quotes() {
       useUIStore.getState().addNotification({
         type: 'success',
         title: 'Eliminado',
-        message: 'Cotización eliminada correctamente',
+        message: hasProposals
+          ? `Cotización y ${proposalIds.length} propuesta${proposalIds.length > 1 ? 's' : ''} eliminadas correctamente.`
+          : 'Cotización eliminada correctamente.',
       });
 
       await refetch();

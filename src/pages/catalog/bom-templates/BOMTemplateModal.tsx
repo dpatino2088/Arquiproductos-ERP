@@ -587,6 +587,10 @@ export default function BOMTemplateModal({
                               form.setHighlightedIndex(0);
                           }}
                           placeholder="Search by SKU or name..."
+                          autoComplete="off"
+                          autoCorrect="off"
+                          autoCapitalize="off"
+                          spellCheck={false}
                           className="pl-8"
                         />
                         {form.showComponentDropdown &&
@@ -617,7 +621,7 @@ export default function BOMTemplateModal({
                                             form.handleSelectComponent(item.id)
                                           }
                                         >
-                                          {item.sku} - {item.name}
+                                          {item.sku}
                                         </button>
                                       );
                                     })}

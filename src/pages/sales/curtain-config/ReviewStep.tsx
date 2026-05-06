@@ -776,8 +776,53 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
     : [];
   const showRollWidthWarning = panelsExceedingRoll.length > 0;
 
+  const laborUnresolved = Boolean(
+    (snapshotTotals as any)?.labor_unresolved === true ||
+      (snapshotTotals as any)?.labor_engine_source === 'unresolved' ||
+      (configuredProductTotals as any)?.labor_unresolved === true
+  );
+  const laborUnresolvedContext = (() => {
+    const meta = (snapshotTotals as any)?.labor_calc_meta || (configuredProductTotals as any)?.labor_meta;
+    const ctx = meta?.context || {};
+    const parts: string[] = [];
+    if (ctx.width_mm != null) parts.push(`${Number(ctx.width_mm).toFixed(0)}mm wide`);
+    if (ctx.height_mm != null) parts.push(`${Number(ctx.height_mm).toFixed(0)}mm tall`);
+    if (ctx.panel_count != null) parts.push(`${ctx.panel_count} panel${ctx.panel_count === 1 ? '' : 's'}`);
+    if (ctx.drops != null) parts.push(`${ctx.drops} drop${ctx.drops === 1 ? '' : 's'}`);
+    if (ctx.has_motor != null) parts.push(ctx.has_motor ? 'motorized' : 'manual');
+    return parts.join(', ');
+  })();
+
   return (
     <div className="max-w-4xl mx-auto">
+      {laborUnresolved && (
+        <div className="mb-4 p-4 bg-red-50 border-2 border-red-300 rounded-lg">
+          <div className="flex items-start gap-3">
+            <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-red-200 shrink-0">
+              <svg className="w-4 h-4 text-red-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.732 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.008v.008H12v-.008Z" />
+              </svg>
+            </span>
+            <div className="flex-1">
+              <h3 className="text-sm font-semibold text-red-900">
+                Labor cost is unresolved — pricing is BLOCKED
+              </h3>
+              <p className="text-xs text-red-800 mt-1">
+                No active LaborRule matches this configuration{laborUnresolvedContext ? ` (${laborUnresolvedContext})` : ''}.
+                The legacy Labor % fallback has been disabled, so this line cannot be saved until you create a covering rule.
+              </p>
+              <a
+                href="/settings/cost-engine"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center mt-2 text-xs font-medium text-red-900 underline"
+              >
+                Open Settings → Cost Engine → Labor Rules
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-6">
         <div>
           <Label className="text-lg font-semibold mb-6 block">CONFIGURED PRODUCT</Label>
@@ -851,9 +896,7 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
                   const fc = snapshotTotals?.fabric_calc;
                   const autoRotated = fc?.is_rotated === true;
                   const hsSeams = fc?.heatseal_seams ?? 0;
-                  const hsCost = Number(fc?.heatseal_cost ?? 0);
                   const bbWrapped = fc?.bottom_bar_wrapped === true;
-                  const bbWrapCost = Number(fc?.bottom_bar_wrap_cost ?? 0);
                   return (
                   <div className="border-t border-gray-100 pt-2.5 space-y-1.5 text-sm">
                     <div className="flex items-center justify-between gap-6">
@@ -874,11 +917,7 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
                           <span className="text-amber-700 font-medium">Heat Seal:</span>{' '}
                           <span className="text-amber-800">{hsSeams} {hsSeams === 1 ? 'seam' : 'seams'}</span>
                         </div>
-                        {hsCost > 0 && (
-                          <div className="text-amber-800 font-medium tabular-nums">
-                            +{'$'}{hsCost.toFixed(2)}
-                          </div>
-                        )}
+                        <div className="text-[11px] text-amber-700 italic">charged via Labor</div>
                       </div>
                     )}
                     {bbWrapped && (
@@ -886,11 +925,7 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
                         <div>
                           <span className="text-blue-700 font-medium">Bottom Bar Wrapped (Forrado)</span>
                         </div>
-                        {bbWrapCost > 0 && (
-                          <div className="text-blue-800 font-medium tabular-nums">
-                            +{'$'}{bbWrapCost.toFixed(2)}
-                          </div>
-                        )}
+                        <div className="text-[11px] text-blue-700 italic">charged via Labor</div>
                       </div>
                     )}
                   </div>
@@ -1354,8 +1389,7 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
                           const fc = snapshotTotals?.fabric_calc;
                           if (!fc || fc.source === 'none' || fc.source === 'legacy') return null;
                           const hsSeams = fc.heatseal_seams ?? 0;
-                          const hsCost = Number(fc.heatseal_cost ?? 0);
-                          const bbWrapCost = Number(fc.bottom_bar_wrap_cost ?? 0);
+                          const bbWrapped = fc.bottom_bar_wrapped === true;
                           return (
                             <tr key={`${idx}-fc`} className="bg-blue-50/30">
                               <td colSpan={6} className="px-3 py-1.5 pl-7">
@@ -1371,13 +1405,12 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
                                   </div>
                                   {hsSeams > 0 && (
                                     <div className="text-amber-600">
-                                      Heat Seal: {hsSeams} {hsSeams === 1 ? 'seam' : 'seams'}
-                                      {hsCost > 0 && <> · +{'$'}{hsCost.toFixed(2)}</>}
+                                      Heat Seal: {hsSeams} {hsSeams === 1 ? 'seam' : 'seams'} <span className="italic text-amber-500">(charged via Labor)</span>
                                     </div>
                                   )}
-                                  {bbWrapCost > 0 && (
+                                  {bbWrapped && (
                                     <div className="text-blue-600">
-                                      Bottom Bar Wrap: +{'$'}{bbWrapCost.toFixed(2)}
+                                      Bottom Bar Wrap <span className="italic text-blue-500">(charged via Labor)</span>
                                     </div>
                                   )}
                                 </div>

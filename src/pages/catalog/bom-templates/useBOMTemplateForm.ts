@@ -380,7 +380,7 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
     const isFabric = sel.is_fabric || autoRole === 'fabric';
     const catalogUom = isFabric ? 'm' : canonicalUom(sel.unit_of_measure || sel.uom, sel.measure_basis);
     setFormData(prev => ({ ...prev, component_item_id: itemId, component_role: autoRole || prev.component_role, uom: catalogUom }));
-    setComponentSearchTerm(`${sel.sku} - ${sel.name || sel.item_name || ''}`);
+    setComponentSearchTerm(sel.sku || '');
     setShowComponentDropdown(false);
     setHighlightedIndex(-1);
   }, [catalogItems]);
@@ -499,8 +499,8 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
     const itemId = component.component_item_id || '';
     const item = catalogItems.find(i => i.id === itemId);
     const display = item
-      ? `${item.sku || 'N/A'} - ${item.name || 'Unnamed'}`
-      : component.catalog_item ? `${component.catalog_item.sku || 'N/A'} - ${component.catalog_item.name || 'Unnamed'}` : '';
+      ? (item.sku || 'N/A')
+      : component.catalog_item ? (component.catalog_item.sku || 'N/A') : '';
     const isFabric = component.component_role === 'fabric';
     const catalogItem = catalogItems.find(i => i.id === component.component_item_id);
     const uomNorm = isFabric ? 'm' : canonicalUom(component.uom || catalogItem?.unit_of_measure, catalogItem?.measure_basis);

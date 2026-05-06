@@ -606,15 +606,26 @@ export default function CutOptimization() {
     setConfirmCut(null);
 
     const groupCuts = pendingCuts.filter(c => c.sku === sku);
-    const wotlIds = groupCuts.map(c => c.wotl_id);
-    if (wotlIds.length === 0) return;
+    const allWotlIds = groupCuts.map(c => c.wotl_id);
+    if (allWotlIds.length === 0) return;
+
+    const wotlIdsToUpdate = groupCuts
+      .filter(c => Boolean(c.completed) !== markCompleted)
+      .map(c => c.wotl_id);
+
+    if (wotlIdsToUpdate.length === 0) {
+      setPendingCuts(prev => prev.map(c =>
+        c.sku === sku ? { ...c, completed: markCompleted } : c,
+      ));
+      return;
+    }
 
     setMarkingReady(sku);
     try {
       const { error } = await supabase
         .from('WorkOrderTaskLines')
         .update({ completed: markCompleted, completed_at: markCompleted ? new Date().toISOString() : null })
-        .in('id', wotlIds);
+        .in('id', wotlIdsToUpdate);
 
       if (error) {
         addNotification({ type: 'error', title: 'Update Failed', message: error.message });
@@ -628,7 +639,7 @@ export default function CutOptimization() {
       addNotification({
         type: 'success',
         title: markCompleted ? 'Marked as Cut' : 'Reverted',
-        message: `${sku}: ${wotlIds.length} line(s) ${markCompleted ? 'marked as cut' : 'reverted to pending'}.`,
+        message: `${sku}: ${wotlIdsToUpdate.length} line(s) ${markCompleted ? 'marked as cut' : 'reverted to pending'}.`,
       });
     } finally {
       setMarkingReady(null);
