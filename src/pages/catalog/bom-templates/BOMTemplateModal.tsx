@@ -10,6 +10,7 @@ import {
   SelectValue,
 } from '../../../components/ui/SelectShadcn';
 import { Tooltip, TooltipProvider } from '../../../components/ui/Tooltip';
+import CatalogItemImage from '../../../components/ui/CatalogItemImage';
 import { getRoleLabel, getAllRoleOptions, normalizeRole } from '../../../lib/bom/roles';
 import { useManufacturers } from '../../../hooks/useCatalog';
 import { BOM_QTY_TYPES, CONDITION_KEY_OPTIONS, CONDITION_VALUE_OPTIONS, getCascadeLabel, getCascadeOrder } from './types';
@@ -230,6 +231,10 @@ export default function BOMTemplateModal({
     return `${label}${mult}${pp}`;
   };
 
+  const selectedComponentItem = form.formData.component_item_id
+    ? form.catalogItems.find((i) => i.id === form.formData.component_item_id) || null
+    : null;
+
   // Stable delta lookup: merge catalogItems (full list) + embedded catalog_item from BOM join
   const deltaMap = React.useMemo(() => {
     const map = new Map<string, { delta_x_mm: number | null; delta_y_mm: number | null }>();
@@ -300,7 +305,7 @@ export default function BOMTemplateModal({
           <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
 
             {/* ── ROW 1: Product Type + Manufacturer ── */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <Label required>Product Type</Label>
                 <SelectShadcn value={form.productTypeId} onValueChange={form.setProductTypeId}>
@@ -327,7 +332,7 @@ export default function BOMTemplateModal({
 
             {/* ── ROW 2: Product Line + System Size (Drapery only) ── */}
             {isDrapery && (
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <Label required>Product Line</Label>
                   <SelectShadcn
@@ -364,7 +369,7 @@ export default function BOMTemplateModal({
             )}
 
             {/* ── ROW 3: Hardware Color + Drive Type ── */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <Label required>Hardware Color</Label>
                 <SelectShadcn value={form.templateHardwareColor} onValueChange={form.setTemplateHardwareColor}>
@@ -441,7 +446,7 @@ export default function BOMTemplateModal({
             })()}
 
             {/* ── ROW 5: System Size (non-drapery) + Installation ── */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {!isDrapery && (
                 <div>
                   <Label>System Size</Label>
@@ -507,7 +512,7 @@ export default function BOMTemplateModal({
                   </button>
                 )}
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="template-name">Name *</Label>
                   <Input
@@ -551,7 +556,7 @@ export default function BOMTemplateModal({
               {/* Add/Edit Component form */}
               {form.showAddComponentForm && (
                 <div className="mb-4 p-4 border border-gray-200 rounded bg-gray-50/50 space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <Label>Category filter</Label>
                       <SelectShadcn
@@ -626,7 +631,18 @@ export default function BOMTemplateModal({
                                             form.handleSelectComponent(item.id)
                                           }
                                         >
-                                          {item.sku}
+                                          <div className="flex items-center gap-2">
+                                            <CatalogItemImage
+                                              src={item.image_url}
+                                              alt={item.name || item.item_name || item.sku || 'Item'}
+                                              size="xs"
+                                              objectFit="contain"
+                                            />
+                                            <div className="min-w-0">
+                                              <div className="font-mono text-[11px] text-gray-900 truncate">{item.sku || 'N/A'}</div>
+                                              <div className="text-gray-500 truncate">{item.name || item.item_name || 'Unnamed'}</div>
+                                            </div>
+                                          </div>
                                         </button>
                                       );
                                     })}
@@ -636,9 +652,25 @@ export default function BOMTemplateModal({
                             </div>
                           )}
                       </div>
+                      {selectedComponentItem && (
+                        <div className="mt-2 rounded-md border border-gray-200 bg-white px-2 py-2">
+                          <div className="flex items-center gap-2">
+                            <CatalogItemImage
+                              src={selectedComponentItem.image_url}
+                              alt={selectedComponentItem.name || selectedComponentItem.item_name || selectedComponentItem.sku || 'Selected item'}
+                              size="sm"
+                              objectFit="contain"
+                            />
+                            <div className="min-w-0">
+                              <div className="font-mono text-[11px] text-gray-900 truncate">{selectedComponentItem.sku || 'N/A'}</div>
+                              <div className="text-[11px] text-gray-600 truncate">{selectedComponentItem.name || selectedComponentItem.item_name || 'Unnamed'}</div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <Label>Role</Label>
                       <SelectShadcn
@@ -697,7 +729,7 @@ export default function BOMTemplateModal({
                     </div>
                   </div>
                   {form.formData.qty_type === 'fixed' && (
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <Label>Qty Value</Label>
                         <Input
@@ -727,7 +759,7 @@ export default function BOMTemplateModal({
                     </div>
                   )}
                   {(form.formData.qty_type === 'per_width' || form.formData.qty_type === 'per_height') && (
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <Label>Multiplier</Label>
                         <Input
@@ -851,7 +883,7 @@ export default function BOMTemplateModal({
                             ) || 0,
                           }))
                         }
-                        className="w-20"
+                        className="w-full md:w-20"
                       />
                     </div>
                   </div>
@@ -870,7 +902,7 @@ export default function BOMTemplateModal({
                       </select>
                     </div>
                     {form.formData.condition_key ? (
-                      <div className="w-40">
+                      <div className="w-full md:w-40">
                         <Label>Value</Label>
                         {CONDITION_VALUE_OPTIONS[form.formData.condition_key] ? (
                           <select
@@ -919,26 +951,26 @@ export default function BOMTemplateModal({
 
               {/* Components table grouped by category */}
               <div className="border border-gray-200 rounded overflow-hidden">
-                <table className="w-full text-xs">
+                <table className="w-full table-fixed text-xs">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-200">
                       <th className="w-8 px-1 py-2" />
-                      <th className="text-left px-3 py-2 font-medium">
+                      <th className="text-left px-3 py-2 font-medium w-[220px]">
                         SKU / Name
                       </th>
-                      <th className="text-left px-3 py-2 font-medium">Qty</th>
-                      <th className="text-left px-3 py-2 font-medium">UOM</th>
-                      <th className="text-center px-2 py-2 font-medium">ΔX</th>
-                      <th className="text-center px-2 py-2 font-medium">ΔY</th>
-                      <th className="text-left px-3 py-2 font-medium">Role</th>
-                      <th className="text-left px-3 py-2 font-medium">Depends On</th>
-                      <th className="text-left px-3 py-2 font-medium">
+                      <th className="text-left px-3 py-2 font-medium w-[96px]">Qty</th>
+                      <th className="text-left px-3 py-2 font-medium w-[56px]">UOM</th>
+                      <th className="text-center px-2 py-2 font-medium w-[44px]">ΔX</th>
+                      <th className="text-center px-2 py-2 font-medium w-[44px]">ΔY</th>
+                      <th className="text-left px-3 py-2 font-medium w-[86px]">Role</th>
+                      <th className="text-left px-3 py-2 font-medium w-[88px]">Depends On</th>
+                      <th className="text-left px-3 py-2 font-medium w-[64px]">
                         Children
                       </th>
-                      <th className="text-left px-3 py-2 font-medium">Eng.</th>
-                      <th className="text-left px-3 py-2 font-medium">Req.</th>
-                      <th className="text-left px-3 py-2 font-medium">Condition</th>
-                      <th className="text-right px-3 py-2 font-medium">
+                      <th className="text-left px-3 py-2 font-medium w-[52px]">Eng.</th>
+                      <th className="text-left px-3 py-2 font-medium w-[52px]">Req.</th>
+                      <th className="text-left px-3 py-2 font-medium w-[120px]">Condition</th>
+                      <th className="text-right px-3 py-2 font-medium w-[90px]">
                         Actions
                       </th>
                     </tr>
@@ -985,22 +1017,40 @@ export default function BOMTemplateModal({
                                   )}
                                 </td>
                                 <td className="px-3 py-2">
-                                  {comp.component_item_id ? (
-                                    <a
-                                      href={`/catalog/items/edit/${comp.component_item_id}?returnTo=/catalog/bom`}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="font-mono text-gray-700 hover:text-primary hover:underline"
-                                      title="Edit in Catalog (new tab)"
-                                    >
-                                      {sku}
-                                    </a>
-                                  ) : (
-                                    <span className="font-mono text-gray-700">{sku}</span>
-                                  )}
-                                  <span className="text-gray-500 ml-1">
-                                    {name}
-                                  </span>
+                                  <div className="flex items-center gap-2">
+                                    <CatalogItemImage
+                                      src={(form.catalogItems.find((i) => i.id === comp.component_item_id) || comp.catalog_item)?.image_url}
+                                      alt={name}
+                                      size="xs"
+                                      objectFit="contain"
+                                    />
+                                    <div className="min-w-0">
+                                      {comp.component_item_id ? (
+                                        <a
+                                          href={`/catalog/items/edit/${comp.component_item_id}?returnTo=/catalog/bom`}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="font-mono text-gray-700 hover:text-primary hover:underline truncate block"
+                                          title="Edit in Catalog (new tab)"
+                                        >
+                                          {sku}
+                                        </a>
+                                      ) : (
+                                        <span className="font-mono text-gray-700 truncate block">{sku}</span>
+                                      )}
+                                      <span
+                                        className="text-gray-500 block whitespace-normal break-words leading-tight"
+                                        style={{
+                                          display: '-webkit-box',
+                                          WebkitLineClamp: 3,
+                                          WebkitBoxOrient: 'vertical',
+                                          overflow: 'hidden',
+                                        }}
+                                      >
+                                        {name}
+                                      </span>
+                                    </div>
+                                  </div>
                                 </td>
                                 <td className="px-3 py-2">
                                   {getQtyDisplay(comp)}
