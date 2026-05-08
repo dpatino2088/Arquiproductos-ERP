@@ -15,6 +15,8 @@ export type PDFVariant = 'dealer' | 'client';
 
 export interface QuotePDFLine {
   id: string;
+  sku?: string | null;
+  catalog_code?: string | null;
   area?: string | null;
   position?: string | null;
   product_type?: string | null;
@@ -349,16 +351,24 @@ export function generateQuotePDF(
   yPos = rightBlockEndY + gapBeforeTableMm;
 
   const buildDescription = (line: QuotePDFLine): string => {
+    const skuCode = line.sku?.trim() || '';
+    const catalogCode = line.catalog_code?.trim() || line.CatalogItems?.sku?.trim() || '';
+    const isCatalog = String(line.product_type ?? '').trim().toLowerCase() === 'catalog';
+    const singleCode = isCatalog
+      ? (catalogCode || skuCode)
+      : (skuCode || catalogCode);
+    const codeLine = singleCode || '';
+
     const isDraperyTrackOnly =
       String(line.product_type ?? '').trim().toLowerCase() === 'drapery' &&
       !!line.track_only;
     const styleLabel = normalizeStyleLabel(line.style_code);
     if (isDraperyTrackOnly) {
-      return styleLabel ? `Drapery Track\nStyle: ${styleLabel}` : 'Drapery Track';
+      const base = styleLabel ? `Drapery Track\nStyle: ${styleLabel}` : 'Drapery Track';
+      return codeLine ? `${base}\n${codeLine}` : base;
     }
 
     // Catalog items: show item name + optional color (no collection/variant/drive)
-    const isCatalog = String(line.product_type ?? '').trim().toLowerCase() === 'catalog';
     if (isCatalog) {
       const catName =
         line.catalog_name?.trim()
@@ -371,7 +381,7 @@ export function generateQuotePDF(
       const head = catName
         ? (catColor ? `${catName} — ${catColor}` : catName)
         : sku || '—';
-      return head;
+      return codeLine ? `${head}\n${codeLine}` : head;
     }
 
     const collectionVariant =
@@ -389,6 +399,7 @@ export function generateQuotePDF(
     const lines: string[] = [];
     if (collectionVariant) lines.push(collectionVariant);
     if (operatingSystem) lines.push(operatingSystem);
+    if (codeLine) lines.push(codeLine);
     return lines.join('\n') || '—';
   };
 

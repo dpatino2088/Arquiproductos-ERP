@@ -62,14 +62,38 @@ type CommercialAdjustmentMeta = {
   note?: string | null;
   extra_discount_pct?: number | null;
   extra_discount_amount?: number | null;
+  effective_discount_pct?: number | null;
   base_unit_dealer_price?: number | null;
   base_line_total?: number | null;
+  applied_unit_dealer_price?: number | null;
+  applied_line_total?: number | null;
 };
 
 function getCommercialAdjustment(line: any): CommercialAdjustmentMeta | null {
   const raw = line?.metadata?.commercial_adjustment;
   if (!raw || typeof raw !== 'object') return null;
   return raw as CommercialAdjustmentMeta;
+}
+
+function getCommercialBasePricing(
+  line: any,
+  dealerDiscountPctForDisplay: number
+): { qty: number; baseUnit: number; baseLine: number; unitCost: number } {
+  const qty = Math.max(1, Number(line?.quantity ?? line?.qty ?? 1) || 1);
+  const unitMsrp =
+    line?.unit_msrp != null && Number(line.unit_msrp) >= 0
+      ? Number(line.unit_msrp)
+      : (line?.msrp != null && qty > 0 ? Number(line.msrp) / qty : 0);
+  const fallbackDealerUnit = unitMsrp * (1 - dealerDiscountPctForDisplay / 100);
+  const commercialMeta = getCommercialAdjustment(line);
+  const baseUnitCandidate = commercialMeta?.base_unit_dealer_price;
+  const baseUnit = Number.isFinite(Number(baseUnitCandidate))
+    ? Number(baseUnitCandidate)
+    : Number.isFinite(Number(line?.unit_dealer_price_snapshot))
+      ? Number(line.unit_dealer_price_snapshot)
+      : fallbackDealerUnit;
+  const unitCost = Number.isFinite(Number(line?.unit_cost_total_snapshot)) ? Number(line.unit_cost_total_snapshot) : 0;
+  return { qty, baseUnit, baseLine: baseUnit * qty, unitCost };
 }
 
 function getEffectiveLinePrices(
@@ -748,10 +772,15 @@ export default function QuoteNew() {
   const [commercialLineId, setCommercialLineId] = useState<string | null>(null);
   const [commercialNonBillable, setCommercialNonBillable] = useState(false);
   const [commercialDiscountPct, setCommercialDiscountPct] = useState<string>('');
-  const [commercialDiscountAmount, setCommercialDiscountAmount] = useState<string>('');
+  const [commercialTargetUnitPrice, setCommercialTargetUnitPrice] = useState<string>('');
   const [commercialReason, setCommercialReason] = useState('');
   const [commercialNote, setCommercialNote] = useState('');
   const [savingCommercial, setSavingCommercial] = useState(false);
+  const [globalCommercialOpen, setGlobalCommercialOpen] = useState(false);
+  const [globalCommercialDiscountPct, setGlobalCommercialDiscountPct] = useState<string>('');
+  const [globalCommercialReason, setGlobalCommercialReason] = useState('');
+  const [globalCommercialNote, setGlobalCommercialNote] = useState('');
+  const [savingGlobalCommercial, setSavingGlobalCommercial] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [approveConfirmOpen, setApproveConfirmOpen] = useState(false);
@@ -765,6 +794,9 @@ export default function QuoteNew() {
   const { settings: costSettings } = useCostSettings();
   const { tiers: dealerTiers } = useDealerTiers();
   const normalizedInternalRole = (internalRole ?? '').toString().trim().toLowerCase();
+  const canManageGlobalDiscount =
+    userType === 'internal' &&
+    ['superadmin', 'admin', 'sales', 'sales_coordinator'].includes(normalizedInternalRole);
   const requiresActingDealerSelection =
     userType === 'internal' &&
     ['superadmin', 'admin', 'sales', 'sales_coordinator'].includes(normalizedInternalRole);
@@ -3436,12 +3468,73 @@ export default function QuoteNew() {
     }
   };
 
+  const commercialLine = useMemo(
+    () => quoteLines.find((line: any) => line.id === commercialLineId) ?? null,
+    [quoteLines, commercialLineId]
+  );
+
+  const commercialPricingPreview = useMemo(() => {
+    if (!commercialLine) return null;
+    const { qty, baseUnit, baseLine, unitCost } = getCommercialBasePricing(commercialLine, dealerDiscountPctForDisplay);
+    if (commercialNonBillable) {
+      return {
+        qty,
+        baseUnit,
+        baseLine,
+        unitCost,
+        discountPct: 100,
+        finalUnit: 0,
+        finalLine: 0,
+        discountAmount: baseLine,
+      };
+    }
+
+    const pctNum = commercialDiscountPct.trim() !== '' ? Number(commercialDiscountPct) : NaN;
+    const targetNum = commercialTargetUnitPrice.trim() !== '' ? Number(commercialTargetUnitPrice) : NaN;
+    const hasPct = Number.isFinite(pctNum) && pctNum > 0;
+    const hasTarget = Number.isFinite(targetNum) && targetNum >= 0;
+
+    let finalUnit = baseUnit;
+    let discountPct = 0;
+    if (hasPct) {
+      discountPct = Math.min(100, Math.max(0, pctNum));
+      finalUnit = baseUnit * (1 - discountPct / 100);
+    } else if (hasTarget) {
+      finalUnit = Math.max(0, targetNum);
+      discountPct = baseUnit > 0 ? Math.min(100, Math.max(0, ((baseUnit - finalUnit) / baseUnit) * 100)) : 0;
+    }
+
+    const finalLine = finalUnit * qty;
+    return {
+      qty,
+      baseUnit,
+      baseLine,
+      unitCost,
+      discountPct,
+      finalUnit,
+      finalLine,
+      discountAmount: Math.max(baseLine - finalLine, 0),
+    };
+  }, [commercialLine, commercialDiscountPct, commercialTargetUnitPrice, commercialNonBillable, dealerDiscountPctForDisplay]);
+
   const openCommercialAdjustment = (line: any) => {
     const meta = getCommercialAdjustment(line);
+    const { baseUnit } = getCommercialBasePricing(line, dealerDiscountPctForDisplay);
+    const nonBillable = Boolean(meta?.non_billable);
+    const pctCandidate =
+      meta?.extra_discount_pct != null
+        ? Number(meta.extra_discount_pct)
+        : (meta?.effective_discount_pct != null ? Number(meta.effective_discount_pct) : 0);
+    const safePct = Number.isFinite(pctCandidate) && pctCandidate > 0 ? pctCandidate : 0;
+    const targetFromMeta =
+      meta?.applied_unit_dealer_price != null && Number.isFinite(Number(meta.applied_unit_dealer_price))
+        ? Number(meta.applied_unit_dealer_price)
+        : Math.max(baseUnit * (1 - safePct / 100), 0);
+
     setCommercialLineId(line.id);
-    setCommercialNonBillable(Boolean(meta?.non_billable));
-    setCommercialDiscountPct(meta?.extra_discount_pct != null ? String(meta.extra_discount_pct) : '');
-    setCommercialDiscountAmount(meta?.extra_discount_amount != null ? String(meta.extra_discount_amount) : '');
+    setCommercialNonBillable(nonBillable);
+    setCommercialDiscountPct(nonBillable ? '' : (safePct > 0 ? String(Number(safePct.toFixed(2))) : ''));
+    setCommercialTargetUnitPrice(nonBillable ? '0' : String(Number(targetFromMeta.toFixed(2))));
     setCommercialReason(meta?.reason ?? '');
     setCommercialNote(meta?.note ?? '');
   };
@@ -3451,29 +3544,15 @@ export default function QuoteNew() {
     setCommercialLineId(null);
     setCommercialNonBillable(false);
     setCommercialDiscountPct('');
-    setCommercialDiscountAmount('');
+    setCommercialTargetUnitPrice('');
     setCommercialReason('');
     setCommercialNote('');
   };
 
   const saveCommercialAdjustment = async () => {
-    if (!commercialLineId) return;
-
-    const discountPctNum = commercialDiscountPct.trim() !== '' ? Number(commercialDiscountPct) : null;
-    const discountAmountNum = commercialDiscountAmount.trim() !== '' ? Number(commercialDiscountAmount) : null;
-    const hasDiscountPct = discountPctNum != null && Number.isFinite(discountPctNum) && discountPctNum > 0;
-    const hasDiscountAmount = discountAmountNum != null && Number.isFinite(discountAmountNum) && discountAmountNum > 0;
-
-    if (hasDiscountPct && hasDiscountAmount) {
-      useUIStore.getState().addNotification({
-        type: 'error',
-        title: 'Invalid adjustment',
-        message: 'Use either discount % or discount amount, not both.',
-      });
-      return;
-    }
-
-    if ((commercialNonBillable || hasDiscountPct || hasDiscountAmount) && !commercialReason.trim()) {
+    if (!commercialLineId || !commercialPricingPreview) return;
+    const hasDiscount = commercialPricingPreview.discountPct > 0 || commercialNonBillable;
+    if (hasDiscount && !commercialReason.trim()) {
       useUIStore.getState().addNotification({
         type: 'error',
         title: 'Reason required',
@@ -3495,8 +3574,8 @@ export default function QuoteNew() {
       const { error } = await supabase.rpc('apply_quote_line_commercial_adjustment', {
         p_quote_line_id: commercialLineId,
         p_non_billable: commercialNonBillable,
-        p_extra_discount_pct: hasDiscountPct ? discountPctNum : null,
-        p_extra_discount_amount: hasDiscountAmount ? discountAmountNum : null,
+        p_extra_discount_pct: commercialNonBillable ? null : Number(commercialPricingPreview.discountPct.toFixed(4)),
+        p_extra_discount_amount: null,
         p_reason: commercialReason.trim() || null,
         p_note: commercialNote.trim() || null,
         p_user_id: userId,
@@ -3519,6 +3598,77 @@ export default function QuoteNew() {
       });
     } finally {
       setSavingCommercial(false);
+    }
+  };
+
+  const applyGlobalCommercialAdjustment = async () => {
+    if (!quoteLines.length) return;
+    const globalPct = Number(globalCommercialDiscountPct);
+    if (!Number.isFinite(globalPct) || globalPct <= 0 || globalPct > 100) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Invalid global discount',
+        message: 'Enter a percentage between 0.01 and 100.',
+      });
+      return;
+    }
+    if (!globalCommercialReason.trim()) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Reason required',
+        message: 'Provide a reason for the global adjustment.',
+      });
+      return;
+    }
+
+    try {
+      setSavingGlobalCommercial(true);
+      const { data: authData } = await supabase.auth.getUser();
+      const userId = authData?.user?.id ?? null;
+      const userName =
+        authData?.user?.user_metadata?.full_name ||
+        authData?.user?.user_metadata?.name ||
+        authData?.user?.email ||
+        null;
+
+      let successCount = 0;
+      let failCount = 0;
+
+      for (const line of quoteLines) {
+        const { error } = await supabase.rpc('apply_quote_line_commercial_adjustment', {
+          p_quote_line_id: line.id,
+          p_non_billable: false,
+          p_extra_discount_pct: Number(globalPct.toFixed(4)),
+          p_extra_discount_amount: null,
+          p_reason: globalCommercialReason.trim(),
+          p_note: globalCommercialNote.trim() || null,
+          p_user_id: userId,
+          p_user_name: userName,
+        });
+        if (error) failCount += 1;
+        else successCount += 1;
+      }
+
+      await refetchLines();
+      useUIStore.getState().addNotification({
+        type: failCount === 0 ? 'success' : 'warning',
+        title: failCount === 0 ? 'Global adjustment applied' : 'Global adjustment completed with warnings',
+        message: `${successCount} line(s) updated${failCount ? `, ${failCount} failed` : ''}.`,
+      });
+      if (failCount === 0) {
+        setGlobalCommercialOpen(false);
+        setGlobalCommercialDiscountPct('');
+        setGlobalCommercialReason('');
+        setGlobalCommercialNote('');
+      }
+    } catch (err: any) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Global adjustment failed',
+        message: err?.message ?? 'Failed to apply global commercial adjustment',
+      });
+    } finally {
+      setSavingGlobalCommercial(false);
     }
   };
 
@@ -3727,6 +3877,8 @@ export default function QuoteNew() {
         const isCatalogLine = productTypeCode === 'catalog';
         return {
           id: line.id,
+          sku: line.sku ?? line.CatalogItems?.sku ?? null,
+          catalog_code: line.CatalogItems?.sku ?? null,
           area: line.area,
           position: line.position,
           product_type: line.ProductType?.name ?? line.product_type ?? '—',
@@ -3941,6 +4093,8 @@ export default function QuoteNew() {
         const isCatalogLine = productTypeCode === 'catalog';
         return {
           id: line.id,
+          sku: line.sku ?? line.CatalogItems?.sku ?? null,
+          catalog_code: line.CatalogItems?.sku ?? null,
           area: line.area,
           position: line.position,
           product_type: line.ProductType?.name ?? line.product_type ?? '—',
@@ -4414,11 +4568,11 @@ export default function QuoteNew() {
             <button
               type="button"
               onClick={() => router.navigate(withReturnTo(`/sales/quotes/${quoteId}`))}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 text-sm"
+              className="inline-flex items-center justify-center p-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50"
               title="View Quote Detail"
+              aria-label="View Quote Detail"
             >
               <Eye className="w-4 h-4 shrink-0 text-gray-600" />
-              View Detail
             </button>
           )}
           {quoteId && (
@@ -4736,6 +4890,15 @@ export default function QuoteNew() {
                 <p className="text-sm text-gray-500 mt-1">{quoteLines.length} {quoteLines.length === 1 ? 'line' : 'lines'}</p>
               </div>
               <div className="flex items-center gap-2">
+                {!isOrdered && canManageGlobalDiscount && (
+                <button
+                  type="button"
+                  onClick={() => setGlobalCommercialOpen(true)}
+                  className="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium"
+                >
+                  Global Discount
+                </button>
+                )}
                 {!isOrdered && (
                 <button
                   type="button"
@@ -5054,9 +5217,9 @@ export default function QuoteNew() {
       )}
 
       {commercialLineId && (
-        <div className="fixed inset-0 bg-black bg-opacity-40 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg">
-            <div className="flex items-center justify-between p-4 border-b">
+        <div className="fixed inset-0 bg-black bg-opacity-40 z-50 flex items-center justify-center p-6">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl">
+            <div className="flex items-center justify-between px-6 py-5 border-b">
               <h3 className="text-base font-semibold text-gray-900">Commercial Adjustment</h3>
               <button
                 type="button"
@@ -5067,8 +5230,8 @@ export default function QuoteNew() {
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="p-4 space-y-4">
-              <div className="flex items-center gap-2">
+            <div className="px-6 py-5 space-y-5">
+              <div className="flex items-center gap-2 py-1">
                 <input
                   id="line-non-billable"
                   type="checkbox"
@@ -5078,7 +5241,7 @@ export default function QuoteNew() {
                     setCommercialNonBillable(checked);
                     if (checked) {
                       setCommercialDiscountPct('');
-                      setCommercialDiscountAmount('');
+                      setCommercialTargetUnitPrice('0');
                     }
                   }}
                   className="rounded border-gray-300"
@@ -5088,9 +5251,9 @@ export default function QuoteNew() {
                 </Label>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label className="text-xs text-gray-600 mb-1">Extra Discount %</Label>
+                  <Label className="text-xs text-gray-600 mb-1.5">Extra Discount %</Label>
                   <Input
                     type="number"
                     min="0"
@@ -5099,31 +5262,73 @@ export default function QuoteNew() {
                     value={commercialDiscountPct}
                     disabled={commercialNonBillable}
                     onChange={(e) => {
-                      setCommercialDiscountPct(e.target.value);
-                      if (e.target.value.trim() !== '') setCommercialDiscountAmount('');
+                      const nextPctRaw = e.target.value;
+                      setCommercialDiscountPct(nextPctRaw);
+                      if (!commercialLine) return;
+                      const { baseUnit } = getCommercialBasePricing(commercialLine, dealerDiscountPctForDisplay);
+                      const pctNum = Number(nextPctRaw);
+                      if (!Number.isFinite(pctNum) || baseUnit <= 0) return;
+                      const clampedPct = Math.min(100, Math.max(0, pctNum));
+                      const nextTarget = Math.max(baseUnit * (1 - clampedPct / 100), 0);
+                      setCommercialTargetUnitPrice(String(Number(nextTarget.toFixed(2))));
                     }}
                     placeholder="e.g. 10"
                   />
                 </div>
                 <div>
-                  <Label className="text-xs text-gray-600 mb-1">Extra Discount Amount</Label>
+                  <Label className="text-xs text-gray-600 mb-1.5">Target Unit Price ($)</Label>
                   <Input
                     type="number"
                     min="0"
                     step="0.01"
-                    value={commercialDiscountAmount}
+                    value={commercialTargetUnitPrice}
                     disabled={commercialNonBillable}
                     onChange={(e) => {
-                      setCommercialDiscountAmount(e.target.value);
-                      if (e.target.value.trim() !== '') setCommercialDiscountPct('');
+                      const nextTargetRaw = e.target.value;
+                      setCommercialTargetUnitPrice(nextTargetRaw);
+                      if (!commercialLine) return;
+                      const { baseUnit } = getCommercialBasePricing(commercialLine, dealerDiscountPctForDisplay);
+                      const targetNum = Number(nextTargetRaw);
+                      if (!Number.isFinite(targetNum) || baseUnit <= 0) return;
+                      const nextPct = Math.min(100, Math.max(0, ((baseUnit - Math.max(0, targetNum)) / baseUnit) * 100));
+                      setCommercialDiscountPct(String(Number(nextPct.toFixed(2))));
                     }}
-                    placeholder="e.g. 50.00"
+                    placeholder="e.g. 500.00"
                   />
                 </div>
               </div>
 
+              {commercialPricingPreview && (
+                <div className="rounded-md border border-gray-200 bg-gray-50 px-4 py-3 text-xs space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-600">Base unit dealer</span>
+                    <span className="font-medium text-gray-900">{formatCurrency(commercialPricingPreview.baseUnit, watch('currency'))}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-600">Discount applied</span>
+                    <span className="font-medium text-gray-900">{commercialPricingPreview.discountPct.toFixed(2)}% ({formatCurrency(commercialPricingPreview.discountAmount, watch('currency'))})</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-600">Final unit dealer</span>
+                    <span className="font-semibold text-gray-900">{formatCurrency(commercialPricingPreview.finalUnit, watch('currency'))}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-600">Final line total</span>
+                    <span className="font-semibold text-gray-900">{formatCurrency(commercialPricingPreview.finalLine, watch('currency'))}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-600">Item performance</span>
+                    <span className="font-medium text-gray-900">
+                      {commercialPricingPreview.finalUnit > 0 && commercialPricingPreview.unitCost > 0
+                        ? `${(((commercialPricingPreview.finalUnit - commercialPricingPreview.unitCost) / commercialPricingPreview.finalUnit) * 100).toFixed(2)}% margin`
+                        : 'N/A'}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               <div>
-                <Label className="text-xs text-gray-600 mb-1">Reason</Label>
+                <Label className="text-xs text-gray-600 mb-1.5">Reason</Label>
                 <Input
                   value={commercialReason}
                   onChange={(e) => setCommercialReason(e.target.value)}
@@ -5132,7 +5337,7 @@ export default function QuoteNew() {
               </div>
 
               <div>
-                <Label className="text-xs text-gray-600 mb-1">Internal note (optional)</Label>
+                <Label className="text-xs text-gray-600 mb-1.5">Internal note (optional)</Label>
                 <Input
                   value={commercialNote}
                   onChange={(e) => setCommercialNote(e.target.value)}
@@ -5140,7 +5345,7 @@ export default function QuoteNew() {
                 />
               </div>
             </div>
-            <div className="flex items-center justify-end gap-2 p-4 border-t">
+            <div className="flex items-center justify-end gap-2 px-6 py-4 border-t bg-gray-50/60">
               <button
                 type="button"
                 onClick={closeCommercialAdjustment}
@@ -5156,6 +5361,78 @@ export default function QuoteNew() {
                 disabled={savingCommercial}
               >
                 {savingCommercial ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {globalCommercialOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-40 z-50 flex items-center justify-center p-6">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
+            <div className="flex items-center justify-between px-6 py-5 border-b">
+              <h3 className="text-base font-semibold text-gray-900">Global Commercial Discount</h3>
+              <button
+                type="button"
+                onClick={() => {
+                  if (savingGlobalCommercial) return;
+                  setGlobalCommercialOpen(false);
+                }}
+                className="p-1 hover:bg-gray-100 rounded"
+                disabled={savingGlobalCommercial}
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="px-6 py-5 space-y-5">
+              <div>
+                <Label className="text-xs text-gray-600 mb-1.5">Discount % for all lines</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  value={globalCommercialDiscountPct}
+                  onChange={(e) => setGlobalCommercialDiscountPct(e.target.value)}
+                  placeholder="e.g. 10"
+                />
+              </div>
+              <div>
+                <Label className="text-xs text-gray-600 mb-1.5">Reason</Label>
+                <Input
+                  value={globalCommercialReason}
+                  onChange={(e) => setGlobalCommercialReason(e.target.value)}
+                  placeholder="Seasonal offer, strategic discount..."
+                />
+              </div>
+              <div>
+                <Label className="text-xs text-gray-600 mb-1.5">Internal note (optional)</Label>
+                <Input
+                  value={globalCommercialNote}
+                  onChange={(e) => setGlobalCommercialNote(e.target.value)}
+                  placeholder="Optional context for internal team"
+                />
+              </div>
+              <p className="text-xs text-gray-500">
+                This applies the same discount to each quote line one by one.
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-2 px-6 py-4 border-t bg-gray-50/60">
+              <button
+                type="button"
+                onClick={() => setGlobalCommercialOpen(false)}
+                className="px-3 py-2 text-sm rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                disabled={savingGlobalCommercial}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={applyGlobalCommercialAdjustment}
+                className="px-3 py-2 text-sm rounded bg-primary text-white hover:bg-primary/90 disabled:opacity-50"
+                disabled={savingGlobalCommercial}
+              >
+                {savingGlobalCommercial ? 'Applying...' : 'Apply to all lines'}
               </button>
             </div>
           </div>
