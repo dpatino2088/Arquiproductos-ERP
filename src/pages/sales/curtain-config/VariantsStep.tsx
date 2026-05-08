@@ -324,6 +324,31 @@ export default function VariantsStep({ config, onUpdate, policy: policyProp }: V
     );
   }, [collections, collectionSearch]);
 
+  // Keep selection resilient: if selected variant is not in current options,
+  // fall back to showing full list and clear stale selection.
+  const hasSelectedVariantInList = useMemo(
+    () => Boolean(variantId && variants.some((v) => v.id === variantId)),
+    [variantId, variants]
+  );
+
+  const displayedVariants = useMemo(() => {
+    if (!variantId) return variants;
+    return hasSelectedVariantInList ? variants.filter((v) => v.id === variantId) : variants;
+  }, [variantId, hasSelectedVariantInList, variants]);
+
+  useEffect(() => {
+    if (!variantId || loadingVariants) return;
+    if (variants.length === 0) return;
+    if (hasSelectedVariantInList) return;
+    onUpdate({
+      variantId: undefined,
+      fabric_catalog_item_id: undefined,
+      fabric_variant_id: undefined,
+      variantName: undefined,
+      variant_name: undefined,
+    } as any);
+  }, [variantId, loadingVariants, variants, hasSelectedVariantInList, onUpdate]);
+
   // Close dropdowns when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -619,11 +644,7 @@ export default function VariantsStep({ config, onUpdate, policy: policyProp }: V
                 </div>
               ) : (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                  {/* If variant is selected, show only that variant. Otherwise show all */}
-                  {(variantId 
-                    ? variants.filter(v => v.id === variantId)
-                    : variants
-                  ).map((variant) => {
+                  {displayedVariants.map((variant) => {
                     // Check if this variant is selected
                     const isSelected = variantId === variant.id;
                     

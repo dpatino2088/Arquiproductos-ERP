@@ -223,19 +223,6 @@ export default function FabricRulesSettings() {
 
     return (
       <div className="space-y-4 p-4 bg-gray-50 border border-gray-200 rounded">
-        {/* ── Deprecation notice for legacy labor-like fields ── */}
-        <div className="rounded border border-amber-300 bg-amber-50 p-3 text-[11px] text-amber-900">
-          <div className="font-semibold mb-1">Heads up — labor charges live in the Cost Engine</div>
-          <div>
-            <code className="px-1 bg-white/60 rounded">Heat Seal Price</code>,{' '}
-            <code className="px-1 bg-white/60 rounded">Bottom Bar Wrap %</code> and{' '}
-            <code className="px-1 bg-white/60 rounded">Confection %</code> have moved to <strong>Cost Engine → Labor Rules</strong>{' '}
-            (per product type, with size escalation). Values shown here are read-only legacy data and are no longer applied to pricing.
-            Configure the equivalent rates in <em>heatseal_rate_per_m</em>, <em>bottom_bar_wrap_rate_per_m</em>, and{' '}
-            <em>confection_base / confection_rate_per_m²</em>.
-          </div>
-        </div>
-
         {/* ── Drapery: Variant identification FIRST (required) ── */}
         {ptIsDrapery && (
           <div className="rounded border border-purple-100 bg-purple-50/40 p-3">

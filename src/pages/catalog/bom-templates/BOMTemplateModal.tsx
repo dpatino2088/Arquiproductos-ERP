@@ -10,7 +10,7 @@ import {
   SelectValue,
 } from '../../../components/ui/SelectShadcn';
 import { Tooltip, TooltipProvider } from '../../../components/ui/Tooltip';
-import { getRoleLabel, getAllRoleOptions } from '../../../lib/bom/roles';
+import { getRoleLabel, getAllRoleOptions, normalizeRole } from '../../../lib/bom/roles';
 import { useManufacturers } from '../../../hooks/useCatalog';
 import { BOM_QTY_TYPES, CONDITION_KEY_OPTIONS, CONDITION_VALUE_OPTIONS, getCascadeLabel, getCascadeOrder } from './types';
 import { useBOMTemplateForm } from './useBOMTemplateForm';
@@ -101,10 +101,15 @@ export default function BOMTemplateModal({
     if (form.templateSystemSize) {
       parts.push(form.templateSystemSize.toUpperCase().replace(/\s+/g, '_'));
     }
-    const hasRequiredHeadbox = form.components.some(c => (c.component_role === 'headbox' || c.component_role === 'cassette') && c.is_required !== false);
+    // Only append HB when a TOP-LEVEL headbox/cassette is required.
+    // Avoids false positives from child rows or legacy/un-normalized role strings.
+    const hasRequiredHeadbox = form.displayComponents.some((c) => {
+      const role = normalizeRole(c.component_role || '');
+      return (role === 'headbox' || role === 'cassette') && c.is_required !== false;
+    });
     if (hasRequiredHeadbox) parts.push('HB');
     return parts.join('_') || '';
-  }, [selectedPt, isDrapery, form.templateProductLine, form.templateOpeningDirection, form.templateDriveType, form.templateHardwareColor, form.templateDriveSide, form.templateInstallationLocation, form.templateManufacturer, form.templateSystemSize, form.components]);
+  }, [selectedPt, isDrapery, form.templateProductLine, form.templateOpeningDirection, form.templateDriveType, form.templateHardwareColor, form.templateDriveSide, form.templateInstallationLocation, form.templateManufacturer, form.templateSystemSize, form.displayComponents]);
 
   useEffect(() => {
     if (!codeManuallyEdited && autoCode) {

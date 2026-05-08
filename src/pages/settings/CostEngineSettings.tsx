@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useCostSettings, useImportTaxRules, useCategoryMargins, useLaborRules, useLaborCoverageGaps } from '../../hooks/useCostEngineSettings';
+import { useCostSettings, useImportTaxRules, useCategoryMargins, useLaborRules } from '../../hooks/useCostEngineSettings';
 import { useUIStore } from '../../stores/ui-store';
 import { useCatalogCategories } from '../../hooks/useCatalog';
 import Input from '../../components/ui/Input';
@@ -10,7 +10,6 @@ import Label from '../../components/ui/Label';
 import { Save, AlertCircle, Plus, Edit2, X, Check, Search, Filter } from 'lucide-react';
 import DealerTiersSettings from './DealerTiersSettings';
 import { useProductTypes } from '../../hooks/useProductTypes';
-import { resolveLaborRuleClient } from '../../lib/laborRules';
 
 const costSettingsSchema = z.object({
   labor_cost_percentage: z.number().min(0, 'Labor cost % must be >= 0').max(100, 'Labor cost % must be <= 100'),
@@ -81,48 +80,15 @@ export default function CostEngineSettings() {
     confection_size_escalation_pct: '0',
     confection_size_reference_width_m: '1',
   });
-  const {
-    gaps: laborCoverageGaps,
-    loading: coverageGapsLoading,
-    error: coverageGapsError,
-    refetch: refetchCoverageGaps,
-  } = useLaborCoverageGaps(90);
-  const [showCoverageGaps, setShowCoverageGaps] = useState(false);
-  const [showLaborTester, setShowLaborTester] = useState(false);
   const [laborSearch, setLaborSearch] = useState('');
   const [laborStatusFilter, setLaborStatusFilter] = useState<'active' | 'all' | 'inactive'>('active');
   const [laborProductFilter, setLaborProductFilter] = useState<string>('all');
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const toggleGroup = (key: string) =>
-    setCollapsedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
-  const [laborTester, setLaborTester] = useState({
-    product_type_id: '',
-    width_mm: '1500',
-    height_mm: '2000',
-    panel_count: '1',
-    drops: '1',
-    has_motor: 'false',
-    operating_type: '',
-    materials_cost: '500',
-    heatseal_length_m: '0',
-    bottom_bar_wrapped: 'false',
-  });
-
-  const laborTesterResult = useMemo(() => {
-    return resolveLaborRuleClient(laborRules || [], {
-      productTypeId: laborTester.product_type_id || null,
-      widthMm: Number(laborTester.width_mm) || 0,
-      heightMm: Number(laborTester.height_mm) || 0,
-      panelCount: Math.max(Number(laborTester.panel_count) || 1, 1),
-      drops: Math.max(Number(laborTester.drops) || 1, 1),
-      hasMotor: laborTester.has_motor === 'true',
-      operatingType: laborTester.operating_type || null,
-      materialsCost: Number(laborTester.materials_cost) || 0,
-      heatsealLengthM: Math.max(Number(laborTester.heatseal_length_m) || 0, 0),
-      bottomBarWrapped: laborTester.bottom_bar_wrapped === 'true',
+    setCollapsedGroups((prev) => {
+      const currentlyCollapsed = prev[key] !== false;
+      return { ...prev, [key]: !currentlyCollapsed };
     });
-  }, [laborRules, laborTester]);
-
   const laborStats = useMemo(() => {
     const total = laborRules.length;
     const active = laborRules.filter((r) => r.is_active).length;
@@ -233,8 +199,6 @@ export default function CostEngineSettings() {
   const [filterImportTaxType, setFilterImportTaxType] = useState<string>('all'); // 'all', 'custom', 'default'
   // Defaults tab: which row is being edited (Dealer Tiers style)
   const [editingDefaultKey, setEditingDefaultKey] = useState<'shipping' | 'import_tax' | 'tax' | null>(null);
-  const [editingLaborKey, setEditingLaborKey] = useState<'labor_cost' | 'labor_dealer' | 'labor_msrp' | null>(null);
-  const [laborEditValue, setLaborEditValue] = useState<string>('');
   const [defaultEditValue, setDefaultEditValue] = useState<string>('');
 
   // Filtered categories for Category Margins tab
@@ -394,6 +358,30 @@ export default function CostEngineSettings() {
       alert('Rule name is required.');
       return;
     }
+
+    // Validate dimension filters: must be null or >= 0, and max >= min when both set
+    const dimFields: Array<{ label: string; minKey: string; maxKey: string }> = [
+      { label: 'Width', minKey: 'width_min_mm', maxKey: 'width_max_mm' },
+      { label: 'Height', minKey: 'height_min_mm', maxKey: 'height_max_mm' },
+      { label: 'Area', minKey: 'area_min_m2', maxKey: 'area_max_m2' },
+    ];
+    for (const { label, minKey, maxKey } of dimFields) {
+      const minVal = toNullableNumber((laborRuleDraft as any)[minKey]);
+      const maxVal = toNullableNumber((laborRuleDraft as any)[maxKey]);
+      if (minVal != null && minVal < 0) {
+        alert(`${label} min cannot be negative. Leave blank for no limit.`);
+        return;
+      }
+      if (maxVal != null && maxVal < 0) {
+        alert(`${label} max cannot be negative. Leave blank for no limit.`);
+        return;
+      }
+      if (minVal != null && maxVal != null && maxVal < minVal) {
+        alert(`${label} max must be greater than or equal to ${label} min.`);
+        return;
+      }
+    }
+
     try {
       setIsSavingLaborRule(true);
       await upsertLaborRule({
@@ -808,136 +796,6 @@ export default function CostEngineSettings() {
               </div>
               </div>
 
-              {/* Labor form (separate section below) */}
-              <div>
-                <h3 className="text-sm font-semibold text-gray-900 mb-2">Labor</h3>
-                <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-md text-xs text-amber-900">
-                  <strong>Labor cost is now driven by Labor Rules.</strong> The legacy “Labor % (of materials)” below is{' '}
-                  <em>deprecated</em> and no longer used in pricing. Manage real labor rules in the{' '}
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('labor_rules')}
-                    className="underline font-medium"
-                  >
-                    Labor Rules tab
-                  </button>
-                  .
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                {[
-                  { key: 'labor_cost' as const, label: 'Labor % (of materials) — deprecated', field: 'labor_cost_percentage' as const, tooltip: 'Deprecated. Labor cost is now resolved by Labor Rules.', deprecated: true },
-                  { key: 'labor_dealer' as const, label: 'Labor Dealer Margin %', field: 'labor_dealer_margin_pct' as const, tooltip: 'labor_dealer = labor_cost / (1 − %). Margen sobre venta.', deprecated: false },
-                  { key: 'labor_msrp' as const, label: 'Labor MSRP Margin %', field: 'labor_msrp_margin_pct' as const, tooltip: 'labor_msrp = labor_dealer / (1 − %). Margen sobre venta.', deprecated: false },
-                ].map(({ key, label, field, tooltip, deprecated }) => {
-                  const isEditing = editingLaborKey === key;
-                  const displayValue = watch(field) ?? 0;
-                  const handleStartEdit = () => {
-                    setEditingLaborKey(key);
-                    setLaborEditValue(String(Math.round(Number(displayValue))));
-                  };
-                  const handleSaveLabor = async () => {
-                    const num = parseFloat(laborEditValue);
-                    const maxVal = key === 'labor_cost' ? 100 : 95;
-                    if (Number.isNaN(num) || num < 0 || num > maxVal) {
-                      alert(`${label} must be between 0 and ${maxVal}.`);
-                      return;
-                    }
-                    setValue(field, num);
-                    setEditingLaborKey(null);
-                    setLaborEditValue('');
-                    try {
-                      setIsSaving(true);
-                      const data = getValues();
-                      const laborPct = (data.labor_cost_percentage ?? 10) / 100;
-                      await upsertSettings({
-                        labor_pct: laborPct,
-                        labor_dealer_pct: (data.labor_dealer_margin_pct ?? 35) / 100,
-                        labor_msrp_pct: (data.labor_msrp_margin_pct ?? 65) / 100,
-                        shipping_pct: (settings?.shipping_pct ?? 0.15),
-                        global_import_tax_pct: (settings?.global_import_tax_pct ?? 0),
-                        tax_pct: (settings?.tax_pct ?? 0.07),
-                        default_msrp_pct: (settings?.default_msrp_pct ?? 0.65),
-                        minimum_margin_pct: (settings?.minimum_margin_pct ?? 0.35),
-                      });
-                      setSaveSuccess(true);
-                      setTimeout(() => setSaveSuccess(false), 3000);
-                    } catch (err: any) {
-                      alert(err?.message ?? 'Failed to save.');
-                    } finally {
-                      setIsSaving(false);
-                    }
-                  };
-                  return (
-                    <div
-                      key={key}
-                      className={`col-span-1 col-start-1 flex items-center gap-4 p-4 border rounded-lg ${
-                        deprecated ? 'bg-amber-50 border-amber-200 opacity-80' : 'bg-white border-gray-200'
-                      }`}
-                      title={tooltip}
-                    >
-                      <div className="flex-1 min-w-0">
-                        <span className={`font-medium ${deprecated ? 'text-amber-900' : 'text-gray-900'}`}>
-                          {label}
-                        </span>
-                        {deprecated && (
-                          <div className="text-[10px] text-amber-700 mt-0.5">
-                            Not used in pricing. Kept for legacy historical data only.
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-4 shrink-0">
-                        {isEditing ? (
-                          <>
-                            <div className="w-24">
-                              <Input
-                                type="number"
-                                min={0}
-                                max={key === 'labor_cost' ? 100 : 95}
-                                step={1}
-                                value={laborEditValue}
-                                onChange={(e) => setLaborEditValue(e.target.value)}
-                                className="py-1 text-xs text-right"
-                                placeholder="0"
-                              />
-                            </div>
-                            <span className="text-gray-500 text-sm">%</span>
-                            <button
-                              type="button"
-                              onClick={handleSaveLabor}
-                              disabled={isSaving}
-                              className="p-2 text-primary hover:bg-primary/10 rounded-md"
-                              title="Save"
-                            >
-                              <Save className="w-4 h-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => { setEditingLaborKey(null); setLaborEditValue(''); }}
-                              className="p-2 text-gray-500 hover:bg-gray-100 rounded-md"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <div className="w-20 text-right shrink-0 mr-6">
-                              <span className="text-gray-700 font-medium whitespace-nowrap">{Math.round(Number(displayValue))}%</span>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={handleStartEdit}
-                              className="text-sm text-primary hover:underline"
-                            >
-                              Edit
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-                </div>
-              </div>
             </div>
           )}
 
@@ -1364,37 +1222,9 @@ export default function CostEngineSettings() {
             <div>
               <div className="mb-6 flex items-start justify-between gap-3">
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-900 mb-1">Labor Rules Engine</h3>
-                  <p className="text-xs text-gray-500">
-                    Labor cost is resolved by rule per product type, size, panels, drops and motor.{' '}
-                    <strong className="text-red-700">Strict mode:</strong> if no rule matches, pricing is{' '}
-                    <strong className="text-red-700">blocked</strong> for that product. The legacy <em>Labor %</em>{' '}
-                    fallback in Defaults is no longer used.
-                  </p>
+                  <h3 className="text-sm font-semibold text-gray-900">Labor Rules Engine</h3>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowCoverageGaps((v) => {
-                        const next = !v;
-                        if (next) refetchCoverageGaps();
-                        return next;
-                      });
-                    }}
-                    className="inline-flex items-center gap-2 px-3 py-2 text-xs border border-amber-300 text-amber-700 rounded-md hover:bg-amber-50"
-                  >
-                    <AlertCircle className="w-3.5 h-3.5" />
-                    {showCoverageGaps ? 'Hide Coverage Gaps' : 'Coverage Gaps'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowLaborTester((v) => !v)}
-                    className="inline-flex items-center gap-2 px-3 py-2 text-xs border border-blue-300 text-blue-700 rounded-md hover:bg-blue-50"
-                  >
-                    <Search className="w-3.5 h-3.5" />
-                    {showLaborTester ? 'Hide Tester' : 'Test which rule applies'}
-                  </button>
                   <button
                     type="button"
                     onClick={() => {
@@ -1409,312 +1239,6 @@ export default function CostEngineSettings() {
                   </button>
                 </div>
               </div>
-
-              <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md text-xs text-blue-900">
-                <strong>How rules are picked:</strong> the resolver filters by{' '}
-                <code className="px-1 bg-white rounded">organization → is_active → product_type → width/height/area → panels/drops → operating_type → motor_required</code>.
-                If multiple rules survive, the one with the <strong>highest priority</strong> wins; ties break by oldest{' '}
-                <code className="px-1 bg-white rounded">created_at</code>. If nothing matches → the line is{' '}
-                <strong className="text-red-700">blocked</strong> until a covering rule exists.
-              </div>
-
-              {showCoverageGaps && (
-                <div className="mb-4 p-4 bg-amber-50 border border-amber-300 rounded-lg">
-                  <div className="flex items-center justify-between mb-2">
-                    <div>
-                      <h4 className="text-sm font-semibold text-amber-900">Coverage Gaps (last 90 days)</h4>
-                      <p className="text-[11px] text-amber-800">
-                        Configurations recently created that have <strong>no matching active LaborRule</strong>. Add a rule to cover each row.
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => refetchCoverageGaps()}
-                        className="text-[11px] underline text-amber-800"
-                      >
-                        Refresh
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setShowCoverageGaps(false)}
-                        className="text-amber-700 hover:text-amber-900"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                  {coverageGapsError ? (
-                    <div className="text-xs text-red-700">{coverageGapsError}</div>
-                  ) : coverageGapsLoading ? (
-                    <div className="text-xs text-amber-800">Loading…</div>
-                  ) : laborCoverageGaps.length === 0 ? (
-                    <div className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded p-2">
-                      <Check className="w-3.5 h-3.5 inline mr-1" />
-                      All recent configurations are covered by an active LaborRule.
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-[11px]">
-                        <thead>
-                          <tr className="text-left text-amber-900 border-b border-amber-200">
-                            <th className="px-2 py-1">Product Type</th>
-                            <th className="px-2 py-1">Motor</th>
-                            <th className="px-2 py-1">Width range (mm)</th>
-                            <th className="px-2 py-1">Height range (mm)</th>
-                            <th className="px-2 py-1 text-right">Sample</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {laborCoverageGaps.map((g, i) => (
-                            <tr key={`${g.product_type_id || 'none'}-${g.has_motor}-${i}`} className="border-b border-amber-100">
-                              <td className="px-2 py-1 text-amber-900">
-                                {g.product_type_name || g.product_type_code || 'Unknown'}
-                              </td>
-                              <td className="px-2 py-1">{g.has_motor ? 'Yes' : 'No'}</td>
-                              <td className="px-2 py-1 text-gray-700">
-                                {g.width_min_mm != null && g.width_max_mm != null
-                                  ? `${Number(g.width_min_mm).toFixed(0)} – ${Number(g.width_max_mm).toFixed(0)}`
-                                  : '—'}
-                              </td>
-                              <td className="px-2 py-1 text-gray-700">
-                                {g.height_min_mm != null && g.height_max_mm != null
-                                  ? `${Number(g.height_min_mm).toFixed(0)} – ${Number(g.height_max_mm).toFixed(0)}`
-                                  : '—'}
-                              </td>
-                              <td className="px-2 py-1 text-right font-semibold text-amber-900">
-                                {g.sample_count}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {showLaborTester && (
-                <div className="mb-4 p-4 bg-white border border-blue-200 rounded-lg">
-                  <div className="mb-3 flex items-center justify-between">
-                    <h4 className="text-xs font-semibold text-gray-900">Tester — see which rule would apply</h4>
-                    <button
-                      type="button"
-                      onClick={() => setShowLaborTester(false)}
-                      className="text-gray-400 hover:text-gray-600"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    <div>
-                      <Label className="text-xs">Product Type</Label>
-                      <select
-                        value={laborTester.product_type_id}
-                        onChange={(e) =>
-                          setLaborTester((s) => ({ ...s, product_type_id: e.target.value }))
-                        }
-                        className="w-full text-xs border border-gray-300 rounded-md px-2 py-2 bg-white"
-                      >
-                        <option value="">— Any (wildcard) —</option>
-                        {productTypes.map((pt: any) => (
-                          <option key={pt.id} value={pt.id}>
-                            {pt.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <Label className="text-xs">Width (mm)</Label>
-                      <Input
-                        type="number"
-                        value={laborTester.width_mm}
-                        onChange={(e) =>
-                          setLaborTester((s) => ({ ...s, width_mm: e.target.value }))
-                        }
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs">Height (mm)</Label>
-                      <Input
-                        type="number"
-                        value={laborTester.height_mm}
-                        onChange={(e) =>
-                          setLaborTester((s) => ({ ...s, height_mm: e.target.value }))
-                        }
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs">Has Motor?</Label>
-                      <select
-                        value={laborTester.has_motor}
-                        onChange={(e) =>
-                          setLaborTester((s) => ({ ...s, has_motor: e.target.value }))
-                        }
-                        className="w-full text-xs border border-gray-300 rounded-md px-2 py-2 bg-white"
-                      >
-                        <option value="false">No</option>
-                        <option value="true">Yes</option>
-                      </select>
-                    </div>
-                    <div>
-                      <Label className="text-xs">Panels</Label>
-                      <Input
-                        type="number"
-                        value={laborTester.panel_count}
-                        onChange={(e) =>
-                          setLaborTester((s) => ({ ...s, panel_count: e.target.value }))
-                        }
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs">Drops</Label>
-                      <Input
-                        type="number"
-                        value={laborTester.drops}
-                        onChange={(e) =>
-                          setLaborTester((s) => ({ ...s, drops: e.target.value }))
-                        }
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs">Operating Type</Label>
-                      <Input
-                        type="text"
-                        placeholder="(optional)"
-                        value={laborTester.operating_type}
-                        onChange={(e) =>
-                          setLaborTester((s) => ({ ...s, operating_type: e.target.value }))
-                        }
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs">Materials Cost ($)</Label>
-                      <Input
-                        type="number"
-                        value={laborTester.materials_cost}
-                        onChange={(e) =>
-                          setLaborTester((s) => ({ ...s, materials_cost: e.target.value }))
-                        }
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs">Heatseal length (m)</Label>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={laborTester.heatseal_length_m}
-                        onChange={(e) =>
-                          setLaborTester((s) => ({ ...s, heatseal_length_m: e.target.value }))
-                        }
-                        placeholder="seams × fabric width"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs">Bottom bar wrapped?</Label>
-                      <select
-                        className="border rounded px-2 py-1 w-full text-sm"
-                        value={laborTester.bottom_bar_wrapped}
-                        onChange={(e) =>
-                          setLaborTester((s) => ({ ...s, bottom_bar_wrapped: e.target.value }))
-                        }
-                      >
-                        <option value="false">No</option>
-                        <option value="true">Yes (charge per width m)</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  {laborTesterResult && (
-                    <div className={`mt-4 p-3 rounded-md border ${laborTesterResult.matched ? 'bg-gray-50 border-gray-200' : 'bg-red-50 border-red-300'}`}>
-                      {laborTesterResult.matched ? (
-                        <>
-                          <div className="flex items-center gap-2 mb-2 flex-wrap">
-                            <Check className="w-4 h-4 text-emerald-600" />
-                            <span className="text-sm font-semibold text-gray-900">
-                              Rule applied: {laborTesterResult.matched.display_name}
-                            </span>
-                            <span className="text-[11px] px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
-                              priority {laborTesterResult.matched.priority}
-                            </span>
-                            <span className="text-[11px] px-2 py-0.5 rounded bg-gray-100 text-gray-700">
-                              {laborTesterResult.matched.calc_mode}
-                            </span>
-                          </div>
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs text-gray-700">
-                            <div>
-                              <div className="text-gray-500">Labor Cost</div>
-                              <div className="font-semibold text-gray-900">
-                                ${laborTesterResult.laborCost.toFixed(2)}
-                              </div>
-                            </div>
-                            <div>
-                              <div className="text-gray-500">Effective % of materials</div>
-                              <div className="font-semibold text-gray-900">
-                                {(laborTesterResult.laborPctEffective * 100).toFixed(1)}%
-                              </div>
-                            </div>
-                            <div>
-                              <div className="text-gray-500">Raw (before min/max)</div>
-                              <div className="font-semibold text-gray-900">
-                                ${laborTesterResult.rawCost.toFixed(2)}
-                              </div>
-                            </div>
-                            <div>
-                              <div className="text-gray-500">Min / Max</div>
-                              <div className="font-semibold text-gray-900">
-                                {laborTesterResult.matched.min_charge != null
-                                  ? `$${Number(laborTesterResult.matched.min_charge).toFixed(2)}`
-                                  : '—'}{' '}
-                                /{' '}
-                                {laborTesterResult.matched.max_charge != null
-                                  ? `$${Number(laborTesterResult.matched.max_charge).toFixed(2)}`
-                                  : 'No cap'}
-                              </div>
-                            </div>
-                          </div>
-                          <div className="mt-3 border-t border-gray-200 pt-2">
-                            <div className="text-[11px] font-semibold text-gray-700 mb-1">Breakdown</div>
-                            <div className="space-y-1">
-                              {laborTesterResult.breakdown.map((line) => (
-                                <div
-                                  key={line.key}
-                                  className={`flex items-center justify-between text-[11px] ${line.active ? 'text-gray-800' : 'text-gray-400'}`}
-                                >
-                                  <div className="flex items-center gap-2">
-                                    <span className="font-medium">{line.label}</span>
-                                    <span className="text-gray-500">— {line.description}</span>
-                                  </div>
-                                  <span className={`tabular-nums ${line.active ? 'font-semibold' : ''}`}>
-                                    ${line.contribution.toFixed(2)}
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="flex items-center gap-2 mb-2">
-                            <AlertCircle className="w-4 h-4 text-red-600" />
-                            <span className="text-sm font-semibold text-red-900">
-                              No rule matched — pricing is BLOCKED
-                            </span>
-                          </div>
-                          <div className="text-xs text-red-800 mb-2">
-                            {laborTesterResult.unresolvedReason}
-                          </div>
-                          <div className="text-[11px] text-red-700">
-                            Real configurations with this profile cannot be saved as a Quote Line until you create a matching rule.
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
 
               {laborRulesError && (
                 <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-800">
@@ -2194,15 +1718,15 @@ export default function CostEngineSettings() {
               ) : (
                 <>
                   {/* ── Filter / search toolbar ────────────────────────── */}
-                  <div className="mb-3 flex flex-wrap items-center gap-2 p-3 bg-white border border-gray-200 rounded-md">
-                    <div className="flex items-center gap-1 text-[11px] bg-gray-100 rounded px-2 py-1 text-gray-700">
+                  <div className="mb-4 flex flex-wrap items-center gap-2.5 p-4 bg-white border border-gray-200 rounded-lg">
+                    <div className="flex items-center gap-1.5 text-xs bg-gray-100 rounded px-2.5 py-1.5 text-gray-700">
                       <span>Total <strong>{laborStats.total}</strong></span>
                       <span className="text-gray-400">·</span>
                       <span className="text-emerald-700">Active <strong>{laborStats.active}</strong></span>
                       <span className="text-gray-400">·</span>
                       <span className="text-gray-500">Inactive <strong>{laborStats.inactive}</strong></span>
                     </div>
-                    <div className="inline-flex rounded border border-gray-300 overflow-hidden text-[11px]">
+                    <div className="inline-flex rounded border border-gray-300 overflow-hidden text-xs">
                       {(['active', 'all', 'inactive'] as const).map((status) => (
                         <button
                           key={status}
@@ -2231,13 +1755,13 @@ export default function CostEngineSettings() {
                         </option>
                       ))}
                     </select>
-                    <div className="flex-1 min-w-[180px]">
+                    <div className="flex-1 min-w-[240px]">
                       <Input
                         type="text"
                         value={laborSearch}
                         onChange={(e) => setLaborSearch(e.target.value)}
-                        placeholder="Search by name, product type or operating mode…"
-                        className="text-xs h-8"
+                        placeholder="Search rule name, product type, or operation mode..."
+                        className="text-sm h-9"
                       />
                     </div>
                     {(laborSearch || laborStatusFilter !== 'active' || laborProductFilter !== 'all') && (
@@ -2248,7 +1772,7 @@ export default function CostEngineSettings() {
                           setLaborStatusFilter('active');
                           setLaborProductFilter('all');
                         }}
-                        className="text-[11px] underline text-gray-600 hover:text-gray-800"
+                        className="text-xs underline text-gray-600 hover:text-gray-800"
                       >
                         Reset
                       </button>
@@ -2260,30 +1784,30 @@ export default function CostEngineSettings() {
                       No labor rules match the current filters.
                     </div>
                   ) : (
-                    <div className="space-y-3">
+                    <div className="space-y-4">
                       {laborGroups.groups.map((group) => {
-                        const collapsed = !!collapsedGroups[group.key];
+                        const collapsed = collapsedGroups[group.key] !== false;
                         const activeCount = group.rules.filter((r) => r.is_active).length;
                         return (
                           <div key={group.key} className="bg-white border border-gray-200 rounded-lg overflow-hidden">
                             <button
                               type="button"
                               onClick={() => toggleGroup(group.key)}
-                              className="w-full flex items-center justify-between gap-3 px-3 py-2 bg-gray-50 hover:bg-gray-100 border-b border-gray-200"
+                              className="w-full flex items-center justify-between gap-3 px-4 py-3 bg-gray-50 hover:bg-gray-100 border-b border-gray-200"
                             >
-                              <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
-                                <span className="text-gray-400 text-xs">{collapsed ? '▸' : '▾'}</span>
+                              <div className="flex items-center gap-2 text-base font-semibold text-gray-900">
+                                <span className="text-gray-400 text-sm">{collapsed ? '▸' : '▾'}</span>
                                 {group.label}
-                                <span className="text-[10px] font-normal px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">
+                                <span className="text-[11px] font-medium px-2 py-0.5 rounded bg-emerald-100 text-emerald-700">
                                   {activeCount} active
                                 </span>
                                 {group.rules.length > activeCount && (
-                                  <span className="text-[10px] font-normal px-1.5 py-0.5 rounded bg-gray-200 text-gray-600">
+                                  <span className="text-[11px] font-medium px-2 py-0.5 rounded bg-gray-200 text-gray-600">
                                     {group.rules.length - activeCount} inactive
                                   </span>
                                 )}
                               </div>
-                              <span className="text-[10px] text-gray-500">
+                              <span className="text-xs text-gray-500">
                                 {group.rules.length} rule{group.rules.length === 1 ? '' : 's'}
                               </span>
                             </button>
@@ -2338,22 +1862,25 @@ export default function CostEngineSettings() {
                                   return (
                                     <React.Fragment key={rule.id}>
                                     <div
-                                      className={`px-3 py-3 ${rule.is_active ? 'bg-white' : 'bg-gray-50/60 opacity-70'}`}
+                                      className={`px-4 py-4 ${rule.is_active ? 'bg-white' : 'bg-gray-50/60 opacity-70'}`}
                                     >
                                       <div className="flex items-start justify-between gap-3">
                                         <div className="flex-1 min-w-0">
-                                          <div className="flex items-center gap-2 flex-wrap">
-                                            <span className={`text-sm font-medium ${rule.is_active ? 'text-gray-900' : 'text-gray-500 line-through decoration-gray-400'}`}>
+                                          <div className="flex items-center gap-2 flex-wrap mb-1">
+                                            <span className="text-[11px] uppercase tracking-wide text-gray-500">
+                                              Rule
+                                            </span>
+                                            <span className={`text-base font-semibold ${rule.is_active ? 'text-gray-900' : 'text-gray-500 line-through decoration-gray-400'}`}>
                                               {rule.display_name}
                                             </span>
-                                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-100">
-                                              {rule.calc_mode || 'composite'}
+                                            <span className="text-[11px] px-2 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-100">
+                                              mode: {rule.calc_mode || 'composite'}
                                             </span>
-                                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-700">
+                                            <span className="text-[11px] px-2 py-0.5 rounded bg-gray-100 text-gray-700">
                                               priority {rule.priority}
                                             </span>
                                             <span
-                                              className={`text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap ${
+                                              className={`text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${
                                                 rule.is_active
                                                   ? 'bg-emerald-100 text-emerald-700'
                                                   : 'bg-gray-200 text-gray-600'
@@ -2363,11 +1890,14 @@ export default function CostEngineSettings() {
                                             </span>
                                           </div>
                                           {filterChips.length > 0 && (
-                                            <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                                            <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                                              <span className="text-[11px] uppercase tracking-wide text-gray-500 mr-1">
+                                                Applies when
+                                              </span>
                                               {filterChips.map((chip) => (
                                                 <span
                                                   key={chip}
-                                                  className="text-[10px] text-gray-500 px-1.5 py-0.5 rounded border border-gray-200 bg-gray-50"
+                                                  className="text-[11px] text-gray-600 px-2 py-0.5 rounded border border-gray-200 bg-gray-50"
                                                 >
                                                   {chip}
                                                 </span>
@@ -2375,9 +1905,9 @@ export default function CostEngineSettings() {
                                             </div>
                                           )}
 
-                                          <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
+                                          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 text-xs">
                                             <div>
-                                              <span className="text-gray-400 font-medium uppercase tracking-wide text-[10px]">Base </span>
+                                              <span className="text-gray-500 font-semibold uppercase tracking-wide text-[11px]">Base formula </span>
                                               <span className="text-gray-700">
                                                 {baseParts.length > 0 ? baseParts.join(' + ') : <em className="text-gray-400">— no base components configured —</em>}
                                               </span>
@@ -2390,7 +1920,7 @@ export default function CostEngineSettings() {
                                               )}
                                             </div>
                                             <div>
-                                              <span className="text-gray-400 font-medium uppercase tracking-wide text-[10px]">Surcharges </span>
+                                              <span className="text-gray-500 font-semibold uppercase tracking-wide text-[11px]">Surcharges </span>
                                               {surchargeParts.length > 0 ? (
                                                 <span className="text-gray-700">
                                                   {surchargeParts.map((s, i) => (
@@ -2407,7 +1937,7 @@ export default function CostEngineSettings() {
                                           </div>
 
                                           {(sizeEsc > 0 || confEsc > 0) && (
-                                            <div className="mt-1.5 text-[10px] text-blue-700 bg-blue-50/60 rounded px-2 py-0.5 inline-block">
+                                            <div className="mt-2 text-[11px] text-blue-700 bg-blue-50/60 rounded px-2.5 py-1 inline-block">
                                               {sizeEsc > 0 && (
                                                 <span>
                                                   Size esc: <strong>{(sizeEsc * 100).toFixed(2)}%/m</strong> over <strong>{sizeRef.toFixed(2)} m</strong>
@@ -2428,7 +1958,6 @@ export default function CostEngineSettings() {
                                             <button
                                               type="button"
                                               onClick={() => {
-                                                setCollapsedGroups((prev) => ({ ...prev, [group.key]: false }));
                                                 setShowNewLaborRule(false);
                                                 beginEditLaborRule(rule);
                                               }}

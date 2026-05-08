@@ -8,7 +8,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { router } from '../../lib/router';
-import { getReturnToFromCurrentQuery, navigateBackContextual } from '../../lib/navigation/returnTo';
+import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
 import { useOrganizationContext } from '../../context/OrganizationContext';
@@ -4411,6 +4411,17 @@ export default function QuoteNew() {
 
         <div className="flex items-center gap-3">
           {quoteId && (
+            <button
+              type="button"
+              onClick={() => router.navigate(withReturnTo(`/sales/quotes/${quoteId}`))}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50 text-sm"
+              title="View Quote Detail"
+            >
+              <Eye className="w-4 h-4 shrink-0 text-gray-600" />
+              View Detail
+            </button>
+          )}
+          {quoteId && (
             <div className="relative" ref={printDropdownRef}>
               <button
                 type="button"
@@ -4820,6 +4831,11 @@ export default function QuoteNew() {
                       ? ((line.CatalogItems?.Manufacturers as any)?.name || line.CatalogItems?.manufacturer || null)
                       : null;
                     const driveDisplay = (isCatalogLine || isFilmLine) ? (catalogMfr || '—') : driveLabel;
+                    const snap = line.config_snapshot ?? {};
+                    const driveSku =
+                      (typeof snap.motor_sku === 'string' && snap.motor_sku.trim()) ||
+                      (typeof snap.drive_sku === 'string' && snap.drive_sku.trim()) ||
+                      null;
 
                     const isDragging = draggedLineId === line.id;
                     const isDragOver = dragOverLineId === line.id;
@@ -4858,9 +4874,31 @@ export default function QuoteNew() {
                             if (isCatalogLine) return driveDisplay;
                             const parts = driveDisplay.split('|').map((s: string) => s.trim());
                             if (parts.length >= 2) {
-                              return <>{parts[0]}<br />{parts.slice(1).join(' ')}</>;
+                              return (
+                                <>
+                                  {parts[0]}
+                                  <br />
+                                  {parts.slice(1).join(' ')}
+                                  {driveSku && (
+                                    <>
+                                      <br />
+                                      <span className="text-[11px] text-gray-500">{driveSku}</span>
+                                    </>
+                                  )}
+                                </>
+                              );
                             }
-                            return driveDisplay;
+                            return (
+                              <>
+                                {driveDisplay}
+                                {driveSku && (
+                                  <>
+                                    <br />
+                                    <span className="text-[11px] text-gray-500">{driveSku}</span>
+                                  </>
+                                )}
+                              </>
+                            );
                           })()}
                         </td>
                         <td className="py-4 px-2 text-gray-700 text-sm text-center align-middle">

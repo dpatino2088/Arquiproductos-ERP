@@ -19,6 +19,7 @@ import DuplicateQuoteModal, { type DuplicateQuoteMode } from '../../components/s
 import { getAppUsersDisplayNames } from '../../lib/appUsersDisplayNames';
 import QuoteAttachmentsTab from '../../components/sales/QuoteAttachmentsTab';
 import DimensionsStackView from '../../components/DimensionsStackView';
+import QuotePerformanceTab from '../../components/sales/QuotePerformanceTab';
 
 const SALES_SUBMODULES = [
   { id: 'quotes', label: 'Quotes', href: '/sales/quotes', icon: FileText },
@@ -188,7 +189,7 @@ export default function QuoteDetail() {
   const quoteId = getQuoteIdFromPath();
   const { activeOrganizationId, loading: orgLoading } = useOrganizationContext();
   const { user } = useAuth();
-  const { isPortal } = useAccessContext();
+  const { isPortal, isInternal } = useAccessContext();
   const addNotification = useUIStore((s) => s.addNotification);
   const { registerSubmodules } = useSubmoduleNav();
 
@@ -710,13 +711,18 @@ export default function QuoteDetail() {
         { id: 'overview', label: 'Overview' },
         { id: 'lines', label: 'Lines', count: lines.length },
         { id: 'proposals', label: 'Proposals', count: proposals.length },
+        { id: 'performance', label: 'Performance' },
         { id: 'attachments', label: 'Attachments' },
         { id: 'timeline', label: 'Timeline' },
       ];
 
-  const displayTotal = lines.length > 0
+  const displaySubtotal = lines.length > 0
     ? lines.reduce((s, l) => s + Number(l.dealer_price_total ?? l.msrp ?? 0), 0)
-    : (quote.total_amount ?? 0);
+    : Number(quote.subtotal ?? 0);
+  const displayTax = Number(quote.tax_amount ?? salesOrder?.tax_amount ?? 0);
+  const displayTotal = lines.length > 0
+    ? displaySubtotal + displayTax
+    : (quote.total_amount ?? (displaySubtotal + displayTax));
 
   const hasAnyPayment = (salesOrderFinancial?.total_paid ?? 0) > 0;
   const hasSalesOrder = Boolean(salesOrder);
@@ -906,11 +912,11 @@ export default function QuoteDetail() {
               <dl className="space-y-2 text-sm">
                 <div className="flex justify-between">
                   <dt className="text-gray-500">Subtotal</dt>
-                  <dd className="font-mono">{formatCurrencyDisplay(lines.length > 0 ? displayTotal : quote.subtotal)}</dd>
+                  <dd className="font-mono">{formatCurrencyDisplay(lines.length > 0 ? displaySubtotal : quote.subtotal)}</dd>
                 </div>
                 <div className="flex justify-between">
                   <dt className="text-gray-500">Tax</dt>
-                  <dd className="font-mono">{formatCurrencyDisplay(quote.tax_amount ?? salesOrder?.tax_amount ?? 0)}</dd>
+                  <dd className="font-mono">{formatCurrencyDisplay(displayTax)}</dd>
                 </div>
                 <div className="flex justify-between border-t pt-2">
                   <dt className="text-gray-500">Total</dt>
@@ -1186,6 +1192,15 @@ export default function QuoteDetail() {
         <QuoteAttachmentsTab
           quoteId={quote.id}
           organizationId={quote.organization_id}
+        />
+      )}
+
+      {activeTab === 'performance' && isInternal && (
+        <QuotePerformanceTab
+          quoteId={quote.id}
+          organizationId={quote.organization_id}
+          taxAmount={displayTax}
+          currency="USD"
         />
       )}
 

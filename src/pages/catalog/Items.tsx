@@ -125,6 +125,29 @@ function splitCsvParam(value: string | null): string[] {
     .filter(Boolean);
 }
 
+function normalizeSearchText(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function tokenizeSearch(value: string): string[] {
+  const normalized = normalizeSearchText(value);
+  return normalized ? normalized.split(/\s+/).filter(Boolean) : [];
+}
+
+function parsePublicStorageUrl(url: string): { bucket: string; path: string } | null {
+  const match = url.match(/\/storage\/v1\/object\/public\/([^/]+)\/(.+)$/);
+  if (!match) return null;
+  return {
+    bucket: match[1],
+    path: decodeURIComponent(match[2]),
+  };
+}
+
 function hasCatalogListParams(params: URLSearchParams): boolean {
   return (
     params.has('q') ||
@@ -217,9 +240,15 @@ export default function Items() {
 
   // Fetch ProductTypes + CatalogItemProductTypes for filtering
   useEffect(() => {
-    if (!activeOrganizationId) return;
+    if (!activeOrganizationId) {
+      setProductTypeMap({});
+      setProductTypeLabels([]);
+      setProductTypeMapLoading(false);
+      return;
+    }
     let cancelled = false;
     (async () => {
+      setProductTypeMapLoading(true);
       const [{ data: ptRows, error: ptError }, { data: ciptRows, error: ciptError }] = await Promise.all([
         supabase
           .from('ProductTypes')
@@ -236,6 +265,7 @@ export default function Items() {
       if (ptError || ciptError) {
         setProductTypeMap({});
         setProductTypeLabels([]);
+        setProductTypeMapLoading(false);
         return;
       }
       const ptLabelMap: Record<string, string> = {};
@@ -249,6 +279,7 @@ export default function Items() {
       });
       setProductTypeMap(itemPtMap);
       setProductTypeLabels([...new Set(Object.values(ptLabelMap))].sort());
+      setProductTypeMapLoading(false);
     })();
     return () => { cancelled = true; };
   }, [activeOrganizationId]);
@@ -278,6 +309,7 @@ export default function Items() {
   const [selectedStock, setSelectedStock] = useState<string[]>([]);
   const [productTypeMap, setProductTypeMap] = useState<Record<string, string[]>>({});
   const [productTypeLabels, setProductTypeLabels] = useState<string[]>([]);
+  const [productTypeMapLoading, setProductTypeMapLoading] = useState(false);
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const [showImportModal, setShowImportModal] = useState(false);
   const [showMoveCategoryModal, setShowMoveCategoryModal] = useState(false);
@@ -618,43 +650,61 @@ export default function Items() {
     });
   }, [itemsData]);
 
+  const rawItemById = useMemo(() => {
+    const byId = new Map<string, any>();
+    (items || []).forEach((item: any) => {
+      if (item?.id) byId.set(item.id, item);
+    });
+    return byId;
+  }, [items]);
+
+  const categorySearchTextById = useMemo(() => {
+    const byId = new Map<string, any>();
+    catalogCategories.forEach((cat: any) => {
+      if (cat?.id) byId.set(cat.id, cat);
+    });
+    const out = new Map<string, string>();
+    catalogCategories.forEach((cat: any) => {
+      if (!cat?.id) return;
+      const parent = cat.parent_id ? byId.get(cat.parent_id) : null;
+      const path = parent?.name ? `${parent.name} ${cat.name}` : String(cat.name || '');
+      out.set(cat.id, normalizeSearchText(path));
+    });
+    return out;
+  }, [catalogCategories]);
+
   // Filter and sort items (excluding stock filter, which depends on availability map)
   const preStockFilteredItems = useMemo(() => {
     const filtered = displayItems.filter(item => {
-      // Search filter - FLEXIBLE (supports SKU with/without hyphens, collection, variant, color)
-      const searchLower = searchTerm.toLowerCase().trim();
-      const searchNormalized = searchLower.replace(/[-\s]/g, ''); // Remove hyphens and spaces
-      
-      const matchesSearch = !searchTerm || (() => {
-        // Normalize SKU for flexible matching (SCR-3001 = SCR3001 = "SCR 3001")
-        const skuNormalized = (item.sku || '').toLowerCase().replace(/[-\s]/g, '');
-        
-        // Get additional fields from original item data
-        const itemData = items?.find(i => i.id === item.id);
-        const collectionName = ((itemData as any)?.collection_name || '').toLowerCase();
-        const variantName = ((itemData as any)?.variant_name || '').toLowerCase();
-        const color = ((itemData as any)?.color || '').toLowerCase();
-        
-        return (
-          // SKU: exact + normalized matching
-          (item.sku || '').toLowerCase().includes(searchLower) ||
-          skuNormalized.includes(searchNormalized) ||
-          // Name
-          (item.itemName || '').toLowerCase().includes(searchLower) ||
-          // Description
-          (item.description || '').toLowerCase().includes(searchLower) ||
-          // Collection, Variant, Color
-          collectionName.includes(searchLower) ||
-          variantName.includes(searchLower) ||
-          color.includes(searchLower) ||
-          // Measure basis, UOM
-          (item.measure_basis || '').toLowerCase().includes(searchLower) ||
-          (item.uom || '').toLowerCase().includes(searchLower) ||
-          // Manufacturer, Category, Family
-          (item.manufacturer || '').toLowerCase().includes(searchLower) ||
-          (item.category || '').toLowerCase().includes(searchLower) ||
-          (item.family || '').toLowerCase().includes(searchLower)
-        );
+      // Search filter - tokenized and accent-insensitive across multiple fields.
+      const searchTokens = tokenizeSearch(searchTerm);
+      const matchesSearch = searchTokens.length === 0 || (() => {
+        const itemData = rawItemById.get(item.id);
+        const categoryPath = item.categoryId ? (categorySearchTextById.get(item.categoryId) || '') : '';
+        const productTypeText = (productTypeMap[item.id] || []).join(' ');
+        const searchable = normalizeSearchText([
+          item.sku,
+          item.itemName,
+          item.description,
+          item.measure_basis,
+          item.uom,
+          item.manufacturer,
+          item.category,
+          item.family,
+          (itemData as any)?.collection_name,
+          (itemData as any)?.variant_name,
+          (itemData as any)?.color,
+          categoryPath,
+          productTypeText,
+        ].filter(Boolean).join(' '));
+
+        // Compact matching keeps SKU search flexible:
+        // "RC3006", "RC-3006", and "RC 3006" all match.
+        const compactSearchable = searchable.replace(/\s+/g, '');
+        return searchTokens.every((token) => {
+          const compactToken = token.replace(/\s+/g, '');
+          return searchable.includes(token) || compactSearchable.includes(compactToken);
+        });
       })();
 
       // Manufacturer filter
@@ -676,7 +726,10 @@ export default function Items() {
       const matchesActive = selectedActive.length === 0 || (item.active !== undefined && selectedActive.includes(item.active ? 'Active' : 'Inactive'));
 
       // Product Type filter
-      const matchesProductType = selectedProductType.length === 0 || (productTypeMap[item.id] && productTypeMap[item.id].some(pt => selectedProductType.includes(pt)));
+      const matchesProductType =
+        selectedProductType.length === 0 ||
+        productTypeMapLoading ||
+        (productTypeMap[item.id] || []).some(pt => selectedProductType.includes(pt));
 
       return matchesSearch && matchesManufacturer && matchesCategory && matchesSubcategory && matchesFamily && matchesMeasureBasis && matchesActive && matchesProductType;
     });
@@ -738,7 +791,7 @@ export default function Items() {
       if (aValue > bValue) return sortOrder === 'asc' ? 1 : -1;
       return 0;
     });
-  }, [searchTerm, itemsData, items, sortBy, sortOrder, selectedManufacturer, selectedCategory, selectedSubcategory, selectedFamily, selectedMeasureBasis, selectedActive, selectedProductType, productTypeMap]);
+  }, [searchTerm, displayItems, rawItemById, categorySearchTextById, sortBy, sortOrder, selectedManufacturer, selectedCategory, selectedSubcategory, selectedFamily, selectedMeasureBasis, selectedActive, selectedProductType, productTypeMap, productTypeMapLoading]);
 
   const filteredItems = useMemo(() => {
     if (selectedStock.length === 0) return preStockFilteredItems;
@@ -755,6 +808,8 @@ export default function Items() {
   const totalPages = Math.ceil(filteredItems.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
   const paginatedItems = filteredItems.slice(startIndex, startIndex + itemsPerPage);
+  const showingStart = filteredItems.length === 0 ? 0 : startIndex + 1;
+  const showingEnd = filteredItems.length === 0 ? 0 : Math.min(startIndex + itemsPerPage, filteredItems.length);
 
   // Fetch availability for current page normally; when stock filter is active, fetch for all pre-stock filtered items
   useEffect(() => {
@@ -781,11 +836,32 @@ export default function Items() {
     [catalogCategories, bulkParentCategoryId]
   );
 
-  // Reset to first page when search changes (except when restoring list state)
+  // Reset to first page when search/filters change (except when restoring list state)
   useEffect(() => {
     if (isRestoringListStateRef.current) return;
     setCurrentPage(1);
-  }, [searchTerm]);
+  }, [
+    searchTerm,
+    selectedManufacturer,
+    selectedCategory,
+    selectedSubcategory,
+    selectedFamily,
+    selectedMeasureBasis,
+    selectedActive,
+    selectedProductType,
+    selectedStock,
+  ]);
+
+  // Clamp current page when filtered result count shrinks.
+  useEffect(() => {
+    if (totalPages === 0) {
+      if (currentPage !== 1) setCurrentPage(1);
+      return;
+    }
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   const saveListStateSnapshot = useCallback(() => {
     const snapshot: CatalogItemsListStateSnapshot = {
@@ -1227,11 +1303,34 @@ export default function Items() {
       const newName = original.is_roll
         ? (derivedRollName || original.name || newSku)
         : (original.name ? `${original.name} (Copy)` : newSku);
+      const sourceImageUrl = (original as any).image_url || item.image || null;
+
+      // Preflight image validation: avoid duplicating with broken links.
+      if (sourceImageUrl) {
+        const parsed = parsePublicStorageUrl(sourceImageUrl);
+        if (parsed) {
+          const segments = parsed.path.split('/');
+          const fileName = segments.pop();
+          const folder = segments.join('/');
+          if (fileName && folder) {
+            const { data: existingObjects, error: listErr } = await supabase.storage
+              .from(parsed.bucket)
+              .list(folder, { search: fileName, limit: 1 });
+            if (listErr) {
+              console.warn('⚠️ Could not validate source image before duplicate:', listErr.message);
+            } else if (!existingObjects || existingObjects.length === 0) {
+              throw new Error(
+                'Original image file is missing in storage. Re-upload the image on the original item first, then duplicate again.'
+              );
+            }
+          }
+        }
+      }
 
       const { data: inserted, error: insertErr } = await supabase
         .from('CatalogItems')
-        .insert({ ...rest, sku: newSku, name: newName })
-        .select('id, sku, name, category_id, cost_exw, manufacturer_id, item_role, measure_basis')
+        .insert({ ...rest, sku: newSku, name: newName, image_url: sourceImageUrl })
+        .select('id, sku, name, category_id, cost_exw, manufacturer_id, item_role, measure_basis, image_url')
         .single();
       if (insertErr) {
         if (insertErr.code === '23505') throw new Error(`SKU "${newSku}" already exists.`);
@@ -1248,6 +1347,46 @@ export default function Items() {
       }
 
       const warnings: string[] = [];
+
+      // Copy image file to a path owned by the new item so duplicated items
+      // remain stable even if the original item image is changed/deleted.
+      try {
+        if (sourceImageUrl && activeOrganizationId) {
+          const marker = '/storage/v1/object/public/catalog-images/';
+          const markerPos = sourceImageUrl.indexOf(marker);
+          if (markerPos >= 0) {
+            const srcPath = decodeURIComponent(sourceImageUrl.slice(markerPos + marker.length));
+            const fileName = srcPath.split('/').pop() || `copy-${Date.now()}.png`;
+            const targetPath = `catalog-items/${activeOrganizationId}/${inserted.id}/${Date.now()}-${fileName}`;
+
+            const { error: copyImageErr } = await supabase.storage
+              .from('catalog-images')
+              .copy(srcPath, targetPath);
+
+            if (copyImageErr) {
+              console.warn('⚠️ Image copy failed:', copyImageErr.message);
+              warnings.push('Image file');
+            } else {
+              const { data: publicUrlData } = supabase.storage
+                .from('catalog-images')
+                .getPublicUrl(targetPath);
+              const finalImageUrl = publicUrlData?.publicUrl || sourceImageUrl;
+              const { error: updateImageErr } = await supabase
+                .from('CatalogItems')
+                .update({ image_url: finalImageUrl })
+                .eq('id', inserted.id)
+                .eq('organization_id', activeOrganizationId);
+              if (updateImageErr) {
+                console.warn('⚠️ Image URL update failed:', updateImageErr.message);
+                warnings.push('Image URL');
+              }
+            }
+          }
+        }
+      } catch (imageEx: any) {
+        console.warn('⚠️ Image copy exception:', imageEx?.message);
+        warnings.push('Image');
+      }
 
       // Copy supply info
       try {
@@ -2174,7 +2313,7 @@ export default function Items() {
               <option value={100}>100</option>
             </select>
             <span className="text-sm text-gray-700">
-              Showing {startIndex + 1}-{Math.min(startIndex + itemsPerPage, filteredItems.length)} of {filteredItems.length}
+              Showing {showingStart}-{showingEnd} of {filteredItems.length}
               {loadingMore && (
                 <span className="ml-2 text-xs text-gray-500">
                   <span className="inline-block animate-spin rounded-full h-3 w-3 border-b-2 border-primary mr-1"></span>

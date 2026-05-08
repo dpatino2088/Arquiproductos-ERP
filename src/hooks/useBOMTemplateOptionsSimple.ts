@@ -543,6 +543,7 @@ export function useBOMTemplateOptionsSimple(
 
         if (templateIds.length === 0) {
           setOptions([]);
+          setRoleRequired(false);
           setLoading(false);
           return;
         }
@@ -620,6 +621,7 @@ export function useBOMTemplateOptionsSimple(
 
         if (componentItemIds.size === 0) {
           setOptions([]);
+          setRoleRequired(false);
           setLoading(false);
           return;
         }
@@ -643,12 +645,20 @@ export function useBOMTemplateOptionsSimple(
           });
         }
 
-        // Build options with template IDs
+      // Build options with template IDs
         // ✅ SIMPLIFICADO: Usar item.id como key único (no normalizar SKU)
         // Esto evita problemas de matching incorrecto y aprovecha que los datos vienen de la misma fuente
         const itemMap = new Map<string, RoleOption>();
         (catalogItems || []).forEach((item: any) => {
           if (!item.id || !item.sku) return;
+        // Extra safety: when role is color-scoped and a color is selected,
+        // exclude items that explicitly belong to a different color.
+        // Keep null/empty colors to support neutral parts.
+        if (requiresColor && normalizedColor) {
+          const itemColor = String(item.color ?? '').trim().toLowerCase();
+          const wantedColor = String(normalizedColor).trim().toLowerCase();
+          if (itemColor && itemColor !== wantedColor) return;
+        }
           
           // Usar el ID del item como key único (garantiza no duplicados)
           const key = item.id;
@@ -690,6 +700,7 @@ export function useBOMTemplateOptionsSimple(
         console.error('[useBOMTemplateOptionsSimple] Error:', err?.message || err);
         setError(err?.message || 'Failed to load options');
         setOptions([]);
+        setRoleRequired(false);
       } finally {
         setLoading(false);
       }
@@ -888,10 +899,18 @@ export function useBOMTemplateAllRoleOptions(
           const roleMap = componentIdsByRole.get(role)!;
           const reqMap = requiredIdsByRole.get(role)!;
           const itemMap = new Map<string, RoleOption>();
+          const roleRequiresColor = COLOR_ROLES.has(role) && !NON_COLOR_ROLES.has(role);
 
           roleMap.forEach((templateIdsSet, itemId) => {
             const item = itemById.get(itemId);
             if (item && item.id && item.sku) {
+              // Extra safety for color-scoped roles:
+              // if selected hardware color is set, do not surface items from another color.
+              if (roleRequiresColor && normalizedColor) {
+                const itemColor = String(item.color ?? '').trim().toLowerCase();
+                const wantedColor = String(normalizedColor).trim().toLowerCase();
+                if (itemColor && itemColor !== wantedColor) return;
+              }
               const templateIds = Array.from(templateIdsSet);
               const requiredTemplateIds = Array.from(reqMap.get(itemId) || []);
               if (!itemMap.has(itemId)) {

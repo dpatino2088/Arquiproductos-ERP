@@ -318,8 +318,8 @@ export default function CatalogItemNew() {
   // Supply (Supply Type + Origin) — only when editing; stored in CatalogItemSupply
   const [supplyType, setSupplyType] = useState<SupplyType>('stock');
   const [supplyOrigin, setSupplyOrigin] = useState<SupplyOrigin>('local');
-  const [leadTimeMinDays, setLeadTimeMinDays] = useState<number>(8);
-  const [leadTimeMaxDays, setLeadTimeMaxDays] = useState<number>(15);
+  const [leadTimeMinDays, setLeadTimeMinDays] = useState<number | ''>(8);
+  const [leadTimeMaxDays, setLeadTimeMaxDays] = useState<number | ''>(15);
   const [primaryLocationId, setPrimaryLocationId] = useState<string | null>(null);
   const shouldCloseAfterSaveRef = useRef(false);
   
@@ -341,6 +341,7 @@ export default function CatalogItemNew() {
   // Counter to force re-fetch of msrpRow after save
   const [msrpFetchKey, setMsrpFetchKey] = useState(0);
   const [msrpLoading, setMsrpLoading] = useState(false);
+  const msrpAutoRecomputeAttemptedRef = useRef<string | null>(null);
   
   // Conversions state (from CatalogItemConversions table)
   const [conversions, setConversions] = useState<{
@@ -576,7 +577,6 @@ export default function CatalogItemNew() {
 
   useEffect(() => {
     if (!categoryId) {
-      setSelectedParentCategoryId('');
       return;
     }
     const parentId = categoryParentBySubcategoryId.get(categoryId);
@@ -1091,12 +1091,12 @@ export default function CatalogItemNew() {
   useEffect(() => {
     if (!itemId || !activeOrganizationId) {
       setMsrpRow(null);
+      msrpAutoRecomputeAttemptedRef.current = null;
       return;
     }
     
     let isMounted = true;
     setMsrpLoading(true);
-    setMsrpRow(null);
     
     (async () => {
       try {
@@ -1126,11 +1126,20 @@ export default function CatalogItemNew() {
 
           // Auto-fix: CIM row exists but prices are zero → stale from UOM change.
           // Trigger recompute silently and re-fetch once done.
-          if (Number(data.dealer_price ?? 0) === 0 &&
-              Number((data as any).pricing_cost_exw ?? 0) === 0) {
+          if (
+              Number(data.dealer_price ?? 0) === 0 &&
+              Number((data as any).pricing_cost_exw ?? 0) === 0 &&
+              msrpAutoRecomputeAttemptedRef.current !== itemId
+          ) {
+            msrpAutoRecomputeAttemptedRef.current = itemId;
             supabase.rpc('msrp_compute_for_item', { p_item_id: itemId })
               .then(() => { if (isMounted) setMsrpFetchKey(k => k + 1); })
               .catch(() => {});
+          } else if (
+            Number(data.dealer_price ?? 0) > 0 ||
+            Number((data as any).pricing_cost_exw ?? 0) > 0
+          ) {
+            msrpAutoRecomputeAttemptedRef.current = null;
           }
         }
       } catch (err) {
@@ -1167,8 +1176,8 @@ export default function CatalogItemNew() {
     setSaveError(null);
     
     try {
-      const rawLeadMin = Number(leadTimeMinDays ?? 0);
-      const rawLeadMax = Number(leadTimeMaxDays ?? 0);
+      const rawLeadMin = Number(leadTimeMinDays === '' ? 0 : leadTimeMinDays);
+      const rawLeadMax = Number(leadTimeMaxDays === '' ? 0 : leadTimeMaxDays);
       const safeLeadMin = Number.isFinite(rawLeadMin) ? Math.max(0, Math.round(rawLeadMin)) : 0;
       const safeLeadMax = Number.isFinite(rawLeadMax) ? Math.max(0, Math.round(rawLeadMax)) : 0;
       if (safeLeadMin > safeLeadMax) {
@@ -2238,7 +2247,10 @@ export default function CatalogItemNew() {
                       min="0"
                       step="1"
                       value={leadTimeMinDays}
-                      onChange={(e) => setLeadTimeMinDays(Number(e.target.value))}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setLeadTimeMinDays(next === '' ? '' : Number(next));
+                      }}
                       className="h-auto py-1 text-xs w-full"
                       disabled={isReadOnly}
                     />
@@ -2257,7 +2269,10 @@ export default function CatalogItemNew() {
                       min="0"
                       step="1"
                       value={leadTimeMaxDays}
-                      onChange={(e) => setLeadTimeMaxDays(Number(e.target.value))}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setLeadTimeMaxDays(next === '' ? '' : Number(next));
+                      }}
                       className="h-auto py-1 text-xs w-full"
                       disabled={isReadOnly}
                     />
@@ -2565,7 +2580,7 @@ export default function CatalogItemNew() {
               <p className="text-xs text-gray-500 bg-amber-50 border border-amber-200 rounded p-3">
                 Save the item first to see MSRP. Values are computed in the backend when cost and category are set.
               </p>
-            ) : msrpLoading ? (
+            ) : (msrpLoading && !msrpRow) ? (
               <p className="text-xs text-gray-500">Loading MSRP…</p>
             ) : msrpRow ? (
               (() => {

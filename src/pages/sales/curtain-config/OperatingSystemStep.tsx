@@ -153,9 +153,16 @@ export default function OperatingSystemStep({
     }
   }, [hardwareFilteredTemplates, hasAnyOperationSelection]);
   
-  // ✅ Base para opciones Manual/Motor: la guardada en config (entrada del step) o la actual
+  // ✅ Base para opciones Manual/Motor:
+  // 1) Prefer immutable base saved before operation selection.
+  // 2) If missing but there is already an operation selection (edit/reopen),
+  //    recover from manufacturer-scoped templates to avoid being stuck in a single
+  //    template narrowed by a previous motor/tube pick.
+  // 3) Fallback to current hardware-filtered templates.
   const baseTemplatesForOptions = (operatingSystemBaseFromConfig && operatingSystemBaseFromConfig.length > 0)
     ? operatingSystemBaseFromConfig
+    : (hasAnyOperationSelection && mfrFilteredTemplates && mfrFilteredTemplates.length > 0)
+    ? mfrFilteredTemplates
     : hardwareFilteredTemplates;
 
   const uniq = (ids: string[] | null | undefined): string[] | null => {
@@ -274,6 +281,10 @@ export default function OperatingSystemStep({
 
   // ✅ effectiveBaseTemplates: usa baseTemplatesForOptions o loadedFallbackTemplates como fallback
   const effectiveBaseTemplates = useMemo(() => baseTemplatesForOptions || loadedFallbackTemplates || null, [baseTemplatesForOptions, loadedFallbackTemplates]);
+  const persistedOperatingBase = useMemo(
+    () => uniq(operatingSystemBaseFromConfig) ?? uniq(effectiveBaseTemplates) ?? uniq(hardwareFilteredTemplates) ?? null,
+    [operatingSystemBaseFromConfig, effectiveBaseTemplates, hardwareFilteredTemplates]
+  );
 
   // ✅ NUEVO: Separar templates por operación para evitar opciones “fantasma”
   // Regla: motor/tube NO filtran por color, PERO manual vs motor debe separar templates:
@@ -493,6 +504,26 @@ export default function OperatingSystemStep({
 
   const loading = loadingMotor || loadingDrive || loadingTube;
 
+  // UX: show full options before selection; once selected, collapse to selected card.
+  // If selected id is stale/not present in current compatible options, show full list.
+  const visibleMotorOptions = useMemo(() => {
+    if (!motorItemId) return motorOptions;
+    const selectedStillAvailable = motorOptions.some((opt) => opt.id === motorItemId);
+    return selectedStillAvailable ? motorOptions.filter((opt) => opt.id === motorItemId) : motorOptions;
+  }, [motorItemId, motorOptions]);
+
+  const visibleDriveOptions = useMemo(() => {
+    if (!driveItemId) return filteredDriveOptions;
+    const selectedStillAvailable = filteredDriveOptions.some((opt) => opt.id === driveItemId);
+    return selectedStillAvailable ? filteredDriveOptions.filter((opt) => opt.id === driveItemId) : filteredDriveOptions;
+  }, [driveItemId, filteredDriveOptions]);
+
+  const visibleTubeOptions = useMemo(() => {
+    if (!tubeItemId) return tubeOptions;
+    const selectedStillAvailable = tubeOptions.some((opt) => opt.id === tubeItemId);
+    return selectedStillAvailable ? tubeOptions.filter((opt) => opt.id === tubeItemId) : tubeOptions;
+  }, [tubeItemId, tubeOptions]);
+
   // ✅ Calcular templates finales después de seleccionar tube
   const selectedTube = tubeOptions.find(opt => opt.id === tubeItemId);
   const finalFilteredTemplates = useMemo(() => {
@@ -622,8 +653,8 @@ export default function OperatingSystemStep({
       updates.manual_drive = undefined;
       updates.drive_item_id = undefined;
       updates.drive_sku = null;
-      // ✅ Resetear a templates de Motor (usando effectiveBaseTemplates como origen)
-      updates._hardware_filtered_templates = uniq(templatesForMotor) ?? uniq(effectiveBaseTemplates) ?? null;
+      // Keep Operating System base stable while changing operation.
+      updates._hardware_filtered_templates = persistedOperatingBase;
     } else {
       const okMotor = await removeSelection('motor');
       const okTube = await removeSelection('tube');
@@ -632,8 +663,8 @@ export default function OperatingSystemStep({
       updates.motor_item_id = undefined;
       updates.motor_sku = null;
       updates.remote_control = undefined;
-      // ✅ Resetear a templates de Manual (usando effectiveBaseTemplates como origen)
-      updates._hardware_filtered_templates = uniq(templatesForManual) ?? uniq(effectiveBaseTemplates) ?? null;
+      // Keep Operating System base stable while changing operation.
+      updates._hardware_filtered_templates = persistedOperatingBase;
     }
     
     // Clear tube when switching operation type
@@ -688,8 +719,10 @@ export default function OperatingSystemStep({
       tube_item_id: undefined,
       tube_sku: null,
       tube_type: undefined,
-      // ✅ Guardar templates filtrados con fallback a effectiveBaseTemplates
-      _hardware_filtered_templates: newFilteredTemplates.length > 0 ? newFilteredTemplates : uniq(templatesForMotor) ?? uniq(effectiveBaseTemplates) ?? null,
+      // Keep base templates in config; selection-specific narrowing happens in-memory
+      // and is finalized after tube selection.
+      _hardware_filtered_templates: persistedOperatingBase,
+      _operating_system_base_templates: persistedOperatingBase,
     } as any);
   };
 
@@ -732,7 +765,8 @@ export default function OperatingSystemStep({
       tube_item_id: undefined,
       tube_sku: null,
       tube_type: undefined,
-      _hardware_filtered_templates: newFilteredTemplates.length > 0 ? newFilteredTemplates : uniq(templatesForManual) ?? uniq(effectiveBaseTemplates) ?? null,
+      _hardware_filtered_templates: persistedOperatingBase,
+      _operating_system_base_templates: persistedOperatingBase,
     } as any);
   };
 
@@ -966,7 +1000,7 @@ export default function OperatingSystemStep({
               <div className="text-sm text-gray-500 mt-2">Loading motors...</div>
             ) : motorOptions.length > 0 ? (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                {motorOptions.filter(item => !motorItemId || item.id === motorItemId).map((item) => {
+                {visibleMotorOptions.map((item) => {
                   const isSelected = motorItemId === item.id;
                   return (
                     <div
@@ -999,8 +1033,7 @@ export default function OperatingSystemStep({
                               tube_item_id: undefined,
                               tube_sku: null,
                               tube_type: undefined,
-                              // ✅ Volver a templatesForMotor (no afecta opciones de Manual) con fallback
-                              _hardware_filtered_templates: uniq(templatesForMotor as any) ?? uniq(effectiveBaseTemplates) ?? null,
+                              _hardware_filtered_templates: persistedOperatingBase,
                             } as any);
                           }}
                           className="absolute top-2 right-2 p-1 bg-white rounded-full shadow-md hover:bg-gray-100 transition-colors z-10"
@@ -1081,7 +1114,7 @@ export default function OperatingSystemStep({
               <div className="text-sm text-gray-500 mt-2">Loading drive options...</div>
             ) : filteredDriveOptions.length > 0 ? (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                {filteredDriveOptions.filter(item => !driveItemId || item.id === driveItemId).map((item) => {
+                {visibleDriveOptions.map((item) => {
                   const isSelected = driveItemId === item.id;
                   return (
                     <div
@@ -1113,8 +1146,7 @@ export default function OperatingSystemStep({
                               tube_item_id: undefined,
                               tube_sku: null,
                               tube_type: undefined,
-                              // ✅ Volver a templatesForManual (no afecta opciones de Motor) con fallback
-                              _hardware_filtered_templates: uniq(templatesForManual as any) ?? uniq(effectiveBaseTemplates) ?? null,
+                              _hardware_filtered_templates: persistedOperatingBase,
                             } as any);
                           }}
                           className="absolute top-2 right-2 p-1 bg-white rounded-full shadow-md hover:bg-gray-100 transition-colors z-10"
@@ -1163,7 +1195,7 @@ export default function OperatingSystemStep({
               <div className="text-sm text-gray-500 mt-2">Loading tube options...</div>
             ) : tubeOptions.length > 0 ? (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                {tubeOptions.filter(item => !tubeItemId || item.id === tubeItemId).map((item) => {
+                {visibleTubeOptions.map((item) => {
                   const isSelected = tubeItemId === item.id;
                   return (
                     <div
