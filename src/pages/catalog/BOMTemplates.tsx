@@ -69,6 +69,7 @@ export default function BOMTemplates() {
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [selectedProductTypes, setSelectedProductTypes] = useState<string[]>([]);
+  const [selectedManufacturers, setSelectedManufacturers] = useState<string[]>([]);
   const [headboxFilter, setHeadboxFilter] = useState<boolean | null>(null);
   const [draggedTemplateId, setDraggedTemplateId] = useState<string | null>(null);
   const [dragOverTemplateId, setDragOverTemplateId] = useState<string | null>(null);
@@ -194,7 +195,21 @@ export default function BOMTemplates() {
     () => Array.from(new Set(templates.map((t) => t.ProductType?.name).filter(Boolean))) as string[],
     [templates]
   );
-  const totalActiveFilters = selectedProductTypes.length + (headboxFilter != null ? 1 : 0);
+  const manufacturerOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          templates
+            .map((t) => (t.manufacturer || '').trim())
+            .filter((value) => value.length > 0)
+        )
+      ).sort((a, b) => a.localeCompare(b)),
+    [templates]
+  );
+  const totalActiveFilters =
+    selectedProductTypes.length +
+    selectedManufacturers.length +
+    (headboxFilter != null ? 1 : 0);
 
   const filteredTemplates = useMemo(() => {
     const normalizedSearch = normalizeSearchText(searchTerm);
@@ -210,6 +225,8 @@ export default function BOMTemplates() {
             t.ProductType?.name,
             t.ProductType?.code,
             t.code,
+            t.manufacturer,
+            t.product_line,
           ].filter(Boolean).join(' '));
           return tokens.every((token) => haystack.includes(token));
         }
@@ -218,11 +235,14 @@ export default function BOMTemplates() {
     if (selectedProductTypes.length > 0) {
       result = result.filter((t) => selectedProductTypes.includes(t.ProductType?.name || ''));
     }
+    if (selectedManufacturers.length > 0) {
+      result = result.filter((t) => selectedManufacturers.includes((t.manufacturer || '').trim()));
+    }
     if (headboxFilter != null) {
       result = result.filter((t) => (t.headbox === true) === headboxFilter);
     }
     return result;
-  }, [templates, searchTerm, selectedProductTypes, headboxFilter]);
+  }, [templates, searchTerm, selectedProductTypes, selectedManufacturers, headboxFilter]);
 
   // ========== ACTIONS ==========
 
@@ -479,6 +499,33 @@ export default function BOMTemplates() {
                       }
                       className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
                         selectedProductTypes.includes(name) ? 'bg-blue-600 text-white' : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
+                      }`}
+                    >
+                      {name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-gray-700">Manufacturer</span>
+                  {selectedManufacturers.length > 0 && (
+                    <button onClick={() => setSelectedManufacturers([])} className="text-xs text-gray-500 hover:text-gray-700">
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {manufacturerOptions.map((name) => (
+                    <button
+                      key={name}
+                      onClick={() =>
+                        setSelectedManufacturers((prev) =>
+                          prev.includes(name) ? prev.filter((v) => v !== name) : [...prev, name]
+                        )
+                      }
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                        selectedManufacturers.includes(name) ? 'bg-blue-600 text-white' : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
                       }`}
                     >
                       {name}

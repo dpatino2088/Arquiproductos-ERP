@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useMemo } from 'react';
 import { supabase } from '../lib/supabase/client';
 
 /** True if string is a Supabase storage public URL (do not sign; use as-is). */
@@ -24,46 +24,38 @@ function isLocalStaticAssetPath(path: string): boolean {
  * - If it's a path (e.g. "dealer-logos/...") without http: build public URL via getPublicUrl(catalog-images).
  */
 export function useResolvedStorageUrl(url: string | null | undefined): string | null {
-  const [resolved, setResolved] = useState<string | null>(url || null);
+  return useMemo(() => {
+    if (!url || !url.trim()) return null;
 
-  useEffect(() => {
-    if (!url || !url.trim()) {
-      setResolved(null);
-      return;
-    }
     const trimmed = url.trim();
+    const cached = resolvedUrlCache.get(trimmed);
+    if (cached !== undefined) return cached;
+
+    let resolved: string | null = null;
 
     // Already a public storage URL → use as-is (no signing)
     if (isSupabasePublicStorageUrl(trimmed)) {
-      setResolved(trimmed);
-      return;
-    }
-
-    // Local static image in /public (e.g. /images/DR_2.0.png)
-    if (isLocalStaticAssetPath(trimmed)) {
+      resolved = trimmed;
+    } else if (isLocalStaticAssetPath(trimmed)) {
+      // Local static image in /public (e.g. /images/DR_2.0.png)
       // Respect Vite BASE_URL for deployments under subpaths.
-      if (trimmed.startsWith('/')) {
-        const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
-        const localPath = trimmed.replace(/^\/+/, '');
-        setResolved(`${base}/${localPath}`);
-      } else {
-        const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
-        setResolved(`${base}/${trimmed}`);
-      }
-      return;
-    }
-
-    // Path only (e.g. dealer-logos/org/dealer/file.png) → build public URL
-    if (!/^https?:\/\//i.test(trimmed)) {
+      const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+      const localPath = trimmed.replace(/^\/+/, '');
+      resolved = `${base}/${localPath}`;
+    } else if (!/^https?:\/\//i.test(trimmed)) {
+      // Path only (e.g. dealer-logos/org/dealer/file.png) → build public URL
       const path = trimmed.replace(/^\/+/, '');
       const { data } = supabase.storage.from('catalog-images').getPublicUrl(path);
-      setResolved(data.publicUrl || null);
-      return;
+      resolved = data.publicUrl || null;
+    } else {
+      // Other URL (external, etc.)
+      resolved = trimmed;
     }
 
-    // Other URL (external, etc.)
-    setResolved(trimmed);
+    resolvedUrlCache.set(trimmed, resolved);
+    return resolved;
   }, [url]);
-
-  return resolved;
 }
+
+// Shared cache to avoid repeated URL resolution across large lists (zero-loading friendly).
+const resolvedUrlCache = new Map<string, string | null>();

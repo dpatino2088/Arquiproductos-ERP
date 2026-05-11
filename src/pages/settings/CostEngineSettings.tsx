@@ -50,6 +50,7 @@ export default function CostEngineSettings() {
     priority: '100',
     is_active: true,
     motor_required: '',
+    track_only_required: '',
     operating_type: '',
     width_min_mm: '',
     width_max_mm: '',
@@ -266,6 +267,7 @@ export default function CostEngineSettings() {
       priority: '100',
       is_active: true,
       motor_required: '',
+      track_only_required: '',
       operating_type: '',
       width_min_mm: '',
       width_max_mm: '',
@@ -312,6 +314,12 @@ export default function CostEngineSettings() {
         rule.motor_required == null
           ? ''
           : rule.motor_required
+          ? 'true'
+          : 'false',
+      track_only_required:
+        rule.track_only_required == null
+          ? ''
+          : rule.track_only_required
           ? 'true'
           : 'false',
       operating_type: rule.operating_type || '',
@@ -395,6 +403,10 @@ export default function CostEngineSettings() {
           laborRuleDraft.motor_required === ''
             ? null
             : laborRuleDraft.motor_required === 'true',
+        track_only_required:
+          laborRuleDraft.track_only_required === ''
+            ? null
+            : laborRuleDraft.track_only_required === 'true',
         operating_type: laborRuleDraft.operating_type.trim() || null,
         width_min_mm: toNullableNumber(laborRuleDraft.width_min_mm),
         width_max_mm: toNullableNumber(laborRuleDraft.width_max_mm),
@@ -1341,7 +1353,19 @@ export default function CostEngineSettings() {
                         <option value="false">Not allowed</option>
                       </select>
                     </div>
-                    <div className="md:col-span-4">
+                    <div className="md:col-span-2">
+                      <Label className="text-xs">Track Only</Label>
+                      <select
+                        value={laborRuleDraft.track_only_required}
+                        onChange={(e) => setLaborRuleDraft((p) => ({ ...p, track_only_required: e.target.value }))}
+                        className="w-full px-2 py-2 border border-gray-200 rounded text-sm bg-white"
+                      >
+                        <option value="">Any</option>
+                        <option value="true">Track only</option>
+                        <option value="false">With fabric</option>
+                      </select>
+                    </div>
+                    <div className="md:col-span-2">
                       <Label className="text-xs">Operating Type</Label>
                       <Input
                         type="text"
@@ -1823,6 +1847,7 @@ export default function CostEngineSettings() {
                                   };
                                   const filterChips = [
                                     rule.motor_required == null ? null : rule.motor_required ? 'motor required' : 'no motor',
+                                    rule.track_only_required == null ? null : rule.track_only_required ? 'track only' : 'with fabric',
                                     rule.operating_type ? `op: ${rule.operating_type}` : null,
                                     fmtRange(rule.width_min_mm, rule.width_max_mm, 'mm w'),
                                     fmtRange(rule.height_min_mm, rule.height_max_mm, 'mm h'),
@@ -2004,6 +2029,7 @@ export default function CostEngineSettings() {
                                                     drops_max: rule.drops_max,
                                                     operating_type: rule.operating_type,
                                                     motor_required: rule.motor_required,
+                                                    track_only_required: (rule as any).track_only_required,
                                                     size_escalation_pct: (rule as any).size_escalation_pct,
                                                     size_reference_width_m: (rule as any).size_reference_width_m,
                                                     heatseal_rate_per_m: (rule as any).heatseal_rate_per_m,
@@ -2117,7 +2143,15 @@ export default function CostEngineSettings() {
                                                 <option value="false">Not allowed</option>
                                               </select>
                                             </div>
-                                            <div className="md:col-span-4">
+                                            <div className="md:col-span-2">
+                                              <Label className="text-xs">Track Only</Label>
+                                              <select value={laborRuleDraft.track_only_required} onChange={(e) => setLaborRuleDraft((p) => ({ ...p, track_only_required: e.target.value }))} className="w-full px-2 py-2 border border-gray-200 rounded text-sm bg-white">
+                                                <option value="">Any</option>
+                                                <option value="true">Track only</option>
+                                                <option value="false">With fabric</option>
+                                              </select>
+                                            </div>
+                                            <div className="md:col-span-2">
                                               <Label className="text-xs">Operating Type</Label>
                                               <Input type="text" placeholder="e.g. motorized, manual, chain (optional)" value={laborRuleDraft.operating_type} onChange={(e) => setLaborRuleDraft((p) => ({ ...p, operating_type: e.target.value }))} />
                                             </div>

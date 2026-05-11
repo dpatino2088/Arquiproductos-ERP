@@ -19,7 +19,7 @@ import { useOrganizationContext } from '../context/OrganizationContext';
 // ✅ Reglas según usuario: estos roles NO aplican color
 const NON_COLOR_ROLES = new Set<string>(['motor', 'tube']);
 // ✅ Reglas según usuario: estos roles SÍ aplican color
-const COLOR_ROLES = new Set<string>(['bottom_bar', 'headbox', 'side_channel', 'bottom_channel', 'drive']);
+const COLOR_ROLES = new Set<string>(['bottom_bar', 'headbox', 'side_channel', 'bottom_channel', 'drive', 'bracket']);
 
 function inferGearRatio(
   sku: string | null | undefined,

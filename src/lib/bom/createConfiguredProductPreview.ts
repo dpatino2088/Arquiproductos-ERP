@@ -47,6 +47,7 @@ async function resolveBomTemplateIdStrict(args: {
   const tube_id = config_snapshot?.tube_item_id ?? null;
   const drive_id = config_snapshot?.drive_item_id ?? null;
   const motor_id = config_snapshot?.motor_item_id ?? null;
+  const bracket_id = config_snapshot?.bracket_item_id ?? null;
 
   // DB strict matcher expects keys: tube_id, bottom_bar_id, and XOR drive_id/motor_id.
   const p_config: any = {
@@ -56,6 +57,7 @@ async function resolveBomTemplateIdStrict(args: {
     headbox_id: config_snapshot?.headbox_item_id === 'NONE' ? null : (config_snapshot?.headbox_item_id ?? null),
     side_channel_id: config_snapshot?.side_channel_item_id === 'NONE' ? null : (config_snapshot?.side_channel_item_id ?? null),
     bottom_channel_id: config_snapshot?.bottom_channel_item_id === 'NONE' ? null : (config_snapshot?.bottom_channel_item_id ?? null),
+    bracket_id: bracket_id,
     hardware_color: config_snapshot?.hardware_color ?? null,
   };
 
@@ -121,6 +123,9 @@ async function resolveBomTemplateIdFrontendStrict(args: {
   }
   if (config_snapshot?.bottom_channel_item_id && config_snapshot.bottom_channel_item_id !== 'NONE') {
     setIf('bottom_channel', config_snapshot.bottom_channel_item_id);
+  }
+  if (config_snapshot?.bracket_item_id && config_snapshot.bracket_item_id !== 'NONE') {
+    setIf('bracket', config_snapshot.bracket_item_id);
   }
 
   // Enforce strict required fields — but only for product types that have these roles
@@ -382,6 +387,7 @@ async function resolveBomTemplateIdFrontendStrict(args: {
     'headbox',
     'side_channel',
     'bottom_channel',
+    'bracket',
   ]);
 
   const byTemplate = new Map<string, Map<string, Set<string>>>();

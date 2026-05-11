@@ -128,6 +128,7 @@ export default function OperatingSystemStep({
   const motorItemId = (config as any).motor_item_id || undefined;
   const driveItemId = (config as any).drive_item_id || undefined;
   const tubeItemId = (config as any).tube_item_id || undefined;
+  const bracketItemId = (config as any).bracket_item_id || undefined;
   const selectedGearRatio: 'standard' | '1:1.5' | '1:3' = (config as any).gear_ratio || 'standard';
 
   const productType = (config as any).productType;
@@ -502,7 +503,89 @@ export default function OperatingSystemStep({
     return tubeOptionsRaw;
   }, [tubeOptionsRaw, operationType, motorItemId, driveItemId, selectedMotor, selectedDrive]);
 
-  const loading = loadingMotor || loadingDrive || loadingTube;
+  // ✅ Calcular templates después de seleccionar tube
+  const selectedTube = tubeOptions.find(opt => opt.id === tubeItemId);
+  const templatesAfterTube = useMemo(() => {
+    if (!selectedTube || !selectedTube.templateIds) {
+      return templatesAfterOperation;
+    }
+    if (templatesAfterOperation) {
+      const set = new Set(selectedTube.templateIds);
+      return templatesAfterOperation.filter(tid => set.has(tid));
+    }
+    return selectedTube.templateIds;
+  }, [selectedTube, templatesAfterOperation]);
+
+  // ✅ Bracket: opcional como desempate cuando quedan múltiples templates.
+  const { options: bracketOptions, loading: loadingBracket } = useBOMTemplateOptionsSimple(
+    canLoadOptions && !isDrapery && !!tubeItemId ? productTypeId : null,
+    hardwareColor,
+    'bracket',
+    isDrapery ? null : templatesAfterTube,
+    panelCount
+  );
+
+  // Show one representative bracket per candidate template.
+  // Some templates have multiple bracket components; for tie-breaker UX we only need
+  // one option per template. Deterministic pick: sorted by sku/name/id, first per template.
+  const bracketTieBreakerOptions = useMemo(() => {
+    if (!templatesAfterTube || templatesAfterTube.length === 0 || bracketOptions.length === 0) {
+      return bracketOptions;
+    }
+
+    const candidateTemplateIds = templatesAfterTube.filter(Boolean);
+    const candidateSet = new Set(candidateTemplateIds);
+    const sortedOptions = [...bracketOptions].sort((a, b) => {
+      const aKey = `${a.sku || ''}|${a.name || ''}|${a.id}`;
+      const bKey = `${b.sku || ''}|${b.name || ''}|${b.id}`;
+      return aKey.localeCompare(bKey);
+    });
+
+    const firstOptionByTemplate = new Map<string, RoleOption>();
+    for (const opt of sortedOptions) {
+      const tids = (opt.templateIds || []).filter((tid) => candidateSet.has(tid));
+      if (tids.length === 0) continue;
+      for (const tid of tids) {
+        if (!firstOptionByTemplate.has(tid)) {
+          firstOptionByTemplate.set(tid, opt);
+        }
+      }
+    }
+
+    const uniqueByOptionId = new Map<string, RoleOption>();
+    for (const tid of candidateTemplateIds) {
+      const opt = firstOptionByTemplate.get(tid);
+      if (opt) uniqueByOptionId.set(opt.id, opt);
+    }
+
+    // Keep selected item visible even if it's not the representative one.
+    if (bracketItemId) {
+      const selected = bracketOptions.find((opt) => opt.id === bracketItemId);
+      if (selected) uniqueByOptionId.set(selected.id, selected);
+    }
+
+    return Array.from(uniqueByOptionId.values());
+  }, [templatesAfterTube, bracketOptions, bracketItemId]);
+
+  const selectedBracket = bracketOptions.find((opt) => opt.id === bracketItemId);
+  const templatesAfterBracket = useMemo(() => {
+    if (!selectedBracket || !selectedBracket.templateIds) {
+      return templatesAfterTube;
+    }
+    if (templatesAfterTube) {
+      const set = new Set(selectedBracket.templateIds);
+      return templatesAfterTube.filter((tid) => set.has(tid));
+    }
+    return selectedBracket.templateIds;
+  }, [selectedBracket, templatesAfterTube]);
+
+  const showBracketSelector = !isDrapery
+    && !!tubeItemId
+    && !!templatesAfterTube
+    && templatesAfterTube.length > 1
+    && bracketTieBreakerOptions.length > 0;
+
+  const loading = loadingMotor || loadingDrive || loadingTube || loadingBracket;
 
   // UX: show full options before selection; once selected, collapse to selected card.
   // If selected id is stale/not present in current compatible options, show full list.
@@ -524,18 +607,15 @@ export default function OperatingSystemStep({
     return selectedStillAvailable ? tubeOptions.filter((opt) => opt.id === tubeItemId) : tubeOptions;
   }, [tubeItemId, tubeOptions]);
 
-  // ✅ Calcular templates finales después de seleccionar tube
-  const selectedTube = tubeOptions.find(opt => opt.id === tubeItemId);
-  const finalFilteredTemplates = useMemo(() => {
-    if (!selectedTube || !selectedTube.templateIds) {
-      return templatesAfterOperation;
-    }
-    if (templatesAfterOperation) {
-      const set = new Set(selectedTube.templateIds);
-      return templatesAfterOperation.filter(tid => set.has(tid));
-    }
-    return selectedTube.templateIds;
-  }, [selectedTube, templatesAfterOperation]);
+  const visibleBracketOptions = useMemo(() => {
+    if (!bracketItemId) return bracketTieBreakerOptions;
+    const selectedStillAvailable = bracketTieBreakerOptions.some((opt) => opt.id === bracketItemId);
+    return selectedStillAvailable
+      ? bracketTieBreakerOptions.filter((opt) => opt.id === bracketItemId)
+      : bracketTieBreakerOptions;
+  }, [bracketItemId, bracketTieBreakerOptions]);
+
+  const finalFilteredTemplates = templatesAfterBracket;
 
   // ✅ Guardar templates finales en config para el matcher
   useEffect(() => {
@@ -576,9 +656,25 @@ export default function OperatingSystemStep({
         tube_item_id: undefined,
         tube_sku: null,
         tube_type: undefined,
+        bracket_item_id: undefined,
+        bracket_sku: null,
       } as any);
     }
   }, [tubeItemId, loadingTube, operationCascadeReady, tubeOptions, tubeOptionsRaw]);
+
+  // Bracket can also become stale when tube or filtered candidates change.
+  useEffect(() => {
+    if (!bracketItemId) return;
+    if (loadingBracket) return;
+    if (bracketOptions.length === 0) return;
+    const stillCompatible = bracketOptions.some((opt) => opt.id === bracketItemId);
+    if (!stillCompatible) {
+      onUpdate({
+        bracket_item_id: undefined,
+        bracket_sku: null,
+      } as any);
+    }
+  }, [bracketItemId, loadingBracket, bracketOptions]);
 
   // Debug logging for results
   useEffect(() => {
@@ -592,10 +688,12 @@ export default function OperatingSystemStep({
         driveCount: driveOptions.length,
         templatesAfterOperation: templatesAfterOperation?.length ?? 'all',
         tubeCount: tubeOptions.length,
+        bracketCount: bracketTieBreakerOptions.length,
+        showBracketSelector,
         finalFilteredTemplates: finalFilteredTemplates?.length ?? 'all',
       });
     }
-  }, [productTypeId, hardwareColor, hardwareFilteredTemplates, operationType, motorOptions.length, driveOptions.length, templatesAfterOperation, tubeOptions.length, finalFilteredTemplates]);
+  }, [productTypeId, hardwareColor, hardwareFilteredTemplates, operationType, motorOptions.length, driveOptions.length, templatesAfterOperation, tubeOptions.length, bracketTieBreakerOptions.length, showBracketSelector, finalFilteredTemplates]);
 
   // Operating system type options
   const operatingSystemOptions: Array<{ value: 'manual' | 'motor'; label: string }> = [
@@ -653,6 +751,8 @@ export default function OperatingSystemStep({
       updates.manual_drive = undefined;
       updates.drive_item_id = undefined;
       updates.drive_sku = null;
+      updates.bracket_item_id = undefined;
+      updates.bracket_sku = null;
       // Keep Operating System base stable while changing operation.
       updates._hardware_filtered_templates = persistedOperatingBase;
     } else {
@@ -663,6 +763,8 @@ export default function OperatingSystemStep({
       updates.motor_item_id = undefined;
       updates.motor_sku = null;
       updates.remote_control = undefined;
+      updates.bracket_item_id = undefined;
+      updates.bracket_sku = null;
       // Keep Operating System base stable while changing operation.
       updates._hardware_filtered_templates = persistedOperatingBase;
     }
@@ -719,6 +821,8 @@ export default function OperatingSystemStep({
       tube_item_id: undefined,
       tube_sku: null,
       tube_type: undefined,
+      bracket_item_id: undefined,
+      bracket_sku: null,
       // Keep base templates in config; selection-specific narrowing happens in-memory
       // and is finalized after tube selection.
       _hardware_filtered_templates: persistedOperatingBase,
@@ -765,6 +869,8 @@ export default function OperatingSystemStep({
       tube_item_id: undefined,
       tube_sku: null,
       tube_type: undefined,
+      bracket_item_id: undefined,
+      bracket_sku: null,
       _hardware_filtered_templates: persistedOperatingBase,
       _operating_system_base_templates: persistedOperatingBase,
     } as any);
@@ -815,8 +921,36 @@ export default function OperatingSystemStep({
       tube_item_id: isVirtual ? null : item.id,
       tube_type: item.sku,
       tube_sku: item.sku,
+      bracket_item_id: undefined,
+      bracket_sku: null,
       // ✅ Guardar templates finales
       _hardware_filtered_templates: uniq(finalTemplates as any) ?? null,
+    } as any);
+  };
+
+  const handleBracketSelect = async (item: RoleOption) => {
+    const isVirtual = String(item.id).startsWith('sku:');
+    if (isVirtual) {
+      notifyError('Invalid bracket selection (virtual SKU).');
+      return;
+    }
+    const ok = await persistSelection('bracket', String(item.id));
+    if (!ok) return;
+
+    let finalTemplates = templatesAfterTube;
+    if (item.templateIds && item.templateIds.length > 0) {
+      if (templatesAfterTube) {
+        const set = new Set(item.templateIds);
+        finalTemplates = templatesAfterTube.filter((tid) => set.has(tid));
+      } else {
+        finalTemplates = item.templateIds;
+      }
+    }
+
+    onUpdate({
+      bracket_item_id: item.id,
+      bracket_sku: item.sku,
+      _hardware_filtered_templates: uniq(finalTemplates as any) ?? uniq(templatesAfterTube as any) ?? null,
     } as any);
   };
 
@@ -841,6 +975,8 @@ export default function OperatingSystemStep({
       tube_item_id: undefined,
       tube_sku: null,
       tube_type: undefined,
+      bracket_item_id: undefined,
+      bracket_sku: null,
       // ✅ Usar effectiveBaseTemplates para restaurar al estado original
       _hardware_filtered_templates: uniq(effectiveBaseTemplates) ?? null,
     } as any);
@@ -1033,6 +1169,8 @@ export default function OperatingSystemStep({
                               tube_item_id: undefined,
                               tube_sku: null,
                               tube_type: undefined,
+                              bracket_item_id: undefined,
+                              bracket_sku: null,
                               _hardware_filtered_templates: persistedOperatingBase,
                             } as any);
                           }}
@@ -1090,6 +1228,8 @@ export default function OperatingSystemStep({
                         tube_item_id: undefined,
                         tube_sku: null,
                         tube_type: undefined,
+                        bracket_item_id: undefined,
+                        bracket_sku: null,
                       } as any);
                     }}
                     className={`px-4 py-3 text-sm font-medium rounded-lg border-2 transition-all ${
@@ -1146,6 +1286,8 @@ export default function OperatingSystemStep({
                               tube_item_id: undefined,
                               tube_sku: null,
                               tube_type: undefined,
+                              bracket_item_id: undefined,
+                              bracket_sku: null,
                               _hardware_filtered_templates: persistedOperatingBase,
                             } as any);
                           }}
@@ -1235,6 +1377,8 @@ export default function OperatingSystemStep({
                               tube_item_id: undefined,
                               tube_sku: null,
                               tube_type: undefined,
+                              bracket_item_id: undefined,
+                              bracket_sku: null,
                               _hardware_filtered_templates: uniq(targetTemplates as any) ?? uniq(effectiveBaseTemplates) ?? null,
                             } as any);
                           }}
@@ -1266,6 +1410,73 @@ export default function OperatingSystemStep({
             ) : (
               <div className="text-sm text-gray-500">
                 No tube options available for current selection
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Bracket Selection (optional tie-breaker when tube still maps to multiple templates) */}
+        {showBracketSelector && (
+          <div>
+            <Label className="text-sm font-medium mb-5 block">BRACKET (TIE-BREAKER)</Label>
+            <p className="text-xs text-gray-500 mb-2">
+              Multiple templates still match. Select bracket to lock the correct BOM template.
+            </p>
+            {loadingBracket ? (
+              <div className="text-sm text-gray-500 mt-2">Loading bracket options...</div>
+            ) : (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                {visibleBracketOptions.map((item) => {
+                  const isSelected = bracketItemId === item.id;
+                  return (
+                    <div
+                      key={item.id}
+                      onClick={async () => {
+                        if (selectionDisabled) return;
+                        await handleBracketSelect(item);
+                      }}
+                      className={`bg-white border rounded-lg overflow-hidden flex flex-col transition-all cursor-pointer relative ${
+                        isSelected
+                          ? 'border-2 border-gray-900 shadow-lg'
+                          : 'border-gray-200 hover:shadow-lg hover:border-gray-300'
+                      } ${selectionDisabled ? 'opacity-50' : ''}`}
+                    >
+                      {isSelected && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (selectionDisabled) return;
+                            onUpdate({
+                              bracket_item_id: undefined,
+                              bracket_sku: null,
+                              _hardware_filtered_templates: uniq(templatesAfterTube as any) ?? null,
+                            } as any);
+                          }}
+                          className="absolute top-2 right-2 p-1 bg-white rounded-full shadow-md hover:bg-gray-100 transition-colors z-10"
+                          title="Remove selection"
+                        >
+                          <X className="w-4 h-4 text-gray-600" />
+                        </button>
+                      )}
+                      <div className="aspect-square flex items-center justify-center bg-white border-b border-gray-200">
+                        <CatalogItemImage
+                          src={item.image_url}
+                          alt={item.name || item.sku}
+                          size="lg"
+                          objectFit="contain"
+                          className="w-full h-full !rounded-none !border-0"
+                        />
+                      </div>
+                      <div className="p-4 bg-gray-100 flex-1">
+                        <h3 className={`font-semibold text-sm ${isSelected ? 'text-gray-900 font-semibold' : 'text-gray-900'}`}>
+                          {item.name || item.sku}
+                        </h3>
+                        <p className="text-xs text-gray-500 mt-1">{item.sku}</p>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

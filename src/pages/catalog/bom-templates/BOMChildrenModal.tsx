@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../../../components/ui/SelectShadcn';
+import CatalogItemImage from '../../../components/ui/CatalogItemImage';
 import { getRoleLabel, getChildRoleOptions } from '../../../lib/bom/roles';
 import { BOM_QTY_TYPES, INITIAL_CHILD_FORM_DATA, CONDITION_KEY_OPTIONS, CONDITION_VALUE_OPTIONS } from './types';
 import type { BOMComponentDraft, BOMQtyType, ChildFormData } from './types';
@@ -82,6 +83,11 @@ export default function BOMChildrenModal({
     });
   }, [catalogItems, childSearchTerm, childComponents, editingChildId]);
 
+  const selectedChildItem = useMemo(
+    () => catalogItems.find((i) => i.id === childFormData.child_item_id) || null,
+    [catalogItems, childFormData.child_item_id]
+  );
+
   const handleSelectChildItem = useCallback(
     (itemId: string) => {
       const item = catalogItems.find((i) => i.id === itemId);
@@ -148,7 +154,7 @@ export default function BOMChildrenModal({
   return (
     <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
       <div
-        className="bg-white max-w-lg w-full max-h-[80vh] flex flex-col rounded shadow-xl"
+        className="bg-white max-w-3xl w-full max-h-[80vh] flex flex-col rounded shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 shrink-0">
@@ -212,14 +218,41 @@ export default function BOMChildrenModal({
                           className="w-full text-left px-3 py-2 text-xs hover:bg-gray-100"
                           onClick={() => handleSelectChildItem(item.id)}
                         >
-                          {item.sku || 'N/A'} - {item.name || item.item_name || 'Unnamed'}
+                          <div className="flex items-center gap-2">
+                            <CatalogItemImage
+                              src={item.image_url}
+                              alt={item.name || item.item_name || item.sku || 'Item'}
+                              size="xs"
+                              objectFit="contain"
+                            />
+                            <div className="min-w-0">
+                              <div className="font-mono text-[11px] text-gray-900 truncate">{item.sku || 'N/A'}</div>
+                              <div className="text-gray-500 truncate">{item.name || item.item_name || 'Unnamed'}</div>
+                            </div>
+                          </div>
                         </button>
                       ))}
                     </div>
                   )}
                 </div>
+                {selectedChildItem && (
+                  <div className="mt-2 rounded-md border border-gray-200 bg-white px-2 py-2">
+                    <div className="flex items-center gap-2">
+                      <CatalogItemImage
+                        src={selectedChildItem.image_url}
+                        alt={selectedChildItem.name || selectedChildItem.item_name || selectedChildItem.sku || 'Selected item'}
+                        size="sm"
+                        objectFit="contain"
+                      />
+                      <div className="min-w-0">
+                        <div className="font-mono text-[11px] text-gray-900 truncate">{selectedChildItem.sku || 'N/A'}</div>
+                        <div className="text-[11px] text-gray-600 truncate">{selectedChildItem.name || selectedChildItem.item_name || 'Unnamed'}</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
                   <Label>Role</Label>
                   <SelectShadcn
@@ -275,7 +308,7 @@ export default function BOMChildrenModal({
                 </div>
               </div>
               {childFormData.qty_type === 'per_spacing' ? (
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
                     <Label>Spacing (mm)</Label>
                     <Input
@@ -381,7 +414,7 @@ export default function BOMChildrenModal({
                   </select>
                 </div>
                 {childFormData.condition_key ? (
-                  <div className="w-40">
+                  <div className="w-full md:w-40">
                     <Label>Value</Label>
                     {CONDITION_VALUE_OPTIONS[childFormData.condition_key] ? (
                       <select
@@ -425,14 +458,14 @@ export default function BOMChildrenModal({
           )}
 
           <div className="border border-gray-200 rounded overflow-hidden">
-            <table className="w-full text-xs">
+            <table className="w-full table-fixed text-xs">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
-                  <th className="text-left px-3 py-2 font-medium">SKU / Name</th>
-                  <th className="text-left px-3 py-2 font-medium">Role</th>
-                  <th className="text-left px-3 py-2 font-medium">Consumption</th>
-                  <th className="text-center px-3 py-2 font-medium">×Panel</th>
-                  <th className="text-right px-3 py-2 font-medium w-20">Actions</th>
+                  <th className="text-left px-3 py-2 font-medium w-[44%]">SKU / Name</th>
+                  <th className="text-left px-3 py-2 font-medium w-[16%]">Role</th>
+                  <th className="text-left px-3 py-2 font-medium w-[22%]">Consumption</th>
+                  <th className="text-center px-3 py-2 font-medium w-[8%]">×Panel</th>
+                  <th className="text-right px-3 py-2 font-medium w-[10%]">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -450,11 +483,33 @@ export default function BOMChildrenModal({
                       onClick={() => handleEditChild(child)}
                     >
                       <td className="px-3 py-2">
-                        <span className="font-mono">{sku}</span>
-                        <span className="text-gray-500 ml-1">{name}</span>
+                        <div className="flex items-center gap-2">
+                          <CatalogItemImage
+                            src={(catalogItems.find((i) => i.id === child.component_item_id) || child.catalog_item)?.image_url}
+                            alt={name}
+                            size="xs"
+                            objectFit="contain"
+                          />
+                          <div className="min-w-0">
+                            <div className="font-mono truncate">{sku}</div>
+                            <div className="text-gray-500 truncate">{name}</div>
+                          </div>
+                        </div>
                       </td>
                       <td className="px-3 py-2">{getRoleLabel(child.component_role)}</td>
-                      <td className="px-3 py-2">{consumptionDisplay}</td>
+                      <td className="px-3 py-2">
+                        <span
+                          className="block whitespace-normal break-words leading-tight"
+                          style={{
+                            display: '-webkit-box',
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: 'vertical',
+                            overflow: 'hidden',
+                          }}
+                        >
+                          {consumptionDisplay}
+                        </span>
+                      </td>
                       <td className="px-3 py-2 text-center">
                         {child.per_panel ? (
                           <span className="inline-block w-4 h-4 rounded-full bg-gray-700" title="Per Panel" />

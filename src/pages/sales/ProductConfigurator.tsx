@@ -128,9 +128,40 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
     'bottom_bar_sku', 'bottom_bar_item_id', 'hardware_color', 'hardwareColor',
     'headbox_item_id', 'headbox_sku', 'side_channel_item_id', 'side_channel_sku',
     'bottom_channel_item_id', 'bottom_channel_sku', 'tube_item_id', 'tube_sku',
-    'drive_item_id', 'drive_sku', 'motor_item_id', 'motor_sku', 'operation_type', 'drive_type',
+    'drive_item_id', 'drive_sku', 'motor_item_id', 'motor_sku', 'bracket_item_id', 'bracket_sku', 'operation_type', 'drive_type',
     '_manufacturer_filtered_templates', '_hardware_filtered_templates',
     'measurements', 'panels',
+  ] as const;
+
+  // Any update to these fields can change BOM template resolution.
+  // If a step changes one of them and does not explicitly set bom_template_id,
+  // we must clear stale template ids and resolve again on submit.
+  const TEMPLATE_RESOLUTION_KEYS = [
+    'manufacturer',
+    'product_line',
+    'system_size',
+    'systemSize',
+    'hardware_color',
+    'hardwareColor',
+    'operatingSystemColor',
+    'operation_type',
+    'drive_type',
+    'bottom_bar_item_id',
+    'bottom_bar_sku',
+    'headbox_item_id',
+    'headbox_sku',
+    'side_channel_item_id',
+    'side_channel_sku',
+    'bottom_channel_item_id',
+    'bottom_channel_sku',
+    'bracket_item_id',
+    'bracket_sku',
+    'motor_item_id',
+    'motor_sku',
+    'drive_item_id',
+    'drive_sku',
+    'tube_item_id',
+    'tube_sku',
   ] as const;
 
   useEffect(() => {
@@ -617,6 +648,20 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
         // No update for bom_template_id - preserve previous value
         (merged as any).bom_template_id = (prev as any).bom_template_id;
       }
+
+      // If template-driving selections changed and caller didn't explicitly set
+      // bom_template_id, invalidate stale template id and force strict re-resolve.
+      if (!('bom_template_id' in (updates as any))) {
+        const touchedTemplateKey = TEMPLATE_RESOLUTION_KEYS.some((k) => k in (updates as any));
+        if (touchedTemplateKey && (merged as any).bom_template_id != null) {
+          (merged as any).bom_template_id = null;
+          if (import.meta.env.DEV) {
+            console.warn('[ProductConfigurator] Cleared stale bom_template_id due to selection change', {
+              changedKeys: TEMPLATE_RESOLUTION_KEYS.filter((k) => k in (updates as any)),
+            });
+          }
+        }
+      }
       
       // ✅ VALIDACIÓN CRÍTICA: Log de campos después de merge
       if (import.meta.env.DEV) {
@@ -763,6 +808,8 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
           tube_item_id: undefined,
           tube_sku: null,
           tube_type: undefined,
+          bracket_item_id: undefined,
+          bracket_sku: null,
           // ✅ Limpiar base y templates para que al re-entrar se recalculen desde Hardware
           _operating_system_base_templates: undefined,
           _hardware_filtered_templates: undefined,
@@ -1104,6 +1151,8 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
             side_channel_sku: configAny.side_channel_item_id === 'NONE' ? null : (configAny.side_channel_sku ? String(configAny.side_channel_sku).trim() : null),
             bottom_channel_item_id: configAny.bottom_channel_item_id === 'NONE' ? null : (configAny.bottom_channel_item_id || null),
             bottom_channel_sku: configAny.bottom_channel_item_id === 'NONE' ? null : (configAny.bottom_channel_sku ? String(configAny.bottom_channel_sku).trim() : null),
+            bracket_item_id: configAny.bracket_item_id || null,
+            bracket_sku: configAny.bracket_sku ? String(configAny.bracket_sku).trim() : null,
             motor_item_id: configAny.motor_item_id || null,
             motor_sku: configAny.motor_sku ? String(configAny.motor_sku).trim() : null,
             drive_item_id: configAny.drive_item_id || null,
@@ -1137,6 +1186,14 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
             const candidateIds = filtered.filter((x: any) => typeof x === 'string' && x.trim().length > 0);
             if (candidateIds.length > 0) {
               configSnapshot.candidate_template_ids = Array.from(new Set(candidateIds));
+            }
+            // In edit flows, if strict filtering still leaves multiple candidates,
+            // keep the previously selected template only when it is still in the
+            // filtered candidate set. This prevents stale cross-family templates
+            // while avoiding unnecessary ambiguous-match failures.
+            const previousTemplateId = typeof configAny.bom_template_id === 'string' ? configAny.bom_template_id : null;
+            if (previousTemplateId && candidateIds.includes(previousTemplateId)) {
+              configSnapshot.bom_template_id = previousTemplateId;
             }
             // If it is already narrowed to 1, use it directly.
             if (candidateIds.length === 1) {
@@ -1269,6 +1326,8 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
       (finalNormalizedConfig as any).side_channel_sku = configAny.side_channel_sku ?? null;
       (finalNormalizedConfig as any).bottom_channel_item_id = configAny.bottom_channel_item_id ?? null;
       (finalNormalizedConfig as any).bottom_channel_sku = configAny.bottom_channel_sku ?? null;
+      (finalNormalizedConfig as any).bracket_item_id = configAny.bracket_item_id ?? null;
+      (finalNormalizedConfig as any).bracket_sku = configAny.bracket_sku ?? null;
       (finalNormalizedConfig as any).tube_item_id = configAny.tube_item_id ?? null;
       (finalNormalizedConfig as any).tube_sku = configAny.tube_sku ?? configAny.tubeSku ?? configAny.tube_type ?? null;
       (finalNormalizedConfig as any).drive_item_id = configAny.drive_item_id ?? null;

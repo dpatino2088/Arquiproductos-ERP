@@ -12,6 +12,7 @@
  * - headbox_sku (opcional, pero si existe filtra)
  * - side_channel_sku (opcional, pero si existe filtra)
  * - bottom_channel_sku (opcional, pero si existe filtra)
+ * - bracket_sku (opcional, usado como desempate)
  * - operation_type (obligatorio, motor/manual)
  * - tube_sku (obligatorio, exacto)
  * 
@@ -44,6 +45,7 @@ export interface MatchConfig {
   headbox_sku?: string | null;
   side_channel_sku?: string | null;
   bottom_channel_sku?: string | null;
+  bracket_sku?: string | null;
   motor_sku?: string | null;
   drive_sku?: string | null;
   manufacturer?: string | null;
@@ -104,6 +106,7 @@ export async function matchBOMTemplate(config: MatchConfig): Promise<MatchResult
     headbox_sku,
     side_channel_sku,
     bottom_channel_sku,
+    bracket_sku,
     motor_sku,
     drive_sku,
     manufacturer: configManufacturer,
@@ -173,6 +176,7 @@ export async function matchBOMTemplate(config: MatchConfig): Promise<MatchResult
   const normalizedHeadboxSku = headbox_sku ? normalizeSku(headbox_sku) : null;
   const normalizedSideChannelSku = side_channel_sku ? normalizeSku(side_channel_sku) : null;
   const normalizedBottomChannelSku = bottom_channel_sku ? normalizeSku(bottom_channel_sku) : null;
+  const normalizedBracketSku = bracket_sku ? normalizeSku(bracket_sku) : null;
   const normalizedMotorSku = motor_sku ? normalizeSku(motor_sku) : null;
   const normalizedDriveSku = drive_sku ? normalizeSku(drive_sku) : null;
 
@@ -189,6 +193,7 @@ export async function matchBOMTemplate(config: MatchConfig): Promise<MatchResult
       headbox_sku: normalizedHeadboxSku,
       side_channel_sku: normalizedSideChannelSku,
       bottom_channel_sku: normalizedBottomChannelSku,
+      bracket_sku: normalizedBracketSku,
       preFilteredTemplateIds: uniquePreFiltered?.length ?? 0,
     });
   }
@@ -470,6 +475,16 @@ export async function matchBOMTemplate(config: MatchConfig): Promise<MatchResult
         }
       }
 
+      // Criterio 6b: bracket (opcional, tie-breaker explícito)
+      if (normalizedBracketSku) {
+        if (hasSkuForRole('bracket', normalizedBracketSku)) {
+          score++;
+          matchedCriteria.push(`bracket:${normalizedBracketSku}`);
+        } else {
+          unmatchedCriteria.push(`bracket expected:${normalizedBracketSku}`);
+        }
+      }
+
       // Criterio 7: manufacturer (template-level, strong filter)
       if (configManufacturer && template.manufacturer) {
         if (template.manufacturer.toLowerCase() === configManufacturer.toLowerCase()) {
@@ -551,6 +566,7 @@ export async function matchBOMTemplate(config: MatchConfig): Promise<MatchResult
     if (normalizedHeadboxSku) maxExpectedScore++;
     if (normalizedSideChannelSku) maxExpectedScore++;
     if (normalizedBottomChannelSku) maxExpectedScore++;
+    if (normalizedBracketSku) maxExpectedScore++;
     if (normalizedMotorSku || normalizedDriveSku) maxExpectedScore += 10;
     if (configManufacturer) maxExpectedScore += 5;
     if (configDriveSide) maxExpectedScore += 3;

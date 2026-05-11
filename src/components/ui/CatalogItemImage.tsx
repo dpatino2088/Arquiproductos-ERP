@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ImageIcon } from 'lucide-react';
 import { useResolvedStorageUrl } from '../../hooks/useResolvedStorageUrl';
 
@@ -37,6 +37,10 @@ export default function CatalogItemImage({
 }: CatalogItemImageProps) {
   const resolvedUrl = useResolvedStorageUrl(src);
   const [broken, setBroken] = useState(false);
+
+  useEffect(() => {
+    setBroken(false);
+  }, [resolvedUrl]);
 
   const { container, icon } = SIZE_CLASSES[size];
   const showImage = resolvedUrl && !broken;

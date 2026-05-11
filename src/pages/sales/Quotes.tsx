@@ -32,6 +32,14 @@ const formatCurrency = (amount: number) => {
   }).format(amount || 0);
 };
 
+const normalizeSearchText = (value: unknown): string =>
+  String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+
 export default function Quotes() {
   const { activeOrganizationId } = useOrganizationContext();
   const { isInternal, portalRole } = useAccessContext();
@@ -483,14 +491,26 @@ export default function Quotes() {
     }
 
     // Search filter
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      result = result.filter(q => 
-        q.quote_no?.toLowerCase().includes(term) ||
-        q.customer_name?.toLowerCase().includes(term) ||
-        q.contact_name?.toLowerCase().includes(term) ||
-        q.status?.toLowerCase().includes(term)
-      );
+    const term = normalizeSearchText(searchTerm);
+    if (term) {
+      result = result.filter((q) => {
+        const dealer = q.dealer_id ? dealerById[q.dealer_id] : null;
+        const proposalNo = proposalByQuoteMap[q.id]?.no ?? '';
+        const soNo = soNumberMap[q.id]?.no ?? '';
+
+        const fields = [
+          q.quote_no,
+          q.customer_name,
+          q.contact_name,
+          q.status,
+          dealer?.dealer_name,
+          dealer?.dealer_no,
+          proposalNo,
+          soNo,
+        ];
+
+        return fields.some((field) => normalizeSearchText(field).includes(term));
+      });
     }
 
     // Sort
@@ -510,7 +530,7 @@ export default function Quotes() {
     });
 
     return result;
-  }, [quotes, nonArchivedQuotes, searchTerm, sortBy, sortOrder, statusTab]);
+  }, [quotes, nonArchivedQuotes, searchTerm, sortBy, sortOrder, statusTab, dealerById, proposalByQuoteMap, soNumberMap]);
 
   // Group quotes by root_quote_id (versioning family). Latest version displayed;
   // older versions collapsed behind a chevron.

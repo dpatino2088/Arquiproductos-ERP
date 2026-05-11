@@ -332,6 +332,7 @@ export interface LaborRuleRow {
   drops_max?: number | null;
   operating_type?: string | null;
   motor_required?: boolean | null;
+  track_only_required?: boolean | null;
   size_escalation_pct?: number | null;
   size_reference_width_m?: number | null;
   heatseal_rate_per_m?: number | null;
@@ -373,6 +374,7 @@ export interface LaborRuleUpsertInput {
   drops_max?: number | null;
   operating_type?: string | null;
   motor_required?: boolean | null;
+  track_only_required?: boolean | null;
   size_escalation_pct?: number | null;
   size_reference_width_m?: number | null;
   heatseal_rate_per_m?: number | null;
@@ -465,6 +467,7 @@ export function useLaborRules() {
       drops_max: input.drops_max ?? null,
       operating_type: input.operating_type ?? null,
       motor_required: input.motor_required ?? null,
+      track_only_required: input.track_only_required ?? null,
       size_escalation_pct: input.size_escalation_pct ?? 0,
       size_reference_width_m: input.size_reference_width_m ?? 1,
       heatseal_rate_per_m: input.heatseal_rate_per_m ?? 0,

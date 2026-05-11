@@ -722,8 +722,11 @@ export default function Items() {
       // Measure Basis filter
       const matchesMeasureBasis = selectedMeasureBasis.length === 0 || (item.measure_basis && selectedMeasureBasis.includes(item.measure_basis));
 
-      // Active filter
-      const matchesActive = selectedActive.length === 0 || (item.active !== undefined && selectedActive.includes(item.active ? 'Active' : 'Inactive'));
+      // Active filter: default to showing only active rows when no explicit state filter is selected.
+      const matchesActive =
+        selectedActive.length === 0
+          ? item.active !== false
+          : (item.active !== undefined && selectedActive.includes(item.active ? 'Active' : 'Inactive'));
 
       // Product Type filter
       const matchesProductType =
