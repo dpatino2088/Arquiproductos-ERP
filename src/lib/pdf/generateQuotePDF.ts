@@ -33,6 +33,10 @@ export interface QuotePDFLine {
   style_code?: string | null;
   /** True when drapery is configured as track-only (no fabric) */
   track_only?: boolean;
+  /** Whether side channel is included in config */
+  has_side_channel?: boolean;
+  /** Whether bottom channel is included in config */
+  has_bottom_channel?: boolean;
   qty: number;
   line_total: number;
   /** Optional: for table "Accessories" column */
@@ -399,6 +403,8 @@ export function generateQuotePDF(
     const lines: string[] = [];
     if (collectionVariant) lines.push(collectionVariant);
     if (operatingSystem) lines.push(operatingSystem);
+    if (line.has_side_channel === true) lines.push('Side Channel: Yes');
+    if (line.has_bottom_channel === true) lines.push('Bottom Channel: Yes');
     if (codeLine) lines.push(codeLine);
     return lines.join('\n') || '—';
   };

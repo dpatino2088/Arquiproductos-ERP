@@ -33,6 +33,7 @@ import { RoleSelection, toRoleSelection } from '../../../lib/bom/selection';
 import { useOrganizationContext } from '../../../context/OrganizationContext';
 import { useUIStore } from '../../../stores/ui-store';
 import { supabase } from '../../../lib/supabase/client';
+import { prefetchImageUrls } from '../../../lib/imagePrefetch';
 
 interface HardwareStepProps {
   config: CurtainConfiguration | ProductConfig;
@@ -553,6 +554,16 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
     }
     return prev;
   }, [bottomChannelItemId, selectedBottomChannel, templatesAfterSideChannel, templatesWithRequiredBottomChannel]);
+
+  useEffect(() => {
+    const urls = [
+      ...optionsToRender.map((opt) => opt.image_url),
+      ...headboxOptionsToRender.map((opt) => opt.image_url),
+      ...sideChannelOptionsToRender.map((opt) => opt.image_url),
+      ...bottomChannelOptionsToRender.map((opt) => opt.image_url),
+    ];
+    prefetchImageUrls(urls, 12);
+  }, [optionsToRender, headboxOptionsToRender, sideChannelOptionsToRender, bottomChannelOptionsToRender]);
   
   // ✅ Guardar templates filtrados en config para el siguiente step
   useEffect(() => {
@@ -870,6 +881,7 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                             alt={item.name || item.sku}
                             size="lg"
                             objectFit="contain"
+                            loadingBehavior="eager"
                             className="w-full h-full !rounded-none !border-0"
                           />
                         )}
@@ -986,6 +998,7 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                             alt={item.name || item.sku}
                             size="lg"
                             objectFit="contain"
+                            loadingBehavior="eager"
                             className="w-full h-full !rounded-none !border-0"
                           />
                         </div>
@@ -1111,6 +1124,7 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                             alt={item.name || item.sku}
                             size="lg"
                             objectFit="contain"
+                            loadingBehavior="eager"
                             className="w-full h-full !rounded-none !border-0"
                           />
                         </div>
@@ -1233,6 +1247,7 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                             alt={item.name || item.sku}
                             size="lg"
                             objectFit="contain"
+                            loadingBehavior="eager"
                             className="w-full h-full !rounded-none !border-0"
                           />
                         </div>

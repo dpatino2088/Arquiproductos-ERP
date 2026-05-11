@@ -19,7 +19,7 @@ import { useResolvedStorageUrl } from '../../hooks/useResolvedStorageUrl';
 import Input from '../../components/ui/Input';
 import Label from '../../components/ui/Label';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
-import { ChevronDown, ChevronRight, GripVertical, Plus, AlertTriangle, Printer, Eye, ArrowLeft, Download, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, GripVertical, Plus, AlertTriangle, Printer, Eye, ArrowLeft, Download, Trash2, ExternalLink } from 'lucide-react';
 import DetailPageLayout from '../../components/shared/DetailPageLayout';
 import StatusBadge from '../../components/shared/StatusBadge';
 import TimelineView from '../../components/shared/TimelineView';
@@ -1288,6 +1288,24 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
         const trackOnly =
           Boolean((snapFrozen as { track_only?: boolean } | null)?.track_only) ||
           Boolean((qlInfo?.config_snapshot as { track_only?: boolean } | null)?.track_only);
+        const hasSideChannel =
+          Boolean((snapFrozen as { side_channel?: boolean } | null)?.side_channel) ||
+          (typeof (snapFrozen as { side_channel_item_id?: string } | null)?.side_channel_item_id === 'string'
+            && String((snapFrozen as { side_channel_item_id?: string }).side_channel_item_id).trim().length > 10
+            && String((snapFrozen as { side_channel_item_id?: string }).side_channel_item_id).toUpperCase() !== 'NONE') ||
+          Boolean((qlInfo?.config_snapshot as { side_channel?: boolean } | null)?.side_channel) ||
+          (typeof (qlInfo?.config_snapshot as { side_channel_item_id?: string } | null)?.side_channel_item_id === 'string'
+            && String((qlInfo?.config_snapshot as { side_channel_item_id?: string }).side_channel_item_id).trim().length > 10
+            && String((qlInfo?.config_snapshot as { side_channel_item_id?: string }).side_channel_item_id).toUpperCase() !== 'NONE');
+        const hasBottomChannel =
+          Boolean((snapFrozen as { bottom_channel?: boolean } | null)?.bottom_channel) ||
+          (typeof (snapFrozen as { bottom_channel_item_id?: string } | null)?.bottom_channel_item_id === 'string'
+            && String((snapFrozen as { bottom_channel_item_id?: string }).bottom_channel_item_id).trim().length > 10
+            && String((snapFrozen as { bottom_channel_item_id?: string }).bottom_channel_item_id).toUpperCase() !== 'NONE') ||
+          Boolean((qlInfo?.config_snapshot as { bottom_channel?: boolean } | null)?.bottom_channel) ||
+          (typeof (qlInfo?.config_snapshot as { bottom_channel_item_id?: string } | null)?.bottom_channel_item_id === 'string'
+            && String((qlInfo?.config_snapshot as { bottom_channel_item_id?: string }).bottom_channel_item_id).trim().length > 10
+            && String((qlInfo?.config_snapshot as { bottom_channel_item_id?: string }).bottom_channel_item_id).toUpperCase() !== 'NONE');
         const draperyTrackDescription = getDraperyTrackDescription({
           productTypeName: productTypeName ?? null,
           trackOnly,
@@ -1316,6 +1334,8 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
             (qlInfo?.config_snapshot as { opening_direction?: string; openingDirection?: string } | null)?.opening_direction ??
             (qlInfo?.config_snapshot as { opening_direction?: string; openingDirection?: string } | null)?.openingDirection ??
             null,
+          has_side_channel: hasSideChannel,
+          has_bottom_channel: hasBottomChannel,
           install_included: isInstallIncluded,
           accessories: formatAccessoriesForPDF(
             (snapFrozen as { accessories?: unknown } | null)?.accessories ??
@@ -1504,6 +1524,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
 
   const contactDisplay = (contact?.contact_name ?? '').trim();
   const customerAddressDisplay = normalizeAddressText(customer?.address ?? null);
+  const linkedQuoteId = quote?.id ?? proposal.quote_id ?? null;
   const actionButtons = (
     <div className="flex items-center gap-2">
       <div className="relative" ref={printDropdownRef}>
@@ -1576,6 +1597,17 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           </div>
         )}
       </div>
+      {linkedQuoteId && (
+        <button
+          type="button"
+          onClick={() => router.navigate(withReturnTo(`/sales/quotes/${linkedQuoteId}/edit`))}
+          className="inline-flex items-center justify-center p-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors hover:bg-gray-50"
+          title="Go to Quote"
+          aria-label="Go to Quote"
+        >
+          <ExternalLink className="w-4 h-4" />
+        </button>
+      )}
       {(hasRedirectBack || quote) && (
         <button
           type="button"
@@ -2126,6 +2158,24 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                   trackOnly: trackOnlyForDrapery,
                   styleCode: styleCodeForDrapery,
                 });
+                const hasSideChannel =
+                  Boolean((snap as { side_channel?: boolean } | null)?.side_channel) ||
+                  (typeof (snap as { side_channel_item_id?: string } | null)?.side_channel_item_id === 'string'
+                    && String((snap as { side_channel_item_id?: string }).side_channel_item_id).trim().length > 10
+                    && String((snap as { side_channel_item_id?: string }).side_channel_item_id).toUpperCase() !== 'NONE') ||
+                  Boolean((qlInfo?.config_snapshot as { side_channel?: boolean } | null)?.side_channel) ||
+                  (typeof (qlInfo?.config_snapshot as { side_channel_item_id?: string } | null)?.side_channel_item_id === 'string'
+                    && String((qlInfo?.config_snapshot as { side_channel_item_id?: string }).side_channel_item_id).trim().length > 10
+                    && String((qlInfo?.config_snapshot as { side_channel_item_id?: string }).side_channel_item_id).toUpperCase() !== 'NONE');
+                const hasBottomChannel =
+                  Boolean((snap as { bottom_channel?: boolean } | null)?.bottom_channel) ||
+                  (typeof (snap as { bottom_channel_item_id?: string } | null)?.bottom_channel_item_id === 'string'
+                    && String((snap as { bottom_channel_item_id?: string }).bottom_channel_item_id).trim().length > 10
+                    && String((snap as { bottom_channel_item_id?: string }).bottom_channel_item_id).toUpperCase() !== 'NONE') ||
+                  Boolean((qlInfo?.config_snapshot as { bottom_channel?: boolean } | null)?.bottom_channel) ||
+                  (typeof (qlInfo?.config_snapshot as { bottom_channel_item_id?: string } | null)?.bottom_channel_item_id === 'string'
+                    && String((qlInfo?.config_snapshot as { bottom_channel_item_id?: string }).bottom_channel_item_id).trim().length > 10
+                    && String((qlInfo?.config_snapshot as { bottom_channel_item_id?: string }).bottom_channel_item_id).toUpperCase() !== 'NONE');
                 const isDrapery = /drapery/i.test(ptNameForOpening ?? '');
                 const openingRaw =
                   snap?.opening_direction ??
@@ -2212,6 +2262,8 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                                   <span className="text-xs text-gray-500">{driveLabel}</span>
                                 ) : null;
                               })()}
+                              {hasSideChannel ? <span className="text-xs text-gray-500">Side Channel: Yes</span> : null}
+                              {hasBottomChannel ? <span className="text-xs text-gray-500">Bottom Channel: Yes</span> : null}
                               {openingLabel ? <span className="text-xs text-gray-500">{openingLabel}</span> : null}
                               {dimsMm && dimsMm !== '—' && <span className="text-xs text-gray-500 whitespace-pre-line">{dimsMm}</span>}
                               {isInstallIncluded ? (

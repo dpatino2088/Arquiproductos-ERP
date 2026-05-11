@@ -32,6 +32,10 @@ export interface ProposalPDFLine {
   opening_direction?: 'left' | 'right' | 'center' | string | null;
   /** True if installation addon present (shows "Install Included") */
   install_included?: boolean;
+  /** Whether side channel is included in the line config */
+  has_side_channel?: boolean;
+  /** Whether bottom channel is included in the line config */
+  has_bottom_channel?: boolean;
   /** Internal only: accessories string */
   accessories?: string | null;
   qty: number;
@@ -299,6 +303,8 @@ export function generateProposalPDF(
           ? (line.panel_count === 1 ? '1 Paño' : `${line.panel_count} Paños`)
           : '');
     const drivePart = driveLabel ? `\n${driveLabel}` : '';
+    const sideChannelPart = line.has_side_channel === true ? '\nSide Channel: Yes' : '';
+    const bottomChannelPart = line.has_bottom_channel === true ? '\nBottom Channel: Yes' : '';
     const installPart = line.install_included ? '\nInstall Included' : '';
     let dimsPart = '';
     if (includeMeasurements && line.dimensions && line.dimensions.trim() && line.dimensions !== '—') {
@@ -307,7 +313,7 @@ export function generateProposalPDF(
     } else if (!includeMeasurements && panelLabel) {
       dimsPart = `\n${panelLabel}`;
     }
-    return `${name}${skuPart}${drivePart}${installPart}${dimsPart}`.trim();
+    return `${name}${skuPart}${drivePart}${sideChannelPart}${bottomChannelPart}${installPart}${dimsPart}`.trim();
   };
 
   const tableData = lines.map((line, index) => [

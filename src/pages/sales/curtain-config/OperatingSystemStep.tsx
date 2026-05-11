@@ -24,6 +24,7 @@ import CatalogItemImage from '../../../components/ui/CatalogItemImage';
 import { supabase } from '../../../lib/supabase/client';
 import { useOrganizationContext } from '../../../context/OrganizationContext';
 import { useUIStore } from '../../../stores/ui-store';
+import { prefetchImageUrls } from '../../../lib/imagePrefetch';
 
 interface OperatingSystemStepProps {
   config: CurtainConfiguration | ProductConfig;
@@ -617,6 +618,16 @@ export default function OperatingSystemStep({
 
   const finalFilteredTemplates = templatesAfterBracket;
 
+  useEffect(() => {
+    const urls = [
+      ...visibleMotorOptions.map((opt) => opt.image_url),
+      ...visibleDriveOptions.map((opt) => opt.image_url),
+      ...visibleTubeOptions.map((opt) => opt.image_url),
+      ...visibleBracketOptions.map((opt) => opt.image_url),
+    ];
+    prefetchImageUrls(urls, 12);
+  }, [visibleMotorOptions, visibleDriveOptions, visibleTubeOptions, visibleBracketOptions]);
+
   // ✅ Guardar templates finales en config para el matcher
   useEffect(() => {
     if (finalFilteredTemplates && finalFilteredTemplates.length > 0) {
@@ -1186,6 +1197,7 @@ export default function OperatingSystemStep({
                           alt={item.name || item.sku}
                           size="lg"
                           objectFit="contain"
+                          loadingBehavior="eager"
                           className="w-full h-full !rounded-none !border-0"
                         />
                       </div>
@@ -1303,6 +1315,7 @@ export default function OperatingSystemStep({
                           alt={item.name || item.sku}
                           size="lg"
                           objectFit="contain"
+                          loadingBehavior="eager"
                           className="w-full h-full !rounded-none !border-0"
                         />
                       </div>
@@ -1394,6 +1407,7 @@ export default function OperatingSystemStep({
                           alt={item.name || item.sku}
                           size="lg"
                           objectFit="contain"
+                          loadingBehavior="eager"
                           className="w-full h-full !rounded-none !border-0"
                         />
                       </div>
@@ -1465,6 +1479,7 @@ export default function OperatingSystemStep({
                           alt={item.name || item.sku}
                           size="lg"
                           objectFit="contain"
+                          loadingBehavior="eager"
                           className="w-full h-full !rounded-none !border-0"
                         />
                       </div>

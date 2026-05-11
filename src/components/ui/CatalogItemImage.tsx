@@ -18,6 +18,7 @@ interface CatalogItemImageProps {
   className?: string;
   onClick?: () => void;
   objectFit?: 'cover' | 'contain';
+  loadingBehavior?: 'lazy' | 'eager';
 }
 
 /**
@@ -34,6 +35,7 @@ export default function CatalogItemImage({
   className = '',
   onClick,
   objectFit = 'cover',
+  loadingBehavior = 'lazy',
 }: CatalogItemImageProps) {
   const resolvedUrl = useResolvedStorageUrl(src);
   const [broken, setBroken] = useState(false);
@@ -60,8 +62,8 @@ export default function CatalogItemImage({
           src={resolvedUrl}
           alt={alt}
           className={`w-full h-full ${objectFit === 'contain' ? 'object-contain' : 'object-cover'}`}
-          loading="lazy"
-          decoding="async"
+          loading={loadingBehavior}
+          decoding={loadingBehavior === 'eager' ? 'sync' : 'async'}
           onError={() => setBroken(true)}
         />
       ) : (

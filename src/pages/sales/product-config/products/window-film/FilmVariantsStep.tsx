@@ -5,6 +5,7 @@ import { useOrganizationContext } from '../../../../../context/OrganizationConte
 import Label from '../../../../../components/ui/Label';
 import Input from '../../../../../components/ui/Input';
 import CatalogItemImage from '../../../../../components/ui/CatalogItemImage';
+import { prefetchImageUrls } from '../../../../../lib/imagePrefetch';
 
 interface FilmVariantsStepProps {
   config: any;
@@ -263,6 +264,10 @@ export default function FilmVariantsStep({ config, onUpdate }: FilmVariantsStepP
     ? variants.filter(v => v.name === selectedVariant)
     : variants;
 
+  useEffect(() => {
+    prefetchImageUrls(displayVariants.map((v) => v.image_url), 12);
+  }, [displayVariants]);
+
   // Price summary
   const selectedItem = useMemo(() => {
     if (!selectedCollection || !selectedVariant) return null;
@@ -391,6 +396,7 @@ export default function FilmVariantsStep({ config, onUpdate }: FilmVariantsStepP
                               src={variant.image_url}
                               alt={variant.display_name}
                               size="lg"
+                              loadingBehavior="eager"
                               className="w-full h-full !rounded-none !border-0"
                             />
                           </div>

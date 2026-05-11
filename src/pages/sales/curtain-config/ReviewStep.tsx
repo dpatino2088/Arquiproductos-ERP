@@ -8,6 +8,7 @@ import { ChevronDown, ChevronUp } from 'lucide-react';
 import { formatMoney, formatUom } from '../../../lib/format';
 import { useCostSettings } from '../../../hooks/useCosts';
 import { computeSelectedSnapshotTotals } from '../../../lib/bom/snapshotSelectedTotals';
+import { useAccessContext } from '../../../hooks/useAccessContext';
 
 // ============================================================================
 // BOM Preview Snapshot types (from ConfiguredProducts.bom_preview_snapshot)
@@ -78,6 +79,11 @@ interface ReviewStepProps {
 export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
   const { activeOrganizationId } = useOrganizationContext();
   const { settings: costSettings } = useCostSettings();
+  const { userType, internalRole } = useAccessContext();
+  const normalizedInternalRole = (internalRole ?? '').toString().trim().toLowerCase();
+  const canViewInternalBreakdown =
+    userType === 'internal' &&
+    ['superadmin', 'admin', 'organization_admin'].includes(normalizedInternalRole);
   const [rollData, setRollData] = useState<{
     sku?: string;
     collection_name?: string;
@@ -1228,7 +1234,8 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
           </div>
         </div>
         
-        {/* PRODUCT MSRP BREAKDOWN */}
+        {/* PRODUCT MSRP BREAKDOWN (internal admin only) */}
+        {canViewInternalBreakdown && (
         <div className="pt-5 border-t border-gray-200">
           <div 
             className="flex items-center justify-between cursor-pointer"
@@ -1641,6 +1648,7 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
             </div>
           )}
         </div>
+        )}
       </div>
     </div>
   );

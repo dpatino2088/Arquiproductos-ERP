@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Building2 } from 'lucide-react';
 import { supabase } from '../../../lib/supabase/client';
 import { useOrganizationContext } from '../../../context/OrganizationContext';
+import { prefetchImageUrls } from '../../../lib/imagePrefetch';
 
 interface Manufacturer {
   name: string;
@@ -11,6 +12,31 @@ interface Manufacturer {
 interface ManufacturerStepProps {
   config: any;
   onUpdate: (updates: Record<string, any>) => void;
+}
+
+const IMAGE_EXTENSIONS = new Set([
+  'png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'avif', 'bmp',
+]);
+
+function isSupportedImageAsset(url: string): boolean {
+  const trimmed = url.trim();
+  if (!trimmed) return false;
+  // No extension -> allow (some storage URLs omit extension in pathname)
+  if (!/[./]/.test(trimmed)) return true;
+  try {
+    const parsed = /^https?:\/\//i.test(trimmed)
+      ? new URL(trimmed)
+      : new URL(trimmed.startsWith('/') ? `https://local${trimmed}` : `https://local/${trimmed}`);
+    const path = parsed.pathname.toLowerCase();
+    const match = path.match(/\.([a-z0-9]+)$/i);
+    if (!match) return true;
+    return IMAGE_EXTENSIONS.has(match[1]);
+  } catch {
+    const bare = trimmed.split('?')[0].split('#')[0].toLowerCase();
+    const match = bare.match(/\.([a-z0-9]+)$/i);
+    if (!match) return true;
+    return IMAGE_EXTENSIONS.has(match[1]);
+  }
 }
 
 export default function ManufacturerStep({ config, onUpdate }: ManufacturerStepProps) {
@@ -96,9 +122,23 @@ export default function ManufacturerStep({ config, onUpdate }: ManufacturerStepP
   }, [activeOrganizationId, productTypeId]);
 
   const getImageSrc = (mfr: Manufacturer) => {
-    if (mfr.logo_url) return mfr.logo_url;
-    return `/images/${mfr.name}.png`;
+    const fallback = `/images/${mfr.name}.png`;
+    const raw = mfr.logo_url?.trim();
+    if (!raw) return fallback;
+    if (!isSupportedImageAsset(raw)) return fallback;
+
+    if (/^https?:\/\//i.test(raw)) return raw;
+    if (raw.startsWith('/images/') || raw.startsWith('images/')) return raw.startsWith('/') ? raw : `/${raw}`;
+    if (raw.startsWith('/assets/') || raw.startsWith('assets/')) return raw.startsWith('/') ? raw : `/${raw}`;
+
+    const { data } = supabase.storage.from('catalog-images').getPublicUrl(raw.replace(/^\/+/, ''));
+    return data.publicUrl || fallback;
   };
+
+  useEffect(() => {
+    if (manufacturers.length === 0) return;
+    prefetchImageUrls(manufacturers.map((mfr) => getImageSrc(mfr)), 8);
+  }, [manufacturers]);
 
   if (loading) {
     return (
@@ -153,6 +193,8 @@ export default function ManufacturerStep({ config, onUpdate }: ManufacturerStepP
                     src={getImageSrc(mfr)}
                     alt={mfr.name}
                     className="max-h-full max-w-full object-contain"
+                    loading="eager"
+                    decoding="sync"
                     onError={() => setImageErrors((prev) => ({ ...prev, [mfr.name]: true }))}
                   />
                 ) : (

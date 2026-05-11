@@ -19,6 +19,7 @@ import { Search, X } from 'lucide-react';
 import CatalogItemImage from '../../../components/ui/CatalogItemImage';
 import type { DealerConfiguratorPolicy } from '../../../hooks/useDealerConfiguratorPolicy';
 import { useConfiguratorPolicy } from '../../../context/ConfiguratorPolicyContext';
+import { prefetchImageUrls } from '../../../lib/imagePrefetch';
 
 interface VariantsStepProps {
   config: CurtainConfiguration | ProductConfig;
@@ -335,6 +336,10 @@ export default function VariantsStep({ config, onUpdate, policy: policyProp }: V
     if (!variantId) return variants;
     return hasSelectedVariantInList ? variants.filter((v) => v.id === variantId) : variants;
   }, [variantId, hasSelectedVariantInList, variants]);
+
+  useEffect(() => {
+    prefetchImageUrls(displayedVariants.map((v: any) => v?.image_url || null), 12);
+  }, [displayedVariants]);
 
   useEffect(() => {
     if (!variantId || loadingVariants) return;
@@ -684,6 +689,7 @@ export default function VariantsStep({ config, onUpdate, policy: policyProp }: V
                             src={(variant as any).image_url}
                             alt={variant.variant_name || variant.sku || 'Variant'}
                             size="lg"
+                            loadingBehavior="eager"
                             className="w-full h-full !rounded-none !border-0"
                           />
                         </div>

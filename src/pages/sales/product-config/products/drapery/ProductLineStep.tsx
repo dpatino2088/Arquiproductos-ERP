@@ -4,6 +4,7 @@ import CatalogItemImage from '../../../../../components/ui/CatalogItemImage';
 import { supabase } from '../../../../../lib/supabase/client';
 import { useOrganizationContext } from '../../../../../context/OrganizationContext';
 import Label from '../../../../../components/ui/Label';
+import { prefetchImageUrls } from '../../../../../lib/imagePrefetch';
 
 interface ProductLineStepProps {
   config: any;
@@ -251,6 +252,16 @@ export default function ProductLineStep({ config, onUpdate }: ProductLineStepPro
     });
   }, [styleRules]);
 
+  useEffect(() => {
+    const lineUrls = productLines.map((line) => {
+      const displayName = DISPLAY_NAMES[line] || line.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+      return PRODUCT_LINE_IMAGE_PATHS[line] || `/images/${displayName}.png`;
+    });
+    const styleUrls = styleCards.map((card) => card.image_url || STYLE_IMAGE_PATHS[card.style_code] || null);
+    const sizeUrls = availableSystemSizes.map((size) => SYSTEM_SIZE_IMAGE_PATHS[size] || null);
+    prefetchImageUrls([...lineUrls, ...styleUrls, ...sizeUrls], 12);
+  }, [productLines, styleCards, availableSystemSizes]);
+
   const showWaveSizeSection = styleCards.length > 1;
 
   const activeRule = useMemo(() => {
@@ -381,6 +392,7 @@ export default function ProductLineStep({ config, onUpdate }: ProductLineStepPro
                       alt={card.name}
                       size="lg"
                       objectFit="contain"
+                      loadingBehavior="eager"
                       className="w-full h-full !rounded-none !border-0"
                     />
                   </div>

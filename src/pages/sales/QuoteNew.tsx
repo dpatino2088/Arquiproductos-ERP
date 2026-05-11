@@ -834,6 +834,37 @@ export default function QuoteNew() {
   const effectiveCustomerIdForContacts = selectedCustomerId || (quoteId && quoteData?.customer_id) || null;
   const effectiveOrgIdForContacts = selectedCustomer?.organization_id ?? activeOrganizationId;
 
+  // Prevent scroll bleed to the page behind the configurator modal.
+  useEffect(() => {
+    if (!showConfigurator) return;
+    const scrollY = window.scrollY || window.pageYOffset || 0;
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+    const previousOverflow = document.body.style.overflow;
+    const previousOverscroll = document.body.style.overscrollBehavior;
+    const previousPosition = document.body.style.position;
+    const previousTop = document.body.style.top;
+    const previousWidth = document.body.style.width;
+
+    // Strong lock to prevent background scroll bleed on trackpads/macOS.
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+    document.body.style.overscrollBehavior = 'none';
+    document.body.style.position = 'fixed';
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.width = '100%';
+
+    return () => {
+      const y = Math.abs(parseInt(document.body.style.top || '0', 10)) || 0;
+      document.documentElement.style.overflow = previousHtmlOverflow;
+      document.body.style.overflow = previousOverflow;
+      document.body.style.overscrollBehavior = previousOverscroll;
+      document.body.style.position = previousPosition;
+      document.body.style.top = previousTop;
+      document.body.style.width = previousWidth;
+      window.scrollTo(0, y);
+    };
+  }, [showConfigurator]);
+
   useEffect(() => {
     const loadUnassignedCustomersForDealerScope = async () => {
       if (!activeOrganizationId || userType !== 'internal' || !filterDealerId) {
@@ -3884,6 +3915,16 @@ export default function QuoteNew() {
           product_type: line.ProductType?.name ?? line.product_type ?? '—',
           style_code: line.config_snapshot?.style_code ?? line.config_snapshot?.styleCode ?? null,
           track_only: Boolean(line.config_snapshot?.track_only),
+          has_side_channel:
+            (typeof line.config_snapshot?.side_channel_item_id === 'string'
+              && line.config_snapshot.side_channel_item_id.trim().length > 10
+              && String(line.config_snapshot.side_channel_item_id).toUpperCase() !== 'NONE')
+            || line.config_snapshot?.side_channel === true,
+          has_bottom_channel:
+            (typeof line.config_snapshot?.bottom_channel_item_id === 'string'
+              && line.config_snapshot.bottom_channel_item_id.trim().length > 10
+              && String(line.config_snapshot.bottom_channel_item_id).toUpperCase() !== 'NONE')
+            || line.config_snapshot?.bottom_channel === true,
           collection_name: line.collection_name,
           variant_name: line.variant_name,
           drive_type: line.drive_type,
@@ -4100,6 +4141,16 @@ export default function QuoteNew() {
           product_type: line.ProductType?.name ?? line.product_type ?? '—',
           style_code: line.config_snapshot?.style_code ?? line.config_snapshot?.styleCode ?? null,
           track_only: Boolean(line.config_snapshot?.track_only),
+          has_side_channel:
+            (typeof line.config_snapshot?.side_channel_item_id === 'string'
+              && line.config_snapshot.side_channel_item_id.trim().length > 10
+              && String(line.config_snapshot.side_channel_item_id).toUpperCase() !== 'NONE')
+            || line.config_snapshot?.side_channel === true,
+          has_bottom_channel:
+            (typeof line.config_snapshot?.bottom_channel_item_id === 'string'
+              && line.config_snapshot.bottom_channel_item_id.trim().length > 10
+              && String(line.config_snapshot.bottom_channel_item_id).toUpperCase() !== 'NONE')
+            || line.config_snapshot?.bottom_channel === true,
           collection_name: line.collection_name,
           variant_name: line.variant_name,
           drive_type: line.drive_type,
@@ -4995,6 +5046,14 @@ export default function QuoteNew() {
                       : null;
                     const driveDisplay = (isCatalogLine || isFilmLine) ? (catalogMfr || '—') : driveLabel;
                     const snap = line.config_snapshot ?? {};
+                    const isRealItemId = (value: unknown): boolean =>
+                      typeof value === 'string' && value.trim().length > 10 && value.toUpperCase() !== 'NONE';
+                    const hasSideChannel = !isCatalogLine && !isFilmLine
+                      ? (isRealItemId(snap.side_channel_item_id) || snap.side_channel === true)
+                      : null;
+                    const hasBottomChannel = !isCatalogLine && !isFilmLine
+                      ? (isRealItemId(snap.bottom_channel_item_id) || snap.bottom_channel === true)
+                      : null;
                     const driveSku =
                       (typeof snap.motor_sku === 'string' && snap.motor_sku.trim()) ||
                       (typeof snap.drive_sku === 'string' && snap.drive_sku.trim()) ||
@@ -5030,7 +5089,15 @@ export default function QuoteNew() {
                           {productTypeName}
                         </td>
                         <td className="py-4 px-2 text-gray-700 text-sm text-center break-words leading-tight" title={collectionDisplay}>
-                          {collectionDisplay}
+                          <div>
+                            <div>{collectionDisplay}</div>
+                            {(hasSideChannel || hasBottomChannel) && (
+                              <div className="text-[11px] text-gray-500 mt-0.5 flex flex-col gap-0.5">
+                                {hasSideChannel ? <span>Side Channel: Yes</span> : null}
+                                {hasBottomChannel ? <span>Bottom Channel: Yes</span> : null}
+                              </div>
+                            )}
+                          </div>
                         </td>
                         <td className="py-4 px-2 text-gray-700 text-sm text-center leading-tight" title={driveDisplay}>
                           {(() => {
@@ -5441,7 +5508,7 @@ export default function QuoteNew() {
 
       {/* Product Configurator Modal */}
       {showConfigurator && quoteId && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 overscroll-none">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
             <div className="flex items-center justify-between p-4 border-b">
               <h2 className="text-lg font-semibold">
@@ -5459,7 +5526,7 @@ export default function QuoteNew() {
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto overscroll-contain">
               <ProductConfigurator
                 quoteId={quoteId}
                 onComplete={handleProductConfigComplete}
