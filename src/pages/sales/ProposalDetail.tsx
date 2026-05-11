@@ -991,9 +991,9 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
       lineTotals.push(material);
       totalProduct += material;
       baseTotalProduct += rawMaterial;
-      const lineQty = getProposalLineQty(line, qlInfo);
       const installationAddons = (displayAddonsMap?.get(line.id) || []).filter((a) => a.addon_type === 'installation');
-      const rawInstall = installationAddons.reduce((s, a) => s + ((Number(a.sale_amount) || 0) * lineQty), 0);
+      // DB recalc_proposal_totals treats addon sale_amount as line-level amount (no qty multiplier).
+      const rawInstall = installationAddons.reduce((s, a) => s + (Number(a.sale_amount) || 0), 0);
       baseInstallationTotal += rawInstall;
       installationTotal += rawInstall * instFeeMul;
     });
@@ -1650,12 +1650,13 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     { id: 'profitability', label: 'Performance' },
     { id: 'timeline', label: 'Timeline' },
   ];
-  const isProposalOutdated = useMemo(() => {
+  // Keep this as a plain value (not a hook) because this block is after early returns.
+  const isProposalOutdated = (() => {
     if (!proposal?.quote_id || !quote?.updated_at || !proposal.created_at) return false;
     const quoteUpdatedTs = Date.parse(quote.updated_at);
     const proposalCreatedTs = Date.parse(proposal.created_at);
     return Number.isFinite(quoteUpdatedTs) && Number.isFinite(proposalCreatedTs) && quoteUpdatedTs > proposalCreatedTs;
-  }, [proposal?.quote_id, proposal?.created_at, quote?.updated_at]);
+  })();
 
   return (
     <DetailPageLayout

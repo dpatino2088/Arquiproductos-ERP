@@ -558,11 +558,6 @@ export default function Proposals() {
                       {p.quote_no && (
                         <span className="text-xs text-gray-500 font-normal block truncate">Quote: {p.quote_no}</span>
                       )}
-                      {p.is_outdated && (
-                        <span className="text-[11px] text-amber-700 font-medium block truncate">
-                          Outdated: Quote modified
-                        </span>
-                      )}
                     </td>
                     <td className="py-4 px-4 text-center">
                       <StatusBadge status={p.status} type="proposal" size="sm" />
