@@ -138,7 +138,7 @@ function getQuoteLineBase(ql: { quantity: number; msrp: number | null; unit_msrp
 function computeLineTotal(
   line: ProposalLine,
   quoteLineInfo: { quantity: number; msrp: number | null; unit_msrp: number | null } | undefined,
-  proposalStatus?: string
+  _proposalStatus?: string
 ): number {
   if (line.line_type === 'custom') {
     const qty = Number(line.qty) || 0;
@@ -147,7 +147,7 @@ function computeLineTotal(
   }
   if (line.line_type === 'from_quote') {
     let base = 0;
-    if (proposalStatus && (proposalStatus === 'sent' || proposalStatus === 'accepted') && line.quote_line_snapshot && (line.quote_line_snapshot as { base_line_msrp?: number }).base_line_msrp != null) {
+    if (line.quote_line_snapshot && (line.quote_line_snapshot as { base_line_msrp?: number }).base_line_msrp != null) {
       base = (line.quote_line_snapshot as { base_line_msrp: number }).base_line_msrp;
     } else if (quoteLineInfo) {
       base = getQuoteLineBase(quoteLineInfo);
@@ -1650,6 +1650,12 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     { id: 'profitability', label: 'Performance' },
     { id: 'timeline', label: 'Timeline' },
   ];
+  const isProposalOutdated = useMemo(() => {
+    if (!proposal?.quote_id || !quote?.updated_at || !proposal.created_at) return false;
+    const quoteUpdatedTs = Date.parse(quote.updated_at);
+    const proposalCreatedTs = Date.parse(proposal.created_at);
+    return Number.isFinite(quoteUpdatedTs) && Number.isFinite(proposalCreatedTs) && quoteUpdatedTs > proposalCreatedTs;
+  }, [proposal?.quote_id, proposal?.created_at, quote?.updated_at]);
 
   return (
     <DetailPageLayout
@@ -1662,6 +1668,15 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
       onBack={handleBack}
       actions={actionButtons}
     >
+      {isProposalOutdated && (
+        <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 flex items-start gap-2">
+          <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>
+            This proposal is <span className="font-semibold">Outdated</span>: the linked quote was modified after this proposal was created.
+            Create a new proposal version if you need the latest quote pricing.
+          </span>
+        </div>
+      )}
       {activeTab === 'overview' && (
         <div className="space-y-6 w-full max-w-full">
           {/* Header cards (2 columns: Left = names/details, Right = discounts + summary) */}

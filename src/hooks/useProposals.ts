@@ -38,9 +38,12 @@ export interface ProposalListItem {
   proposal_created_by?: string;
   quote_status?: string;
   quote_created_at?: string | null;
+  quote_updated_at?: string | null;
   /** coalesce(AppUsers.display_name, 'Legacy / Imported') for quote creator */
   quote_created_by?: string;
   quote_total_amount?: number | null;
+  /** True when quote was edited after this proposal was created. */
+  is_outdated?: boolean;
   archived?: boolean;
 }
 
@@ -108,16 +111,17 @@ export function useProposalsList() {
       const quoteIds = [...new Set(rows.map((r) => r.quote_id).filter((id): id is string => !!id))];
 
       const quotesRes = quoteIds.length
-        ? await supabase.from('Quotes').select('id, quote_no, status, created_at, created_by_user_id, customer_id, contact_id, total_amount').in('id', quoteIds).or('deleted.is.false,deleted.is.null')
+        ? await supabase.from('Quotes').select('id, quote_no, status, created_at, updated_at, created_by_user_id, customer_id, contact_id, total_amount').in('id', quoteIds).or('deleted.is.false,deleted.is.null')
         : { data: [] };
       if (signal?.aborted) return;
 
-      const quoteMap = new Map<string, { quote_no?: string; status?: string; created_at?: string; created_by_user_id?: string | null; customer_id?: string; contact_id?: string; total_amount?: number | null }>();
+      const quoteMap = new Map<string, { quote_no?: string; status?: string; created_at?: string; updated_at?: string; created_by_user_id?: string | null; customer_id?: string; contact_id?: string; total_amount?: number | null }>();
       (quotesRes.data || []).forEach((q: any) => {
         quoteMap.set(q.id, {
           quote_no: q.quote_no,
           status: q.status,
           created_at: q.created_at,
+          updated_at: q.updated_at,
           created_by_user_id: q.created_by_user_id ?? undefined,
           customer_id: q.customer_id ?? undefined,
           contact_id: q.contact_id ?? undefined,
@@ -174,6 +178,7 @@ export function useProposalsList() {
         r.quote_no = q?.quote_no;
         r.quote_status = q?.status;
         r.quote_created_at = q?.created_at ?? undefined;
+        r.quote_updated_at = q?.updated_at ?? undefined;
         r.proposal_created_by = (r as any).created_by_user_id
           ? (appUsersMap.get((r as any).created_by_user_id) ?? 'Legacy / Imported')
           : 'Legacy / Imported';
@@ -184,6 +189,9 @@ export function useProposalsList() {
               ? (appUsersMap.get(q.created_by_user_id) ?? 'Legacy / Imported')
               : 'Legacy / Imported');
         r.quote_total_amount = r.quote_id ? (quoteDealerTotalMap.get(r.quote_id) ?? null) : null;
+        const quoteUpdatedTs = q?.updated_at ? Date.parse(q.updated_at) : NaN;
+        const proposalCreatedTs = r.created_at ? Date.parse(r.created_at) : NaN;
+        r.is_outdated = Number.isFinite(quoteUpdatedTs) && Number.isFinite(proposalCreatedTs) && quoteUpdatedTs > proposalCreatedTs;
         const customerId = r.customer_id ?? q?.customer_id;
         r.customer_name = customerId ? customerMap.get(customerId) : undefined;
       });
@@ -280,7 +288,7 @@ export interface ProposalDetailState {
   addonsMap: Map<string, ProposalLineAddOn[]>;
   quoteLinesMap: Map<string, QuoteLineInfoForPDF>;
   configuredProductsMap: Record<string, { config_snapshot: Record<string, unknown> | null }>;
-  quote: { id: string; quote_no: string } | null;
+  quote: { id: string; quote_no: string; updated_at?: string | null } | null;
   customer: ProposalDetailCustomer | null;
   contact: ProposalDetailContact | null;
   /** Dealer logo URL for the proposal's dealer (Dealers.logo_url filtered by proposal.dealer_id) */
@@ -362,16 +370,16 @@ export async function fetchProposalDetailData(proposalId: string): Promise<Propo
 
   let quoteLinesMap = new Map<string, QuoteLineInfoForPDF>();
   let configuredProductsMap: Record<string, { config_snapshot: Record<string, unknown> | null }> = {};
-  let quote: { id: string; quote_no: string } | null = null;
+  let quote: { id: string; quote_no: string; updated_at?: string | null } | null = null;
 
   if (proposal.quote_id) {
     const { data: quoteData } = await supabase
       .from('Quotes')
-      .select('id, quote_no')
+      .select('id, quote_no, updated_at')
       .eq('id', proposal.quote_id)
       .eq('deleted', false)
       .single();
-    if (quoteData) quote = { id: quoteData.id, quote_no: quoteData.quote_no || '' };
+    if (quoteData) quote = { id: quoteData.id, quote_no: quoteData.quote_no || '', updated_at: quoteData.updated_at ?? null };
   }
 
   if (proposal.quote_id) {
@@ -977,6 +985,16 @@ export async function createProposalFromQuote(
     const { error: linesInsertErr } = await supabase.from('ProposalLines').insert(lineRows);
     if (linesInsertErr) {
       return { error: linesInsertErr.message };
+    }
+    // Freeze quote-derived pricing at proposal creation time so later Quote edits
+    // do not mutate existing proposal economics.
+    const { error: snapshotErr } = await supabase.rpc('capture_proposal_snapshot', {
+      p_proposal_id: proposalId,
+    });
+    if (snapshotErr) {
+      // Best effort rollback to avoid leaving a draft proposal without a frozen snapshot.
+      await supabase.from('Proposals').update({ deleted: true }).eq('id', proposalId);
+      return { error: snapshotErr.message || 'Error freezing proposal snapshot' };
     }
   }
 
