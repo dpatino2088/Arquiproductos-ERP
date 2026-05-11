@@ -42,6 +42,8 @@ export interface BOMComponentDraft {
     id: string;
     sku: string;
     name: string | null;
+    item_name?: string | null;
+    image_url?: string | null;
     delta_x_mm?: number | null;
     delta_y_mm?: number | null;
     measure_basis?: string | null;

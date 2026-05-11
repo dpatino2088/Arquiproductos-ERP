@@ -158,7 +158,16 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
   // ========== FLAT FILTERED ITEMS (autocomplete) ==========
 
   const flatFilteredItems = useMemo(() => {
-    const items: Array<{ id: string; sku: string; name: string; category: string; categoryCode: string | null; uom: string }> = [];
+    const items: Array<{
+      id: string;
+      sku: string;
+      name: string;
+      item_name?: string | null;
+      image_url?: string | null;
+      category: string;
+      categoryCode: string | null;
+      uom: string;
+    }> = [];
     const searchTerm = componentSearchTerm.trim();
     const normalizedSearch = searchTerm.toLowerCase().replace(/[-_\s]/g, '');
     const filtered = catalogItems.filter(item => {
@@ -189,7 +198,16 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
     });
     categoryMap.forEach(group => {
       group.items.forEach(item => {
-        items.push({ id: item.id, sku: item.sku || '', name: item.name || item.item_name || 'Unnamed', category: group.category.name, categoryCode: group.category.code, uom: item.uom || 'ea' });
+        items.push({
+          id: item.id,
+          sku: item.sku || '',
+          name: item.name || item.item_name || 'Unnamed',
+          item_name: item.item_name ?? null,
+          image_url: item.image_url ?? null,
+          category: group.category.name,
+          categoryCode: group.category.code,
+          uom: item.uom || 'ea',
+        });
       });
     });
     return items;
@@ -282,7 +300,16 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
         condition_key: comp.condition_key || null,
         condition_value: comp.condition_value || null,
         catalog_item: catItem
-          ? { id: catItem.id, sku: catItem.sku, name: catItem.name ?? catItem.item_name, delta_x_mm: catItem.delta_x_mm ?? null, delta_y_mm: catItem.delta_y_mm ?? null, measure_basis: catItem.measure_basis ?? null }
+          ? {
+              id: catItem.id,
+              sku: catItem.sku,
+              name: catItem.name ?? catItem.item_name,
+              item_name: catItem.item_name ?? null,
+              image_url: catItem.image_url ?? null,
+              delta_x_mm: catItem.delta_x_mm ?? null,
+              delta_y_mm: catItem.delta_y_mm ?? null,
+              measure_basis: catItem.measure_basis ?? null,
+            }
           : comp.component_item || null,
       };
     });
