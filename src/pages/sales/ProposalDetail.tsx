@@ -969,132 +969,114 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
   );
 
   const totals = useMemo(() => {
-    // Read percentages from headerForm (live); '0' and '' both parse to 0
+    // Mirror DB recalc_proposal_totals formula exactly.
+    const roundMoney = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
     const discountPct = headerForm.global_discount_pct !== '' ? parseFloat(headerForm.global_discount_pct) || 0 : 0;
-    const globalFeePct = headerForm.global_fee_amount !== '' ? parseFloat(headerForm.global_fee_amount) || 0 : 0;
+    const globalFeeAmount = headerForm.global_fee_amount !== '' ? parseFloat(headerForm.global_fee_amount) || 0 : 0;
     const instDiscountPct = headerForm.global_installation_discount_pct !== '' ? parseFloat(headerForm.global_installation_discount_pct) || 0 : 0;
     const instFeePct = headerForm.global_installation_fee_pct !== '' ? parseFloat(headerForm.global_installation_fee_pct) || 0 : 0;
 
-    const feeMul = 1 + ((Number.isNaN(globalFeePct) ? 0 : globalFeePct) / 100);
-    const instFeeMul = 1 + ((Number.isNaN(instFeePct) ? 0 : instFeePct) / 100);
-
-    // Fee is baked into each line total so Unit Price & Line Total reflect it
     const lineTotals: number[] = [];
     let totalProduct = 0;
-    let baseTotalProduct = 0;
     let baseInstallationTotal = 0;
-    let installationTotal = 0;
+    let otherAddonsTotal = 0;
     displayLines.forEach((line) => {
       const qlInfo = line.quote_line_id ? quoteLinesMap.get(line.quote_line_id) : undefined;
       const rawMaterial = computeLineTotal(line, qlInfo, proposal?.status);
-      const material = rawMaterial * feeMul;
-      lineTotals.push(material);
-      totalProduct += material;
-      baseTotalProduct += rawMaterial;
-      const installationAddons = (displayAddonsMap?.get(line.id) || []).filter((a) => a.addon_type === 'installation');
-      // DB recalc_proposal_totals treats addon sale_amount as line-level amount (no qty multiplier).
-      const rawInstall = installationAddons.reduce((s, a) => s + (Number(a.sale_amount) || 0), 0);
-      baseInstallationTotal += rawInstall;
-      installationTotal += rawInstall * instFeeMul;
+      lineTotals.push(rawMaterial);
+      totalProduct += rawMaterial;
+
+      const addons = displayAddonsMap?.get(line.id) || [];
+      baseInstallationTotal += addons
+        .filter((a) => a.addon_type === 'installation')
+        .reduce((s, a) => s + (Number(a.sale_amount) || 0), 0);
+      otherAddonsTotal += addons
+        .filter((a) => a.addon_type !== 'installation')
+        .reduce((s, a) => s + (Number(a.sale_amount) || 0), 0);
     });
 
-    // Discount applies to fee-inclusive Total Product
-    const discountAmount = Number.isNaN(discountPct) ? 0 : totalProduct * (discountPct / 100);
-    const afterDiscount = Math.max(totalProduct - discountAmount, 0);
+    const installationTotal = baseInstallationTotal;
+    const installationNet = roundMoney(installationTotal * (1 - (Number.isNaN(instDiscountPct) ? 0 : instDiscountPct) / 100) * (1 + (Number.isNaN(instFeePct) ? 0 : instFeePct) / 100));
+    const laborDiscountAmount = roundMoney(Math.max(installationTotal - installationNet, 0));
 
-    // Labor Discount applies to fee-inclusive Installation
-    const laborDiscountAmount = Number.isNaN(instDiscountPct) ? 0 : installationTotal * (instDiscountPct / 100);
-    const installationNet = installationTotal - laborDiscountAmount;
-
-    const subtotal = afterDiscount + installationNet;
+    const subtotalBeforeDiscount = totalProduct + installationNet + otherAddonsTotal;
+    const discountAmount = roundMoney((Number.isNaN(discountPct) ? 0 : subtotalBeforeDiscount * (discountPct / 100)));
+    const taxableBase = Math.max(subtotalBeforeDiscount - discountAmount, 0);
 
     const exemptTax = headerForm.exempt_tax;
     const taxPct = proposal?.tax_pct ?? 0.07;
-    const taxAmount = exemptTax ? 0 : subtotal * taxPct;
-    const total = subtotal + taxAmount;
+    const taxAmount = exemptTax ? 0 : roundMoney(taxableBase * taxPct);
+    const total = roundMoney(taxableBase + taxAmount + (Number.isNaN(globalFeeAmount) ? 0 : globalFeeAmount));
 
     return {
       totalProduct,
-      baseTotalProduct,
+      baseTotalProduct: totalProduct,
       baseInstallationTotal,
       discountPct,
       discountAmount,
-      globalFeePct,
+      globalFeeAmount,
+      globalFeePct: 0, // kept for backward-compatible props/keys
       installationTotal,
       laborDiscountAmount,
       installationAmount: installationTotal,
       installationNet,
-      subtotal,
+      otherAddonsTotal,
+      subtotalBeforeDiscount,
+      subtotal: taxableBase,
       taxAmount,
       total,
       lineTotals,
       instDiscountPct,
       instFeePct,
     };
-  }, [displayLines, quoteLinesMap, displayAddonsMap, proposal?.status, proposal?.global_discount_pct, proposal?.global_fee_amount, proposal?.global_installation_discount_pct, proposal?.global_installation_fee_pct, proposal?.tax_pct, headerForm.global_discount_pct, headerForm.global_fee_amount, headerForm.global_installation_discount_pct, headerForm.global_installation_fee_pct, headerForm.exempt_tax]);
+  }, [displayLines, quoteLinesMap, displayAddonsMap, proposal?.status, proposal?.tax_pct, headerForm.global_discount_pct, headerForm.global_fee_amount, headerForm.global_installation_discount_pct, headerForm.global_installation_fee_pct, headerForm.exempt_tax]);
 
   /**
-   * Resolve targetAfterDiscount (= base product net the dealer wants AFTER fee/discount)
-   * into either a Global Discount % or a Global Fee % so totalProduct(after) === target.
-   *
-   * Single-pass math (no fee already applied):
-   *   afterDiscount = baseTotalProduct * (1 + fee/100) * (1 - disc/100)
-   * We use only ONE of fee/disc at a time:
-   *   ratio = afterDiscount / baseTotalProduct
-   *     - ratio < 1 → disc = (1 - ratio) * 100, fee = 0
-   *     - ratio > 1 → fee = (ratio - 1) * 100, disc = 0
-   *     - ratio == 1 → both 0
+   * Resolve desired taxable base (subtotal after global discount) into Global Discount %.
+   * Mirrors DB formula where discount is applied to subtotal_before_discount.
    */
   const setHeaderFromTargetProductNet = useCallback(
     (targetAfterDiscount: number) => {
-      const base = totals.baseTotalProduct ?? 0;
+      const base = totals.subtotalBeforeDiscount ?? 0;
       if (base <= 0) return;
-      let nextDiscount = '0';
-      let nextFee = '0';
+      let nextDiscount = 0;
       if (targetAfterDiscount <= 0) {
-        nextDiscount = '100';
+        nextDiscount = 100;
       } else if (targetAfterDiscount < base) {
-        const disc = Math.round(((base - targetAfterDiscount) / base) * 1000000) / 10000;
-        nextDiscount = String(disc);
-      } else if (targetAfterDiscount > base) {
-        const fee = Math.round(((targetAfterDiscount - base) / base) * 1000000) / 10000;
-        nextFee = String(fee);
+        nextDiscount = Math.round(((base - targetAfterDiscount) / base) * 1000000) / 10000;
       }
       setHeaderForm((f) => ({
         ...f,
-        global_discount_pct: nextDiscount,
-        global_fee_amount: nextFee,
+        global_discount_pct: String(Math.max(0, Math.min(100, nextDiscount))),
       }));
       setHeaderDirty(true);
     },
-    [totals.baseTotalProduct]
+    [totals.subtotalBeforeDiscount]
   );
 
-  /** Target subtotal = afterDiscount + installationNet (sin tax). */
+  /** Target subtotal (sin tax) == taxable base after global discount. */
   const applyTargetSubtotal = useCallback(
     (raw: string) => {
       const target = parseFloat(raw);
       if (Number.isNaN(target) || target < 0) return;
-      const installNet = totals.installationNet ?? 0;
-      const targetAfterDiscount = target - installNet;
-      setHeaderFromTargetProductNet(targetAfterDiscount);
+      setHeaderFromTargetProductNet(target);
     },
-    [totals.installationNet, setHeaderFromTargetProductNet]
+    [setHeaderFromTargetProductNet]
   );
 
-  /** Target total (con o sin ITBMS según exempt_tax) → derive subtotal then product net. */
+  /** Target total (con o sin ITBMS) -> derive taxable base using DB equation. */
   const applyTargetTotal = useCallback(
     (raw: string) => {
       const targetTotal = parseFloat(raw);
       if (Number.isNaN(targetTotal) || targetTotal < 0) return;
+      const globalFeeAmount = Number(headerForm.global_fee_amount) || 0;
+      const targetAfterFee = Math.max(targetTotal - globalFeeAmount, 0);
       const exemptTax = headerForm.exempt_tax;
       const taxPct = exemptTax ? 0 : (proposal?.tax_pct ?? 0.07);
-      const targetSub = targetTotal / (1 + taxPct);
-      const installNet = totals.installationNet ?? 0;
-      const targetAfterDiscount = targetSub - installNet;
-      setHeaderFromTargetProductNet(targetAfterDiscount);
+      const targetSub = targetAfterFee / (1 + taxPct);
+      setHeaderFromTargetProductNet(targetSub);
     },
-    [headerForm.exempt_tax, proposal?.tax_pct, totals.installationNet, setHeaderFromTargetProductNet]
+    [headerForm.exempt_tax, headerForm.global_fee_amount, proposal?.tax_pct, setHeaderFromTargetProductNet]
   );
 
   const customLinesInvalid = useMemo(() => {
@@ -1862,12 +1844,11 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                   />
                 </div>
                 <div>
-                  <Label className="block min-h-[2.5rem] leading-5">Global Fee %</Label>
+                  <Label className="block min-h-[2.5rem] leading-5">Global Fee</Label>
                   <Input
                     type="number"
                     step="0.01"
                     min="0"
-                    max="100"
                     placeholder="0"
                     value={headerForm.global_fee_amount}
                     onChange={(e) => { setHeaderForm((f) => ({ ...f, global_fee_amount: e.target.value })); setHeaderDirty(true); }}
@@ -1950,6 +1931,18 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                       </div>
                     )}
                   </>
+                )}
+                {(totals.otherAddonsTotal ?? 0) > 0 && (
+                  <div className="flex justify-between py-1 text-sm">
+                    <span className="text-gray-600">Other add-ons</span>
+                    <span className="tabular-nums">{formatCurrency(totals.otherAddonsTotal ?? 0, currency)}</span>
+                  </div>
+                )}
+                {(totals.globalFeeAmount ?? 0) > 0 && (
+                  <div className="flex justify-between py-1 text-sm">
+                    <span className="text-gray-600">Global fee</span>
+                    <span className="tabular-nums">{formatCurrency(totals.globalFeeAmount ?? 0, currency)}</span>
+                  </div>
                 )}
                 <div
                   className="flex justify-between py-1 text-sm cursor-pointer group"
@@ -2629,7 +2622,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                                 <div>
                                   <Label className="text-xs">Adjusted Price</Label>
                                   <Input
-                                    key={`adj-${line.id}-${line.line_adjustment_pct ?? 0}-${totals.globalFeePct ?? 0}`}
+                                    key={`adj-${line.id}-${line.line_adjustment_pct ?? 0}`}
                                     type="number"
                                     step="0.01"
                                     min="0"
@@ -2638,9 +2631,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                                     onBlur={(e) => {
                                       const target = parseFloat(e.target.value);
                                       if (Number.isNaN(target) || target < 0 || baseAmount <= 0) return;
-                                      const fMul = 1 + ((totals.globalFeePct ?? 0) / 100);
-                                      const rawTarget = fMul > 0 ? target / fMul : target;
-                                      const pct = Math.round(((rawTarget / baseAmount) - 1) * 1000000) / 10000;
+                                      const pct = Math.round(((target / baseAmount) - 1) * 1000000) / 10000;
                                       updateLineAdjustment(line.id, Math.max(-100, Math.min(100, pct)));
                                     }}
                                     disabled={contentReadOnly}
