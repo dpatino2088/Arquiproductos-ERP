@@ -55,7 +55,7 @@ interface DemandRow {
 interface CreatedPO {
   id: string;
   po_number: string;
-  manufacturer_name: string | null;
+  manufacturer_names: string[];
   vendor_name: string | null;
   line_count: number;
 }
@@ -85,7 +85,12 @@ export default function MaterialDemand() {
   const [showMODropdown, setShowMODropdown] = useState(false);
   const [moFilterSearch, setMoFilterSearch] = useState('');
   const [confirmPO, setConfirmPO] = useState<{
-    groups: Map<string, { manufacturer_name: string | null; vendor_name: string | null; lineCount: number; itemNames: string[] }>;
+    groups: Map<string, {
+      manufacturer_names: string[];
+      vendor_name: string | null;
+      lineCount: number;
+      itemNames: string[];
+    }>;
     totalLines: number;
     totalPOs: number;
   } | null>(null);
@@ -535,6 +540,10 @@ export default function MaterialDemand() {
     const selected = allRows.filter(r => selectedRows.has(rowKey(r)));
     const withNeedToBuy = selected.filter(r => r.need_to_buy > 0);
 
+    // Group by vendor_id so that two manufacturers sharing a vendor consolidate
+    // into ONE PO. Items without vendor get their OWN PO each (keyed by item id),
+    // never bundled together — they would otherwise inherit a wrong vendor from
+    // an arbitrary first row.
     const groups = new Map<string, {
       manufacturer_id: string | null;
       manufacturer_name: string | null;
@@ -543,7 +552,9 @@ export default function MaterialDemand() {
       rows: DemandRow[];
     }>();
     for (const r of withNeedToBuy) {
-      const key = r.manufacturer_id ?? '__no_manufacturer__';
+      const key = r.vendor_id
+        ? `vendor:${r.vendor_id}`
+        : `novendor:${r.manufacturer_id ?? 'none'}:${r.catalog_item_id}`;
       if (!groups.has(key)) {
         groups.set(key, {
           manufacturer_id: r.manufacturer_id,
@@ -555,6 +566,9 @@ export default function MaterialDemand() {
       }
       groups.get(key)!.rows.push(r);
     }
+
+    // For grouped vendors, surface the LIST of unique manufacturers in the group
+    // so the confirmation dialog shows accurate provenance.
     return groups;
   }, [demandRows, selectedRows]);
 
@@ -572,17 +586,24 @@ export default function MaterialDemand() {
     }
 
     const groups = buildPOGroups();
-    const summary = new Map<string, { manufacturer_name: string | null; vendor_name: string | null; lineCount: number; itemNames: string[] }>();
+    const summary = new Map<string, {
+      manufacturer_names: string[];
+      vendor_name: string | null;
+      lineCount: number;
+      itemNames: string[];
+    }>();
     let totalLines = 0;
     for (const [key, group] of groups) {
       const uniqueItems = new Map<string, string>();
+      const mfrSet = new Set<string>();
       for (const r of group.rows) {
         if (r.need_to_buy > 0 && !uniqueItems.has(r.catalog_item_id)) {
           uniqueItems.set(r.catalog_item_id, r.item_name ?? r.sku ?? 'Item');
         }
+        if (r.manufacturer_name) mfrSet.add(r.manufacturer_name);
       }
       summary.set(key, {
-        manufacturer_name: group.manufacturer_name,
+        manufacturer_names: [...mfrSet],
         vendor_name: group.vendor_name,
         lineCount: uniqueItems.size,
         itemNames: [...uniqueItems.values()].slice(0, 5),
@@ -661,6 +682,12 @@ export default function MaterialDemand() {
 
       const allMoIds = [...new Set(group.rows.map(r => r.manufacturing_order_id))];
 
+      const mfrSet = new Set<string>();
+      for (const r of group.rows) {
+        if (r.manufacturer_name) mfrSet.add(r.manufacturer_name);
+      }
+      const mfrNames = [...mfrSet];
+
       try {
         const po = await createPurchaseOrder({
           warehouse_id: defaultWarehouse.id,
@@ -672,12 +699,12 @@ export default function MaterialDemand() {
         results.push({
           id: po.id,
           po_number: po.po_number ?? po.id,
-          manufacturer_name: group.manufacturer_name,
+          manufacturer_names: mfrNames,
           vendor_name: group.vendor_name,
           line_count: lines.length,
         });
       } catch (err: unknown) {
-        const label = group.manufacturer_name ?? group.vendor_name ?? 'Unknown';
+        const label = group.vendor_name ?? (mfrNames.join(', ') || 'Unknown');
         addNotification({ type: 'error', title: 'Error', message: `Failed to create PO for ${label}: ${(err as Error).message}` });
       }
     }
@@ -709,7 +736,9 @@ export default function MaterialDemand() {
 
       const noVendor = results.filter(r => !r.vendor_name);
       if (noVendor.length > 0) {
-        const names = noVendor.map(r => r.manufacturer_name ?? 'Unknown').join(', ');
+        const names = noVendor
+          .map(r => r.manufacturer_names.join(', ') || 'Unknown')
+          .join('; ');
         addNotification({
           type: 'warning',
           title: 'POs Created Without Vendor',
@@ -847,11 +876,13 @@ export default function MaterialDemand() {
               <div key={po.id} className="flex items-center justify-between text-sm">
                 <span className="text-green-900">
                   <span className="font-medium">{po.po_number}</span>
-                  <span className="text-green-700 ml-2">{po.manufacturer_name ?? 'Unknown'}</span>
                   {po.vendor_name
-                    ? <span className="text-green-600 ml-1">→ {po.vendor_name}</span>
-                    : <span className="text-amber-600 ml-1">(no vendor assigned)</span>
+                    ? <span className="text-green-700 ml-2">{po.vendor_name}</span>
+                    : <span className="text-amber-600 ml-2">⚠ No vendor assigned</span>
                   }
+                  {po.manufacturer_names.length > 0 && (
+                    <span className="text-green-600 ml-1">· {po.manufacturer_names.join(', ')}</span>
+                  )}
                   <span className="text-green-600 ml-2">({po.line_count} lines)</span>
                 </span>
                 <button
@@ -1019,13 +1050,15 @@ export default function MaterialDemand() {
               {[...confirmPO.groups.entries()].map(([key, g]) => (
                 <div key={key} className="rounded-lg border border-gray-200 p-3">
                   <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-sm font-medium text-gray-900">{g.manufacturer_name ?? 'Unknown Manufacturer'}</span>
+                    <span className={`text-sm font-medium ${g.vendor_name ? 'text-gray-900' : 'text-amber-700'}`}>
+                      {g.vendor_name ?? '⚠ No vendor assigned'}
+                    </span>
                     <span className="text-xs text-gray-500">{g.lineCount} item{g.lineCount > 1 ? 's' : ''}</span>
                   </div>
-                  {g.vendor_name ? (
-                    <div className="text-xs text-gray-500 mb-1.5">Vendor: {g.vendor_name}</div>
-                  ) : (
-                    <div className="text-xs text-amber-600 mb-1.5">⚠ No vendor assigned</div>
+                  {g.manufacturer_names.length > 0 && (
+                    <div className="text-xs text-gray-500 mb-1.5">
+                      Manufacturer{g.manufacturer_names.length > 1 ? 's' : ''}: {g.manufacturer_names.join(', ')}
+                    </div>
                   )}
                   <div className="text-xs text-gray-400">
                     {g.itemNames.join(', ')}

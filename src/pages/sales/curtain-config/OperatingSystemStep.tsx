@@ -584,9 +584,44 @@ export default function OperatingSystemStep({
     && !!tubeItemId
     && !!templatesAfterTube
     && templatesAfterTube.length > 1
-    && bracketTieBreakerOptions.length > 0;
+    && bracketTieBreakerOptions.length > 1;
 
   const loading = loadingMotor || loadingDrive || loadingTube || loadingBracket;
+
+  // Auto-pick bracket only when it is truly a tie-breaker and there is a single possible option.
+  useEffect(() => {
+    if (isDrapery) return;
+    if (selectionDisabled) return;
+    if (!tubeItemId) return;
+    if (!templatesAfterTube || templatesAfterTube.length <= 1) return;
+    if (loadingBracket) return;
+    if (bracketTieBreakerOptions.length !== 1) return;
+
+    const onlyOption = bracketTieBreakerOptions[0];
+    if (!onlyOption) return;
+    if (bracketItemId === onlyOption.id) return;
+
+    let finalTemplates = templatesAfterTube;
+    if (onlyOption.templateIds && onlyOption.templateIds.length > 0) {
+      const set = new Set(onlyOption.templateIds);
+      finalTemplates = templatesAfterTube.filter((tid) => set.has(tid));
+    }
+
+    onUpdate({
+      bracket_item_id: onlyOption.id,
+      bracket_sku: onlyOption.sku,
+      _hardware_filtered_templates: uniq(finalTemplates as any) ?? uniq(templatesAfterTube as any) ?? null,
+    } as any);
+  }, [
+    isDrapery,
+    selectionDisabled,
+    tubeItemId,
+    templatesAfterTube,
+    loadingBracket,
+    bracketTieBreakerOptions,
+    bracketItemId,
+    onUpdate,
+  ]);
 
   // UX: show full options before selection; once selected, collapse to selected card.
   // If selected id is stale/not present in current compatible options, show full list.

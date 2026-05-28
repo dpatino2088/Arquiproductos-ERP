@@ -41,6 +41,7 @@ export interface BOMComponent {
   cut_axis?: string | null; // Cut axis: none, width, height, length
   cut_delta_mm?: number | null; // Cut delta in mm
   cut_delta_scope?: string | null; // Cut delta scope: per_side, per_item
+  placement_section?: 'cuttable' | 'drive' | 'passive' | 'shared' | 'consumable' | null; // Parent-side section for cut deductions
   // Engineering v1.5 metadata (future-proof for dynamic delta resolution)
   engineering_delta_source?: 'fixed' | 'derived' | null;
   engineering_attr_key?: string | null;

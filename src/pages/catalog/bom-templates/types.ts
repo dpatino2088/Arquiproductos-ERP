@@ -38,6 +38,7 @@ export interface BOMComponentDraft {
   condition_key?: string | null;
   condition_value?: string | null;
   component_mode?: string;
+  placement_section?: 'cuttable' | 'drive' | 'passive' | 'shared' | 'consumable' | null;
   catalog_item?: {
     id: string;
     sku: string;
@@ -63,6 +64,7 @@ export interface ComponentFormData {
   per_panel: boolean;
   condition_key: string;
   condition_value: string;
+  placement_section: 'cuttable' | 'drive' | 'passive' | 'shared' | 'consumable';
 }
 
 export interface ChildFormData {
@@ -105,6 +107,7 @@ export interface ComponentGroupedByCategory {
 export const CONDITION_KEY_OPTIONS = [
   { value: '', label: '-- None --' },
   { value: 'system_size', label: 'System Size (glider spacing)' },
+  { value: 'drive_side', label: 'Drive Side (left/right)' },
   { value: 'gear_ratio', label: 'Gear Ratio (clutch type)' },
   { value: 'motor_item_id', label: 'Motor (configurator selection)' },
 ] as const;
@@ -115,6 +118,10 @@ export const CONDITION_VALUE_OPTIONS: Record<string, { value: string; label: str
     { value: '54mm', label: '54mm' },
     { value: '60mm', label: '60mm' },
     { value: '80mm', label: '80mm' },
+  ],
+  drive_side: [
+    { value: 'left', label: 'Left' },
+    { value: 'right', label: 'Right' },
   ],
   gear_ratio: [
     { value: 'standard', label: 'Standard (1:1)' },
@@ -136,6 +143,7 @@ export const INITIAL_FORM_DATA: ComponentFormData = {
   per_panel: false,
   condition_key: '',
   condition_value: '',
+  placement_section: 'shared',
 };
 
 export const INITIAL_CHILD_FORM_DATA: ChildFormData = {

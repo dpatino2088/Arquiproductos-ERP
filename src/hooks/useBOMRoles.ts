@@ -223,22 +223,26 @@ export function useBOMRoles() {
 
   const createRole = useCallback(
     async (roleCode: string, label: string, roleType: RoleType = 'both') => {
+      if (!activeOrganizationId) throw new Error('No organization');
       const code = roleCode.toLowerCase().trim().replace(/\s+/g, '_');
       if (!code) throw new Error('Role code cannot be empty');
       if (!/^[a-z0-9_]+$/.test(code)) throw new Error('Role code must be lowercase letters, numbers and underscores only');
       const trimLabel = label.trim();
       if (!trimLabel) throw new Error('Label cannot be empty');
       const { data, error: err } = await supabase
-        .from('CatalogItemRoles')
-        .insert({ role_code: code, label: trimLabel, role_type: roleType, active: true, sort_order: 0, role_name: trimLabel })
-        .select('role_code, label, description, role_type, active, sort_order')
-        .single();
+        .rpc('create_catalog_item_role', {
+          p_org_id: activeOrganizationId,
+          p_role_code: code,
+          p_label: trimLabel,
+          p_role_type: roleType,
+        });
       if (err) throw new Error(err.message);
+      const created = Array.isArray(data) ? data[0] : data;
       invalidateRolesCache();
-      if (data) setRoles(prev => [...prev, data as CatalogRole].sort((a, b) => a.sort_order - b.sort_order || a.label.localeCompare(b.label)));
-      return data as CatalogRole;
+      if (created) setRoles(prev => [...prev, created as CatalogRole].sort((a, b) => a.sort_order - b.sort_order || a.label.localeCompare(b.label)));
+      return created as CatalogRole;
     },
-    [],
+    [activeOrganizationId],
   );
 
   const countRoleUsage = useCallback(async (roleCode: string) => {

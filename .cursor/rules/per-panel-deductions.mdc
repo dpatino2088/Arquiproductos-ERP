@@ -32,3 +32,27 @@ Multi-panel products decompose linearly. Intermediates are **always shared** bet
 6. The breakdown must show, for each panel: base → each deduction (component, delta, position reason) → final cut.
 7. Fabric per-panel follows the same tube deduction pattern (fabric width = tube cut width for roller shades).
 8. Bottom bar per-panel: only outer panels get end_cap deductions; center panels get none.
+
+## Golden rule: unequal panel widths
+
+`config_snapshot.panels` is the source of truth. Each panel carries its own `width_mm`.
+**Never** divide the total by N as a shortcut. If the declared total is 3700mm with
+panels `[1000, 1200, 1500]`, the cuts are:
+
+- **Panel 1 (1000mm)**: `1000 − (left-edge deductions) − ½ intermediate(1↔2)`
+- **Panel 2 (1200mm)**: `1200 − ½ intermediate(1↔2) − ½ intermediate(2↔3)`
+- **Panel 3 (1500mm)**: `1500 − ½ intermediate(2↔3) − (right-edge deductions)`
+
+Invariant: `SUM(panel_cuts[i].cut_mm) === resolved_mm` for every cuttable.
+
+## Chained `depends_on_role` in multi-panel
+
+When a cuttable B has `depends_on_role = A`:
+
+- Resolve A panel by panel first, storing `panel_cuts_by_role[A][i] = cut_mm_i`.
+- For B: `base_per_panel[i] = panel_cuts_by_role[A][i]` (NOT `resolved_mm(A)/N`).
+- Apply B's own deductions to each panel based on its position (left edge / center / right edge).
+
+This applies to every chain: `fabric depends_on tube`, `bottom_bar depends_on tube`,
+`bottom_channel depends_on bottom_bar`, etc. The whole dependency tree resolves
+panel-by-panel so unequal panel widths flow correctly through every layer.

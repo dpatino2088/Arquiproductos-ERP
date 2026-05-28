@@ -17,6 +17,7 @@ import { BOM_QTY_TYPES, CONDITION_KEY_OPTIONS, CONDITION_VALUE_OPTIONS, getCasca
 import { useBOMTemplateForm } from './useBOMTemplateForm';
 import BOMChildrenModal from './BOMChildrenModal';
 import BOMEngineeringPopup from './BOMEngineeringPopup';
+import CutBreakdownPanel from './CutBreakdownPanel';
 import type { BOMComponentDraft } from './types';
 import { supabase } from '../../../lib/supabase/client';
 import { useOrganizationContext } from '../../../context/OrganizationContext';
@@ -67,10 +68,27 @@ export default function BOMTemplateModal({
   const autocompleteRef = useRef<HTMLDivElement>(null);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [showCutBreakdown, setShowCutBreakdown] = useState(false);
+  const [previewDriveSideOverride, setPreviewDriveSideOverride] = useState<'left' | 'right'>('right');
+  const [previewPanelCount, setPreviewPanelCount] = useState<number>(1);
+  const [previewMotorItemId, setPreviewMotorItemId] = useState<string>('');
   const [codeManuallyEdited, setCodeManuallyEdited] = useState(() => !!editingTemplateId);
 
   const selectedPt = form.productTypes.find((pt: any) => pt.id === form.productTypeId);
   const isDrapery = !!(selectedPt && (selectedPt.code === 'drapery' || selectedPt.name?.toLowerCase().includes('drapery')));
+  // Headbox / cassette presence and obligatoriness in the BOM
+  // - none      → no headbox/cassette component in BOM
+  // - optional  → present but `is_required = false` (Roller-only case)
+  // - required  → present and `is_required != false` (Dual / Triple, or Roller w/ required HB)
+  const headboxComponent = form.displayComponents.find((c) => {
+    const role = normalizeRole(c.component_role || '');
+    return role === 'headbox' || role === 'cassette';
+  });
+  const hasRequiredHeadbox = !!headboxComponent && headboxComponent.is_required !== false;
+  const cutDiagramHeadboxMode: 'none' | 'optional' | 'required' = !headboxComponent
+    ? 'none'
+    : headboxComponent.is_required === false
+      ? 'optional'
+      : 'required';
   // Drapery templates no longer use system_size at the template level.
   // Glider size is handled via condition_key/condition_value on BOMComponents.
   const needsSystemSize = false;
@@ -104,13 +122,9 @@ export default function BOMTemplateModal({
     }
     // Only append HB when a TOP-LEVEL headbox/cassette is required.
     // Avoids false positives from child rows or legacy/un-normalized role strings.
-    const hasRequiredHeadbox = form.displayComponents.some((c) => {
-      const role = normalizeRole(c.component_role || '');
-      return (role === 'headbox' || role === 'cassette') && c.is_required !== false;
-    });
     if (hasRequiredHeadbox) parts.push('HB');
     return parts.join('_') || '';
-  }, [selectedPt, isDrapery, form.templateProductLine, form.templateOpeningDirection, form.templateDriveType, form.templateHardwareColor, form.templateDriveSide, form.templateInstallationLocation, form.templateManufacturer, form.templateSystemSize, form.displayComponents]);
+  }, [selectedPt, isDrapery, form.templateProductLine, form.templateOpeningDirection, form.templateDriveType, form.templateHardwareColor, form.templateDriveSide, form.templateInstallationLocation, form.templateManufacturer, form.templateSystemSize, hasRequiredHeadbox]);
 
   useEffect(() => {
     if (!codeManuallyEdited && autoCode) {
@@ -123,31 +137,113 @@ export default function BOMTemplateModal({
   const { activeOrganizationId } = useOrganizationContext();
   const [cutBreakdown, setCutBreakdown] = useState<any[]>([]);
   const [cutBreakdownLoading, setCutBreakdownLoading] = useState(false);
+  const [cutBreakdownError, setCutBreakdownError] = useState<string | null>(null);
 
-  const loadCutBreakdown = useCallback(async (templateId: string | null) => {
+  // List of motor variants declared on this template (condition_key = 'motor_item_id').
+  // Used both to default-select a motor for the preview and to render the selector below.
+  const motorVariants = React.useMemo(() => {
+    const seen = new Set<string>();
+    const out: { value: string; label: string }[] = [];
+    for (const c of form.components) {
+      if (c.parent_component_id) continue;
+      if (c.condition_key !== 'motor_item_id') continue;
+      const v = (c.condition_value || '').trim();
+      if (!v || seen.has(v)) continue;
+      seen.add(v);
+      const ci = c.catalog_item as any;
+      const label = ci?.name ? `${ci.name} (${ci.sku || v})` : (ci?.sku || v);
+      out.push({ value: v, label });
+    }
+    return out;
+  }, [form.components]);
+
+  const loadCutBreakdown = useCallback(async (
+    templateId: string | null,
+    panelCountOverride?: number,
+    motorOverride?: string,
+  ) => {
     if (!templateId || !activeOrganizationId) {
       setCutBreakdown([]);
+      setCutBreakdownError(null);
       return;
     }
     setCutBreakdownLoading(true);
+    setCutBreakdownError(null);
     try {
-      const { data, error } = await supabase.rpc('compute_template_cut_breakdown', {
+      const panelCount = Math.max(1, Number(panelCountOverride ?? previewPanelCount ?? 1));
+      const mockPanels = Array.from({ length: panelCount }, () => ({
+        width_mm: 1000 / panelCount,
+      }));
+      const motorItemId = motorOverride !== undefined ? motorOverride : previewMotorItemId;
+      const previewConfig: Record<string, unknown> = {
+        drive_side: form.templateDriveSide,
+        opening_direction: form.templateOpeningDirection === 'all' ? null : form.templateOpeningDirection,
+        panels: mockPanels,
+      };
+      if (motorItemId) previewConfig.motor_item_id = motorItemId;
+      let { data, error } = await supabase.rpc('compute_template_cut_breakdown_preview', {
         p_bom_template_id: templateId,
         p_org_id: activeOrganizationId,
+        p_config_snapshot: previewConfig,
+        p_width_mm: 1000,
+        p_height_mm: 1000,
+        p_panel_count: panelCount,
       });
+      if (error) {
+        const fallback = await supabase.rpc('compute_template_cut_breakdown', {
+          p_bom_template_id: templateId,
+          p_org_id: activeOrganizationId,
+        });
+        data = fallback.data;
+        error = fallback.error;
+      }
       if (error) throw error;
       setCutBreakdown(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Error loading cut breakdown:', err);
       setCutBreakdown([]);
+      const message = err instanceof Error ? err.message : 'Unable to load cut breakdown preview.';
+      setCutBreakdownError(message);
     } finally {
       setCutBreakdownLoading(false);
     }
-  }, [activeOrganizationId]);
+  }, [activeOrganizationId, form.templateDriveSide, form.templateOpeningDirection, previewPanelCount, previewMotorItemId]);
 
   useEffect(() => {
     loadCutBreakdown(editingTemplateId);
   }, [editingTemplateId, loadCutBreakdown]);
+
+  // Sync the preview panel count to the template's minimum once the form loads it.
+  useEffect(() => {
+    const min = Math.max(1, Number(form.templatePanelCount || 1));
+    setPreviewPanelCount((cur) => (cur === min ? cur : min));
+  }, [form.templatePanelCount]);
+
+  // Default-select the first motor variant so motor + drive deductions show up in preview.
+  useEffect(() => {
+    if (!motorVariants.length) {
+      if (previewMotorItemId) setPreviewMotorItemId('');
+      return;
+    }
+    if (!previewMotorItemId || !motorVariants.some(m => m.value === previewMotorItemId)) {
+      setPreviewMotorItemId(motorVariants[0].value);
+    }
+  }, [motorVariants, previewMotorItemId]);
+
+  const handlePreviewPanelCountChange = useCallback((next: number) => {
+    const clamped = Math.max(1, Math.floor(Number(next) || 1));
+    setPreviewPanelCount(clamped);
+    loadCutBreakdown(editingTemplateId, clamped);
+  }, [editingTemplateId, loadCutBreakdown]);
+
+  const handlePreviewMotorChange = useCallback((next: string) => {
+    setPreviewMotorItemId(next);
+    loadCutBreakdown(editingTemplateId, undefined, next);
+  }, [editingTemplateId, loadCutBreakdown]);
+
+  useEffect(() => {
+    setPreviewDriveSideOverride(form.templateDriveSide === 'left' ? 'left' : 'right');
+  }, [form.templateDriveSide]);
 
   const toggleExpand = useCallback((id: string) => {
     setExpandedRows(prev => {
@@ -670,7 +766,7 @@ export default function BOMTemplateModal({
                       )}
                     </div>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                       <Label>Role</Label>
                       <SelectShadcn
@@ -692,6 +788,29 @@ export default function BOMTemplateModal({
                               {opt.label}
                             </SelectItem>
                           ))}
+                        </SelectContent>
+                      </SelectShadcn>
+                    </div>
+                    <div>
+                      <Label>Section</Label>
+                      <SelectShadcn
+                        value={form.formData.placement_section || 'shared'}
+                        onValueChange={(v) =>
+                          form.setFormData((prev) => ({
+                            ...prev,
+                            placement_section: v as any,
+                          }))
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select section" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="cuttable">Cuttable</SelectItem>
+                          <SelectItem value="drive">Drive</SelectItem>
+                          <SelectItem value="passive">Passive</SelectItem>
+                          <SelectItem value="shared">Shared</SelectItem>
+                          <SelectItem value="consumable">Consumable</SelectItem>
                         </SelectContent>
                       </SelectShadcn>
                     </div>
@@ -963,6 +1082,7 @@ export default function BOMTemplateModal({
                       <th className="text-center px-2 py-2 font-medium w-[44px]">ΔX</th>
                       <th className="text-center px-2 py-2 font-medium w-[44px]">ΔY</th>
                       <th className="text-left px-3 py-2 font-medium w-[86px]">Role</th>
+                      <th className="text-left px-3 py-2 font-medium w-[70px]">Section</th>
                       <th className="text-left px-3 py-2 font-medium w-[88px]">Depends On</th>
                       <th className="text-left px-3 py-2 font-medium w-[64px]">
                         Children
@@ -983,7 +1103,7 @@ export default function BOMTemplateModal({
                           className="bg-gray-100 font-medium text-gray-700"
                         >
                           <td
-                            colSpan={13}
+                            colSpan={14}
                             className="px-3 py-1.5"
                           >
                             {group.category_name}
@@ -1090,6 +1210,11 @@ export default function BOMTemplateModal({
                                   {getCascadeLabel(comp.component_role) && (
                                     <span className="ml-1.5 text-[10px] text-gray-400">{getCascadeLabel(comp.component_role)?.split(' ')[0]}</span>
                                   )}
+                                </td>
+                                <td className="px-3 py-2">
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-medium uppercase">
+                                    {comp.placement_section || (comp.uom === 'm' || comp.uom === 'm2' ? 'cuttable' : 'shared')}
+                                  </span>
                                 </td>
                                 <td className="px-3 py-2">
                                   {comp.depends_on_role ? (
@@ -1234,6 +1359,7 @@ export default function BOMTemplateModal({
                                         {getRoleLabel(child.component_role)}
                                       </td>
                                       <td className="px-3 py-1.5 text-gray-300">—</td>
+                                      <td className="px-3 py-1.5 text-gray-300">—</td>
                                       <td className="px-3 py-1.5" />
                                       <td className="px-3 py-1.5" />
                                       <td className="px-3 py-1.5 text-xs text-gray-300">
@@ -1255,11 +1381,10 @@ export default function BOMTemplateModal({
                 </table>
               </div>
             </div>
-          </div>
 
-          {/* Cut Breakdown (DB-driven) */}
-          {(cutBreakdown.length > 0 || cutBreakdownLoading) && (
-            <div className="mx-6 mb-3">
+          {/* Cut Breakdown (DB-driven) — kept inside scrollable body so it never blocks navigation */}
+          {editingTemplateId && (
+            <div className="mt-2">
               <button
                 type="button"
                 onClick={() => setShowCutBreakdown(prev => !prev)}
@@ -1271,138 +1396,78 @@ export default function BOMTemplateModal({
                   ? <ChevronDown className="h-3 w-3" />
                   : <ChevronRight className="h-3 w-3" />}
                 <span className="text-gray-300 font-normal">
-                  {cutBreakdownLoading ? '…' : `(${cutBreakdown.length} cuttable${cutBreakdown.length !== 1 ? 's' : ''})`}
+                  {cutBreakdownLoading
+                    ? '(loading...)'
+                    : cutBreakdownError
+                      ? '(error)'
+                      : `(${cutBreakdown.length} cuttable${cutBreakdown.length !== 1 ? 's' : ''})`}
                 </span>
               </button>
 
               {showCutBreakdown && (
-                <div className="mt-2 space-y-1.5">
+                <div className="mt-2">
                   {cutBreakdownLoading ? (
                     <p className="text-xs text-gray-400 italic py-2">Loading breakdown…</p>
-                  ) : cutBreakdown.map((item, idx) => {
-                    const deductions: any[] = item.deductions || [];
-                    const hasDeductions = deductions.length > 0;
-                    const pcs = item.qty_value > 1 ? item.qty_value : 1;
-
-                    const fixedDeds = deductions.filter((d: any) => !d.conditional);
-                    const conditionalDeds = deductions.filter((d: any) => d.conditional);
-
-                    const condGroups = new Map<string, any[]>();
-                    for (const d of conditionalDeds) {
-                      const key = `${d.condition_key}=${d.condition_value}`;
-                      if (!condGroups.has(key)) condGroups.set(key, []);
-                      condGroups.get(key)!.push(d);
-                    }
-
-                    const fixedTotal = fixedDeds.reduce((s: number, d: any) => s + d.total, 0);
-                    const fixedNetDeltaTotal = item.tolerance - fixedTotal;
-                    const fixedNetDelta = pcs > 1 ? Math.round((fixedNetDeltaTotal / pcs) * 100) / 100 : fixedNetDeltaTotal;
-
-                    const renderDed = (d: any) => {
-                      const perPcDed = pcs > 1 ? Math.round((d.total / pcs) * 100) / 100 : d.total;
-                      return (
-                        <span key={d.sku} className="inline-flex items-center gap-0.5">
-                          <span className="text-red-500">−{perPcDed}</span>
-                          <span className="text-gray-400 text-[10px]">({d.sku})</span>
-                        </span>
-                      );
-                    };
-
-                    const axisBadge = (
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${item.axis === 'height' ? 'bg-purple-50 text-purple-500' : 'bg-blue-50 text-blue-500'}`}>
-                        {item.axis === 'height' ? '↕ Y' : '↔ X'}
-                      </span>
-                    );
-                    const pcsBadge = pcs > 1 ? (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 font-medium">×{pcs} pcs</span>
-                    ) : null;
-
-                    return (
-                      <div key={`${item.role}-${idx}`} className="rounded-md bg-gray-50 border border-gray-100 px-3 py-2 space-y-1">
-                        {/* Header: label + base + fixed deductions */}
-                        <div className="flex items-center gap-2 font-mono text-xs leading-relaxed flex-wrap">
-                          <span className="font-semibold text-gray-800">{item.label}</span>
-                          {item.sku && <span className="text-[10px] text-gray-400">{item.sku}</span>}
-                          <span className="text-gray-400">=</span>
-                          <span className="text-blue-600 font-medium">{item.base}</span>
-                          {item.tolerance !== 0 && (
-                            <span className={item.tolerance > 0 ? 'text-green-600' : 'text-orange-500'}>
-                              {item.tolerance > 0 ? '+' : ''}{item.tolerance}
-                            </span>
-                          )}
-                          {fixedDeds.map(renderDed)}
-                          {condGroups.size === 0 && (
-                            <>
-                              <span className="text-gray-400">=</span>
-                              <span className="font-semibold text-gray-900">
-                                {item.base} {fixedNetDelta >= 0 ? '+' : ''}{fixedNetDelta} mm
-                              </span>
-                              {axisBadge}
-                              {pcsBadge}
-                            </>
-                          )}
-                          {condGroups.size > 0 && fixedDeds.length > 0 && (
-                            <>
-                              <span className="text-gray-400">=</span>
-                              <span className="text-gray-600">
-                                {item.base} {fixedNetDelta >= 0 ? '+' : ''}{fixedNetDelta} mm
-                              </span>
-                              {axisBadge}
-                              {pcsBadge}
-                            </>
-                          )}
-                          {condGroups.size > 0 && fixedDeds.length === 0 && (
-                            <>
-                              {axisBadge}
-                              {pcsBadge}
-                            </>
-                          )}
-                        </div>
-
-                        {/* Conditional option rows — multi_panel first, then optional, then others */}
-                        {Array.from(condGroups.entries())
-                        .sort(([a], [b]) => {
-                          const rank = (k: string) => k === 'optional=true' ? 1 : k === 'multi_panel=true' ? 3 : 2;
-                          return rank(a) - rank(b);
-                        })
-                        .map(([condLabel, deds]) => {
-                          const condTotalRaw = deds.reduce((s: number, d: any) => s + d.total, 0);
-                          const condPerPc = pcs > 1 ? Math.round((condTotalRaw / pcs) * 100) / 100 : condTotalRaw;
-                          const isOptional = condLabel === 'optional=true';
-                          const isMultiPanel = condLabel === 'multi_panel=true';
-                          const badgeLabel = isOptional ? 'Optional' : isMultiPanel ? 'Multi-panel' : condLabel;
-                          const badgeColor = isOptional
-                            ? 'bg-teal-50 text-teal-600'
-                            : isMultiPanel
-                              ? 'bg-violet-50 text-violet-600'
-                              : 'bg-amber-50 text-amber-600';
-                          const borderColor = isOptional
-                            ? 'border-teal-200'
-                            : isMultiPanel
-                              ? 'border-violet-200'
-                              : 'border-amber-200';
-                          return (
-                            <div key={condLabel} className={`flex items-center gap-2 font-mono text-[11px] leading-relaxed flex-wrap pl-3 border-l-2 ${borderColor}`}>
-                              <span className={`text-[9px] px-1 py-px rounded font-sans font-medium shrink-0 ${badgeColor}`}>{badgeLabel}</span>
-                              {deds.map(renderDed)}
-                              <span className="text-gray-400">=</span>
-                              <span className="font-semibold text-gray-700">
-                                {condPerPc > 0 ? '−' : '+'}{Math.abs(condPerPc)} mm
-                              </span>
-                            </div>
-                          );
-                        })}
-
-                        {!hasDeductions && (
-                          <p className="text-[10px] text-gray-300 italic">No deductions configured</p>
+                  ) : cutBreakdownError ? (
+                    <p className="text-xs text-red-500 py-2">
+                      Could not load breakdown: {cutBreakdownError}
+                    </p>
+                  ) : cutBreakdown.length === 0 ? (
+                    <p className="text-xs text-gray-400 italic py-2">
+                      No breakdown rows returned for this template.
+                    </p>
+                  ) : (
+                    <>
+                      <div className="mb-2 flex items-center justify-end gap-3 flex-wrap">
+                        {motorVariants.length > 0 && (
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] text-gray-500">Motor preview</span>
+                            <SelectShadcn
+                              value={previewMotorItemId || motorVariants[0].value}
+                              onValueChange={handlePreviewMotorChange}
+                            >
+                              <SelectTrigger className="h-7 w-[220px] text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {motorVariants.map(m => (
+                                  <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </SelectShadcn>
+                          </div>
                         )}
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] text-gray-500">Drive preview</span>
+                          <SelectShadcn
+                            value={previewDriveSideOverride}
+                            onValueChange={(v) => setPreviewDriveSideOverride(v as 'left' | 'right')}
+                          >
+                            <SelectTrigger className="h-7 w-[185px] text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="right">Option A · Motor Right</SelectItem>
+                              <SelectItem value="left">Option B · Motor Left</SelectItem>
+                            </SelectContent>
+                          </SelectShadcn>
+                        </div>
                       </div>
-                    );
-                  })}
+                    <CutBreakdownPanel
+                      components={form.components}
+                      previewBreakdown={cutBreakdown}
+                      previewDriveSide={previewDriveSideOverride}
+                      previewPanelCount={previewPanelCount}
+                      onPreviewPanelCountChange={handlePreviewPanelCountChange}
+                      headboxMode={cutDiagramHeadboxMode}
+                    />
+                    </>
+                  )}
                 </div>
               )}
             </div>
           )}
+          </div>
 
           {/* Footer */}
           <div className="flex justify-end gap-2 px-6 py-4 border-t border-gray-200 shrink-0">

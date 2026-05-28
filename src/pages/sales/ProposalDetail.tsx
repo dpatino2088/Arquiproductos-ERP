@@ -244,6 +244,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
   addonDraftRef.current = addonDraft;
 
   const [saving, setSaving] = useState(false);
+  const saveInFlightRef = useRef(false);
   const [headerDirty, setHeaderDirty] = useState(false);
   const [printDropdownOpen, setPrintDropdownOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
@@ -571,9 +572,11 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
 
   const handleSave = useCallback(async () => {
     if (!proposal || !canWrite) return;
+    if (saveInFlightRef.current) return;
     if (!headerDirty && !linesDirty && !addonsDirty && removedCustomLineIds.length === 0) {
       return;
     }
+    saveInFlightRef.current = true;
     setSaving(true);
     try {
       let ok = true;
@@ -742,6 +745,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
         useUIStore.getState().addNotification({ type: 'success', title: 'Saved', message: 'Proposal saved.' });
       }
     } finally {
+      saveInFlightRef.current = false;
       setSaving(false);
     }
   }, [proposal, canWrite, headerDirty, linesDirty, addonsDirty, removedCustomLineIds, draftLines, draftAddonsMap, addonsMap, saveHeader, refetch, setCanWrite, headerForm.status, authUser, refetchTimeline]);
@@ -2266,7 +2270,11 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                               {(() => {
                                 const driveRaw = snap?.drive_type ?? qlInfo?.drive_type ?? null;
                                 const driveLabel = (snap?.drive_system_label ?? qlInfo?.drive_system_label)
-                                  ?? (driveRaw === 'motor' ? 'Motorized' : driveRaw === 'manual' ? 'Manual' : null);
+                                  ?? (driveRaw === 'motor' || driveRaw === 'motorized'
+                                      ? 'Motorized'
+                                      : driveRaw === 'manual'
+                                        ? 'Manual'
+                                        : null);
                                 return driveLabel ? (
                                   <span className="text-xs text-gray-500">{driveLabel}</span>
                                 ) : null;

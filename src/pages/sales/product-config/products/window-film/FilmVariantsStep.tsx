@@ -26,6 +26,7 @@ interface FilmRow {
 
 interface MsrpInfo {
   dealer_price: number;
+  pricing_uom: string | null;
 }
 
 const INCHES_TO_M = 0.0254;
@@ -104,10 +105,14 @@ export default function FilmVariantsStep({ config, onUpdate }: FilmVariantsStepP
       if (ids.length > 0) {
         const { data: msrpRows } = await supabase
           .from('CatalogItemsMSRP')
-          .select('catalog_item_id, dealer_price')
+          .select('catalog_item_id, dealer_price, pricing_uom')
+          .eq('organization_id', activeOrganizationId)
           .in('catalog_item_id', ids);
         if (msrpRows) {
-          msrp = new Map(msrpRows.map((r: any) => [r.catalog_item_id, { dealer_price: Number(r.dealer_price) }]));
+          msrp = new Map(msrpRows.map((r: any) => [r.catalog_item_id, {
+            dealer_price: Number(r.dealer_price) || 0,
+            pricing_uom: r.pricing_uom ? String(r.pricing_uom).toLowerCase() : null,
+          }]));
         }
       }
 
@@ -211,10 +216,17 @@ export default function FilmVariantsStep({ config, onUpdate }: FilmVariantsStepP
       i => i.collection_name === selectedCollection && i.variant_name === variantName
     );
     if (match) {
-      const dealerPerM2 = msrpMap.get(match.id)?.dealer_price ?? 0;
+      const msrpInfo = msrpMap.get(match.id);
+      const dealerRate = msrpInfo?.dealer_price ?? 0;
+      const pricingUom = msrpInfo?.pricing_uom ?? 'm';
+      const dealerPerLinearM = pricingUom === 'm2'
+        ? dealerRate * match.roll_width_m
+        : dealerRate;
+      const dealerPerM2 = match.roll_width_m > 0
+        ? dealerPerLinearM / match.roll_width_m
+        : 0;
       const rollArea = match.roll_width_m * match.roll_length_m;
-      const dealerPerLinearM = dealerPerM2 * match.roll_width_m;
-      const rollDealerTotal = dealerPerM2 * rollArea;
+      const rollDealerTotal = dealerPerLinearM * match.roll_length_m;
       const unitArea = sellMode === 'roll'
         ? rollArea
         : match.roll_width_m * linearLength;
@@ -231,6 +243,7 @@ export default function FilmVariantsStep({ config, onUpdate }: FilmVariantsStepP
         roll_width_m: match.roll_width_m,
         roll_length_m: match.roll_length_m,
         roll_area_m2: rollArea,
+        pricing_uom: 'm',
         dealer_per_m2: dealerPerM2,
         dealer_per_linear_m: dealerPerLinearM,
         roll_dealer_total: rollDealerTotal,
@@ -278,10 +291,16 @@ export default function FilmVariantsStep({ config, onUpdate }: FilmVariantsStepP
 
   const computedTotal = useMemo(() => {
     if (!selectedItem) return 0;
-    const dealerPerM2 = msrpMap.get(selectedItem.id)?.dealer_price ?? 0;
-    const rollArea = selectedItem.roll_width_m * selectedItem.roll_length_m;
-    if (sellMode === 'roll') return dealerPerM2 * rollArea * qty;
-    return dealerPerM2 * selectedItem.roll_width_m * linearLength * qty;
+    const msrpInfo = msrpMap.get(selectedItem.id);
+    const dealerRate = msrpInfo?.dealer_price ?? 0;
+    const pricingUom = msrpInfo?.pricing_uom ?? 'm';
+    const dealerPerLinearM = pricingUom === 'm2'
+      ? dealerRate * selectedItem.roll_width_m
+      : dealerRate;
+    const unitPrice = sellMode === 'roll'
+      ? dealerPerLinearM * selectedItem.roll_length_m
+      : dealerPerLinearM * linearLength;
+    return unitPrice * qty;
   }, [selectedItem, msrpMap, sellMode, qty, linearLength]);
 
   return (

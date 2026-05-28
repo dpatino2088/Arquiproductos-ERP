@@ -22,6 +22,22 @@ import {
   getDefaultDependsOn,
 } from './types';
 
+type PlacementSection = 'cuttable' | 'drive' | 'passive' | 'shared' | 'consumable';
+
+function inferPlacementSection(
+  role: string | null | undefined,
+  isCuttable: boolean,
+): PlacementSection {
+  const r = normalizeRole(role || '') || '';
+  // Role-based "consumable" wins over measure_basis = linear/area, because
+  // tapes / glues / fasteners can ship by length but are NOT cut deductors.
+  if (['consumable', 'tape', 'fastener', 'screw_cap', 'glue', 'adhesive'].includes(r)) return 'consumable';
+  if (isCuttable) return 'cuttable';
+  if (['drive', 'motor', 'chain', 'chain_stop', 'chain_tensioner', 'wand'].includes(r)) return 'drive';
+  if (['idler', 'end_plug', 'bearing', 'adapter'].includes(r)) return 'passive';
+  return 'shared';
+}
+
 export function useBOMTemplateForm(editingTemplateId: string | null) {
   const { activeOrganizationId } = useOrganizationContext();
   const { productTypes } = useProductTypes();
@@ -109,28 +125,53 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
     if (!displayComponents.length) return [];
 
     const cuttable: BOMComponentDraft[] = [];
-    const units: BOMComponentDraft[] = [];
+    const drive: BOMComponentDraft[] = [];
+    const passive: BOMComponentDraft[] = [];
+    const shared: BOMComponentDraft[] = [];
+    const consumable: BOMComponentDraft[] = [];
     displayComponents.forEach(c => {
       const order = getCascadeOrder(c.component_role);
       const item = catalogItems.find(i => i.id === c.component_item_id) || c.catalog_item;
       const mb = (item as any)?.measure_basis;
       const isCuttable = mb === 'linear' || mb === 'area' || c.uom === 'm' || c.uom === 'm2';
-      if (isCuttable || order < 80) {
+      const placement = (c.placement_section as PlacementSection | null) || inferPlacementSection(c.component_role, isCuttable || order < 80);
+      if (placement === 'cuttable') {
         cuttable.push(c);
+      } else if (placement === 'drive') {
+        drive.push(c);
+      } else if (placement === 'passive') {
+        passive.push(c);
+      } else if (placement === 'consumable') {
+        consumable.push(c);
       } else {
-        units.push(c);
+        shared.push(c);
       }
     });
 
-    cuttable.sort((a, b) => getCascadeOrder(a.component_role) - getCascadeOrder(b.component_role) || (a.sort_order || 0) - (b.sort_order || 0));
-    units.sort((a, b) => getCascadeOrder(a.component_role) - getCascadeOrder(b.component_role) || (a.sort_order || 0) - (b.sort_order || 0));
+    const sortFn = (a: BOMComponentDraft, b: BOMComponentDraft) =>
+      getCascadeOrder(a.component_role) - getCascadeOrder(b.component_role) ||
+      (a.sort_order || 0) - (b.sort_order || 0);
+    cuttable.sort(sortFn);
+    drive.sort(sortFn);
+    passive.sort(sortFn);
+    shared.sort(sortFn);
+    consumable.sort(sortFn);
 
     const groups: ComponentGroupedByCategory[] = [];
     if (cuttable.length > 0) {
-      groups.push({ category_id: '__cascade_cuttable', category_name: 'CASCADE ORDER (Cuttable)', category_code: '__cascade', components: cuttable });
+      groups.push({ category_id: '__section_cuttable', category_name: 'CUTTABLE (Base)', category_code: '__section', components: cuttable });
     }
-    if (units.length > 0) {
-      groups.push({ category_id: '__cascade_units', category_name: 'UNIT ITEMS (No Cut)', category_code: '__units', components: units });
+    if (drive.length > 0) {
+      groups.push({ category_id: '__section_drive', category_name: 'DRIVE', category_code: '__section', components: drive });
+    }
+    if (passive.length > 0) {
+      groups.push({ category_id: '__section_passive', category_name: 'PASSIVE', category_code: '__section', components: passive });
+    }
+    if (shared.length > 0) {
+      groups.push({ category_id: '__section_shared', category_name: 'SHARED', category_code: '__section', components: shared });
+    }
+    if (consumable.length > 0) {
+      groups.push({ category_id: '__section_consumable', category_name: 'CONSUMIBLES', category_code: '__section', components: consumable });
     }
     return groups;
   }, [displayComponents, catalogItems]);
@@ -151,7 +192,9 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
         || c.affects_role !== orig.affects_role
         || c.cut_axis !== orig.cut_axis
         || c.cut_delta_mm !== orig.cut_delta_mm
-        || c.delta_mode !== orig.delta_mode;
+        || c.cut_delta_scope !== orig.cut_delta_scope
+        || c.delta_mode !== orig.delta_mode
+        || c.placement_section !== orig.placement_section;
     });
   }, [components, componentsToDelete]);
 
@@ -225,7 +268,9 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
             setTemplateName(data.name || '');
             setTemplateDescription(data.description || '');
             setTemplateHardwareColor(data.hardware_color || '');
-            const pc = data.panel_count_max ?? data.panel_count_min ?? 1;
+            // Preview must default to the smallest valid panel count, not the max,
+            // otherwise per-joint deductions get inflated by (max-1) in both DB and FE.
+            const pc = data.panel_count_min ?? 1;
             setTemplatePanelCount(Math.max(1, Number(pc) || 1));
             setTemplateDriveType(data.drive_type || null);
             setTemplateDriveSide(data.drive_side === 'left' ? 'left' : data.drive_side === 'right' ? 'right' : data.drive_type ? 'both' : null);
@@ -276,6 +321,8 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
       const syncedUom = isFabric
         ? 'm'
         : canonicalUom(catItem?.unit_of_measure || catItem?.uom || comp.uom, catItem?.measure_basis);
+      const mb = (catItem as any)?.measure_basis;
+      const isCuttable = mb === 'linear' || mb === 'area' || syncedUom === 'm' || syncedUom === 'm2';
       return {
         id: comp.id,
         parent_component_id: comp.parent_component_id || null,
@@ -289,6 +336,7 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
         affects_role: comp.affects_role || null,
         cut_axis: comp.cut_axis || null,
         cut_delta_mm: comp.cut_delta_mm || 0,
+        cut_delta_scope: comp.cut_delta_scope || 'per_item',
         delta_mode: comp.delta_mode || 'subtract',
         qty_spacing_mm: comp.qty_spacing_mm ?? null,
         qty_min: comp.qty_min != null ? Number(comp.qty_min) : null,
@@ -299,6 +347,7 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
         auto_select: false,
         condition_key: comp.condition_key || null,
         condition_value: comp.condition_value || null,
+        placement_section: (comp.placement_section as PlacementSection | null) || inferPlacementSection(comp.component_role, isCuttable),
         catalog_item: catItem
           ? {
               id: catItem.id,
@@ -406,7 +455,22 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
     const autoRole = normalizeRole(sel.item_role) || '';
     const isFabric = sel.is_fabric || autoRole === 'fabric';
     const catalogUom = isFabric ? 'm' : canonicalUom(sel.unit_of_measure || sel.uom, sel.measure_basis);
-    setFormData(prev => ({ ...prev, component_item_id: itemId, component_role: autoRole || prev.component_role, uom: catalogUom }));
+    // Auto-suggest placement_section so consumables (tape/glue/fastener with
+    // measure_basis = linear) don't fall into "cuttable" by default. The user
+    // can still override via the Section dropdown.
+    const isCuttableItem =
+      sel.measure_basis === 'linear' ||
+      sel.measure_basis === 'area' ||
+      catalogUom === 'm' ||
+      catalogUom === 'm2';
+    const inferredSection = inferPlacementSection(autoRole, isCuttableItem);
+    setFormData(prev => ({
+      ...prev,
+      component_item_id: itemId,
+      component_role: autoRole || prev.component_role,
+      uom: catalogUom,
+      placement_section: inferredSection,
+    }));
     setComponentSearchTerm(sel.sku || '');
     setShowComponentDropdown(false);
     setHighlightedIndex(-1);
@@ -434,6 +498,8 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
     const sel = catalogItems.find(i => i.id === formData.component_item_id);
     const finalUom = isFabric ? 'm' : canonicalUom(formData.uom || sel?.unit_of_measure || sel?.uom, sel?.measure_basis);
     const finalQty = isFabric && formData.qty_type === 'fixed' ? 'per_area' : formData.qty_type;
+    const mb = (sel as any)?.measure_basis;
+    const isCuttable = mb === 'linear' || mb === 'area' || finalUom === 'm' || finalUom === 'm2';
 
     const cascadeOrder = getCascadeOrder(role);
     const defaultDep = getDefaultDependsOn(role);
@@ -453,6 +519,7 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
       affects_role: null,
       cut_axis: null,
       cut_delta_mm: 0,
+      cut_delta_scope: 'per_item',
       qty_spacing_mm: finalQty === 'per_spacing' ? (formData.qty_spacing_mm ?? 500) : null,
       qty_min: finalQty === 'per_spacing' ? formData.qty_min : null,
       uom: finalUom,
@@ -462,6 +529,10 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
       auto_select: false,
       condition_key: formData.condition_key || null,
       condition_value: formData.condition_value || null,
+      // Respect the user's explicit Section choice. Fall back to inferred only
+      // when nothing was set on the form (paranoid safety net).
+      placement_section: (formData.placement_section as PlacementSection | null)
+        || inferPlacementSection(formData.component_role, isCuttable),
       catalog_item: sel ? { id: sel.id, sku: sel.sku, name: sel.name || sel.item_name || null } : null,
     };
     setComponents(prev => [...prev, newComp]);
@@ -484,6 +555,8 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
     const sel = catalogItems.find(i => i.id === formData.component_item_id);
     const finalUom = isFabric ? 'm' : canonicalUom(formData.uom || sel?.unit_of_measure || sel?.uom, sel?.measure_basis);
     const finalQty = isFabric && formData.qty_type === 'fixed' ? 'per_area' : formData.qty_type;
+    const mb = (sel as any)?.measure_basis;
+    const isCuttable = mb === 'linear' || mb === 'area' || finalUom === 'm' || finalUom === 'm2';
 
     setComponents(prev => prev.map(c => {
       if (c.id !== editingComponentId) return c;
@@ -501,6 +574,11 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
         per_panel: formData.per_panel ?? false,
         condition_key: formData.condition_key || null,
         condition_value: formData.condition_value || null,
+        // Respect the user's explicit Section choice on edit. Falls back to
+        // inferred / previously-saved if for some reason the form value is missing.
+        placement_section: (formData.placement_section as PlacementSection | null)
+          || (c.placement_section as PlacementSection | null)
+          || inferPlacementSection(normalized, isCuttable),
         catalog_item: sel ? { id: sel.id, sku: sel.sku, name: sel.name || sel.item_name || null } : c.catalog_item,
       };
     }));
@@ -548,6 +626,7 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
       per_panel: component.per_panel === true,
       condition_key: component.condition_key || '',
       condition_value: component.condition_value || '',
+      placement_section: (component.placement_section as PlacementSection | null) || 'shared',
     });
     setShowAddComponentForm(true);
     setSelectedCategoryFilter('');
@@ -622,6 +701,7 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
       affects_role: null,
       cut_axis: null,
       cut_delta_mm: 0,
+      cut_delta_scope: 'per_item',
       qty_spacing_mm: childQtyType === 'per_spacing' ? (childFormData.qty_spacing_mm ?? 500) : null,
       qty_min: childQtyType === 'per_spacing' ? childFormData.qty_min : null,
       uom,
@@ -631,6 +711,7 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
       auto_select: false,
       condition_key: childFormData.condition_key || null,
       condition_value: childFormData.condition_value || null,
+      placement_section: null,
       catalog_item: sel ? { id: sel.id, sku: sel.sku, name: sel.name || sel.item_name || null } : null,
     };
 
@@ -708,6 +789,7 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
         affects_role: null,
         cut_axis: null,
         cut_delta_mm: 0,
+        cut_delta_scope: 'per_item',
         qty_spacing_mm: childQtyType === 'per_spacing' ? (childFormData.qty_spacing_mm ?? 500) : null,
         qty_min: childQtyType === 'per_spacing' ? childFormData.qty_min ?? null : null,
         uom,
@@ -716,6 +798,7 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
         per_panel: childFormData.per_panel === true,
         auto_select: false,
         catalog_item: sel ? { id: sel.id, sku: sel.sku, name: sel.name || sel.item_name || null } : null,
+        placement_section: null,
       };
       if (editingChildId) {
         effectiveComponents = components.map(c => (c.id === editingChildId ? childPayload : c));
@@ -779,6 +862,7 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
           affects_role: c.affects_role || null,
           cut_axis: c.cut_axis || null,
           cut_delta_mm: c.cut_delta_mm || 0,
+          cut_delta_scope: c.cut_delta_scope || 'per_item',
           delta_mode: c.delta_mode || 'subtract',
           qty_spacing_mm: c.qty_spacing_mm ?? null,
           qty_min: c.qty_min ?? null,
@@ -788,6 +872,7 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
           per_panel: c.per_panel === true,
           condition_key: c.condition_key || null,
           condition_value: c.condition_value || null,
+          placement_section: c.parent_component_id ? null : (c.placement_section || inferPlacementSection(c.component_role, ['m', 'm2'].includes(c.uom || ''))),
           engineering_delta_source: c.engineering_delta_source || 'fixed',
           engineering_attr_key: c.engineering_attr_key || null,
           engineering_scope: c.engineering_scope || 'total',
@@ -823,7 +908,36 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
 
       const result = data as { template_id: string; id_map: Record<string, string>; components: any[] };
 
+      const parentSectionRows = effectiveComponents
+        .filter((c) => !c.parent_component_id)
+        .map((c) => ({
+          component_item_id: c.component_item_id,
+          component_role: c.component_role || '',
+          sort_order: c.sort_order || 0,
+          condition_key: c.condition_key || '',
+          condition_value: c.condition_value || '',
+          placement_section: c.placement_section || inferPlacementSection(c.component_role, ['m', 'm2'].includes(c.uom || '')),
+        }));
+
+      const { error: sectionPersistError } = await supabase.rpc('save_bom_component_placement_sections', {
+        p_organization_id: activeOrganizationId,
+        p_bom_template_id: result.template_id,
+        p_rows: parentSectionRows,
+      });
+      if (sectionPersistError) {
+        useUIStore.getState().addNotification({
+          type: 'warning',
+          title: 'Section mapping not persisted',
+          message: sectionPersistError.message || 'Could not persist parent section mapping.',
+        });
+      }
+
       if (result?.components) {
+        const sectionByParentKey = new Map<string, PlacementSection>();
+        parentSectionRows.forEach((r) => {
+          const key = `${r.component_item_id || ''}|${r.component_role}|${r.sort_order}|${r.condition_key}|${r.condition_value}`;
+          sectionByParentKey.set(key, r.placement_section as PlacementSection);
+        });
         const refreshed: BOMComponentDraft[] = result.components.map((comp: any) => ({
           id: comp.id,
           parent_component_id: comp.parent_component_id || null,
@@ -837,6 +951,7 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
           affects_role: comp.affects_role || null,
           cut_axis: comp.cut_axis || null,
           cut_delta_mm: comp.cut_delta_mm || 0,
+          cut_delta_scope: comp.cut_delta_scope || 'per_item',
           delta_mode: comp.delta_mode || 'subtract',
           qty_spacing_mm: comp.qty_spacing_mm ?? null,
           qty_min: comp.qty_min != null ? Number(comp.qty_min) : null,
@@ -847,6 +962,11 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
           auto_select: false,
           condition_key: comp.condition_key || null,
           condition_value: comp.condition_value || null,
+          placement_section: comp.parent_component_id
+            ? null
+            : ((comp.placement_section as PlacementSection | null)
+              || sectionByParentKey.get(`${comp.component_item_id || ''}|${comp.component_role || ''}|${comp.sort_order || 0}|${comp.condition_key || ''}|${comp.condition_value || ''}`)
+              || inferPlacementSection(comp.component_role, ['m', 'm2'].includes(comp.uom || ''))),
         }));
         setComponents(refreshed);
         initialComponentsRef.current = refreshed.map(c => ({ ...c }));

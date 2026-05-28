@@ -394,7 +394,9 @@ export default function ProposalPrint() {
                 const snapFrozen = line.quote_line_snapshot;
                 const qlInfo = line.quote_line_id ? quoteLinesMap.get(line.quote_line_id) : undefined;
                 const lineTotal = lineTotals[index] ?? 0;
-                const qty = line.line_type === 'custom' ? Number(line.qty) || 0 : snapFrozen?.qty ?? qlInfo?.quantity ?? 0;
+                const qty = line.line_type === 'custom'
+                  ? Number(line.qty) || 0
+                  : snapFrozen?.qty ?? qlInfo?.quantity ?? 0;
                 // Unit price = adjusted (lineTotal/qty); no override display
                 const unitPrice = qty > 0 ? lineTotal / qty : 0;
                 const baseAmount = unitPrice;

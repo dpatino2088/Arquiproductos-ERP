@@ -1520,6 +1520,7 @@ export default function QuoteNew() {
 
         const configSnapshot = {
           sell_mode: sellMode,
+          pricing_uom: 'm',
           film_model: cfg.film_model ?? '',
           film_collection: cfg.film_collection ?? '',
           film_variant: cfg.film_variant ?? '',
@@ -1529,6 +1530,7 @@ export default function QuoteNew() {
           roll_width_m: rollWidthM,
           roll_length_m: rollLengthM,
           roll_area_m2: rollAreaM2,
+          dealer_per_m: Number(cfg.dealer_per_linear_m) || 0,
           dealer_per_m2: Number(cfg.dealer_per_m2) || 0,
           dealer_per_linear_m: Number(cfg.dealer_per_linear_m) || 0,
           roll_dealer_total: Number(cfg.roll_dealer_total) || 0,
@@ -1635,6 +1637,7 @@ export default function QuoteNew() {
 
         const configSnapshot = {
           sell_mode: sellMode,
+          pricing_uom: 'm',
           film_model: cfg.film_model ?? '',
           film_collection: cfg.film_collection ?? '',
           film_variant: cfg.film_variant ?? '',
@@ -1644,6 +1647,7 @@ export default function QuoteNew() {
           roll_width_m: rollWidthM,
           roll_length_m: rollLengthM,
           roll_area_m2: rollAreaM2,
+          dealer_per_m: Number(cfg.dealer_per_linear_m) || 0,
           dealer_per_m2: Number(cfg.dealer_per_m2) || 0,
           dealer_per_linear_m: Number(cfg.dealer_per_linear_m) || 0,
           roll_dealer_total: Number(cfg.roll_dealer_total) || 0,
@@ -1818,6 +1822,15 @@ export default function QuoteNew() {
         }
 
         // 4. Update QuoteLine — only structural fields, NO pricing
+        const driveTypeRaw = (productConfig as any).operation_type || (productConfig as any).drive_type || null;
+        const normalizedDriveType =
+          driveTypeRaw === 'motorized'
+            ? 'motor'
+            : driveTypeRaw === 'manual'
+              ? 'manual'
+              : driveTypeRaw;
+        const refreshedConfigSnapshot = buildConfigSnapshotFromProductConfig(productConfig);
+
         const updatePayload: Record<string, any> = {
           configured_product_id: cpNewId,
           product_type_id: productTypeId,
@@ -1830,6 +1843,11 @@ export default function QuoteNew() {
           fabric_drop: (productConfig as any).fabricDrop ?? (productConfig as any).drop_type ?? null,
           installation_type: (productConfig as any).installationType ?? null,
           installation_location: (productConfig as any).installationLocation ?? null,
+          config_snapshot: refreshedConfigSnapshot,
+          drive_type: normalizedDriveType ?? null,
+          // Recompute from current config. Null allows the UI fallback
+          // to render from drive_type instead of stale legacy labels.
+          drive_system_label: null,
         };
         // Sync fabric/roll fields — always set (clear stale values from previous product type)
         updatePayload.catalog_item_id = cpNew?.roll_catalog_item_id ?? null;
@@ -5040,7 +5058,11 @@ export default function QuoteNew() {
                     const driveType = line.drive_type;
                     const driveLabel = line.drive_system_label
                       ? line.drive_system_label
-                      : (driveType === 'motor' ? 'Motorized' : driveType === 'manual' ? 'Manual' : 'N/A');
+                      : (driveType === 'motor' || driveType === 'motorized'
+                          ? 'Motorized'
+                          : driveType === 'manual'
+                            ? 'Manual'
+                            : 'N/A');
                     const catalogMfr = (isCatalogLine || isFilmLine)
                       ? ((line.CatalogItems?.Manufacturers as any)?.name || line.CatalogItems?.manufacturer || null)
                       : null;

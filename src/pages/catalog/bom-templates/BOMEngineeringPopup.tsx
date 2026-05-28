@@ -17,6 +17,12 @@ function openCatalogItem(catalogItemId: string | null | undefined) {
 }
 
 type DeltaMode = 'subtract' | 'add' | 'info';
+// `cut_delta_scope` is now always 'per_item' from the UI. Total deduction is
+// `delta × qty`, and the placement_section decides how the total is split
+// across panels (edge → 50/50, drive/passive → one side, etc.). The legacy
+// 'per_side (×2)' scope was migrated to per_item with qty doubled — see
+// migration `20261217100000_drop_per_side_scope_apply_qty.sql`.
+type DeltaScope = 'per_item';
 
 function parseRoles(str: string | null | undefined): string[] {
   if (!str) return [];
@@ -33,6 +39,12 @@ function addAffects(affectsRole: string | null | undefined, r: string): string {
 function removeAffects(affectsRole: string | null | undefined, r: string): string | null {
   const roles = parseRoles(affectsRole).filter(x => x !== r);
   return roles.length > 0 ? roles.join(',') : null;
+}
+
+function getSignedDelta(mode: DeltaMode, value: number): number {
+  if (mode === 'add') return value;
+  if (mode === 'subtract') return -value;
+  return 0;
 }
 
 function wouldCreateCycle(
@@ -225,6 +237,21 @@ export default function BOMEngineeringPopup({
     }
   }, [role, allComponents, childrenByParent, onPatchComponent]);
 
+  const ownChildrenNetDelta = useMemo(() => {
+    if (!showPopup || !editingComponent || !isCuttable || ownChildren.length === 0) return 0;
+    let sum = 0;
+    for (const ch of ownChildren) {
+      const chCi = catalogItems.find((i: any) => i.id === ch.component_item_id) || ch.catalog_item;
+      const rawDelta = isYAxis ? (chCi as any)?.delta_y_mm : (chCi as any)?.delta_x_mm;
+      if (rawDelta == null || rawDelta === 0) continue;
+      const qty = ch.qty_value ?? 1;
+      const effective = Math.abs(Number(rawDelta)) * qty;
+      const mode = (ch.delta_mode || 'subtract') as DeltaMode;
+      sum += getSignedDelta(mode, effective);
+    }
+    return sum;
+  }, [showPopup, editingComponent, isCuttable, ownChildren, catalogItems, isYAxis]);
+
   if (!showPopup || !editingComponent) return null;
 
   const ci = catalogItems.find((i: any) => i.id === editingComponent.component_item_id) || editingComponent.catalog_item;
@@ -365,6 +392,16 @@ export default function BOMEngineeringPopup({
                     </SelectShadcn>
                   )}
                 </div>
+                {ownChildren.length > 0 && (
+                  <div className="mb-2 rounded border border-primary/20 bg-primary/5 px-2.5 py-1.5 text-[11px] text-gray-700 flex items-center justify-between">
+                    <span className="font-medium">
+                      Own children net on {isYAxis ? 'Height (Y)' : 'Width (X)'}
+                    </span>
+                    <span className={`font-mono font-semibold tabular-nums ${ownChildrenNetDelta < 0 ? 'text-red-600' : ownChildrenNetDelta > 0 ? 'text-green-700' : 'text-gray-500'}`}>
+                      {ownChildrenNetDelta > 0 ? '+' : ''}{ownChildrenNetDelta} mm
+                    </span>
+                  </div>
+                )}
 
                 {/* Show deducting components grouped by parent role in cascade order */}
                 {(affectedByComponents.length > 0 || ownChildren.length > 0) && (
@@ -381,7 +418,10 @@ export default function BOMEngineeringPopup({
                         for (const k of kids) {
                           const kCi = catalogItems.find((i: any) => i.id === k.component_item_id) || k.catalog_item;
                           const kd = isYAxis ? (kCi as any)?.delta_y_mm : (kCi as any)?.delta_x_mm;
-                          if (kd != null && kd !== 0) sum += kd * (k.qty_value ?? 1);
+                          if (kd != null && kd !== 0) {
+                            const qty = k.qty_value ?? 1;
+                            sum += Number(kd) * qty;
+                          }
                         }
                         return sum;
                       };
@@ -407,6 +447,10 @@ export default function BOMEngineeringPopup({
                                 const chCi2 = catalogItems.find((i: any) => i.id === ch.component_item_id) || ch.catalog_item;
                                 const dx2 = isYAxis ? (chCi2 as any)?.delta_y_mm : (chCi2 as any)?.delta_x_mm;
                                 const chMode2 = (ch.delta_mode || 'subtract') as DeltaMode;
+                                const qty2 = ch.qty_value ?? 1;
+                                // total = delta × qty. Placement_section
+                                // decides the split (edge / drive / passive / shared).
+                                const effective2 = dx2 != null && dx2 !== 0 ? Math.abs(Number(dx2)) * qty2 : 0;
                                 const modeColor2 = chMode2 === 'subtract' ? 'bg-red-50 text-red-600'
                                   : chMode2 === 'add' ? 'bg-green-50 text-green-700'
                                     : 'bg-gray-50 text-gray-400';
@@ -428,10 +472,13 @@ export default function BOMEngineeringPopup({
                                       <option value="add">+Add</option>
                                       <option value="info">Info</option>
                                     </select>
-                                    <span className={`text-xs font-mono font-medium tabular-nums w-14 text-right ${valColor2}`}>
+                                    <span className={`text-xs font-mono font-medium tabular-nums w-24 text-right ${valColor2}`}>
                                       {chMode2 === 'info' ? '' : dx2 != null && dx2 !== 0
-                                        ? `${chMode2 === 'subtract' ? '−' : '+'}${dx2}${(ch.qty_value ?? 1) > 1 ? `×${ch.qty_value}` : ''}`
+                                        ? `${chMode2 === 'subtract' ? '−' : '+'}${effective2}`
                                         : '—'}
+                                    </span>
+                                    <span className="text-[9px] font-mono text-gray-400 w-[72px] text-right">
+                                      {dx2 != null && dx2 !== 0 ? `${Math.abs(Number(dx2))}${qty2 > 1 ? `×${qty2}` : ''}` : ''}
                                     </span>
                                   </div>
                                 );
@@ -541,6 +588,9 @@ export default function BOMEngineeringPopup({
               <div className="flex items-center gap-4 text-[10px] text-gray-500">
                 <span>ΔX <span className="font-mono font-medium text-gray-700">{deltaX != null ? `${deltaX} mm` : '—'}</span></span>
                 <span>ΔY <span className="font-mono font-medium text-gray-700">{deltaY != null ? `${deltaY} mm` : '—'}</span></span>
+                <span className="text-[9px] text-gray-400 italic">
+                  Total = delta × qty. Placement decides side split.
+                </span>
                 {deltaX == null && deltaY == null && (
                   <button
                     type="button"
