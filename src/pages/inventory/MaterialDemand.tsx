@@ -200,6 +200,12 @@ export default function MaterialDemand() {
           .in('catalog_item_id', catalogIds);
 
         const directUnits = new Set(['each', 'ea', 'ft', 'm', 'yd', 'm2', 'yd2', 'roll']);
+        // Vendor linear units -> internal meters (keep in sync with inventory_on_order view).
+        const linearToMeters: Record<string, number> = {
+          yd: 0.9144, yard: 0.9144, yards: 0.9144,
+          ft: 0.3048, foot: 0.3048, feet: 0.3048,
+          in: 0.0254, inch: 0.0254, inches: 0.0254,
+        };
         for (const line of draftPOLines ?? []) {
           const itemId = (line as any).catalog_item_id as string | null;
           if (!itemId) continue;
@@ -216,6 +222,8 @@ export default function MaterialDemand() {
           let multiplier = 1;
           if (unit === 'roll') {
             multiplier = Number.isFinite(rollLengthM) && rollLengthM > 0 ? rollLengthM : 1;
+          } else if (linearToMeters[unit] != null) {
+            multiplier = linearToMeters[unit];
           } else if (uppu > 1 && !directUnits.has(unit)) {
             multiplier = uppu;
           }
@@ -333,7 +341,9 @@ export default function MaterialDemand() {
         const onOrder = onOrderMap.get(itemId) ?? 0;
         const reserved = nonDemandAllocMap.get(itemId) ?? 0;
         const available = Math.max(0, onHand - reserved);
-        itemNeedToBuyMap.set(itemId, Math.round(Math.max(0, totalReq - available - onOrder) * 100) / 100);
+        // Policy: round the net deficit UP to a whole internal unit (e.g. 11.60 m -> 12 m).
+        const deficit = Math.max(0, totalReq - available - onOrder);
+        itemNeedToBuyMap.set(itemId, deficit > 0 ? Math.ceil(deficit - 1e-9) : 0);
       }
 
       return demand.map((d: any) => {
@@ -641,11 +651,19 @@ export default function MaterialDemand() {
           purchaseUnit: r.purchase_unit,
         });
 
+        // Policy: propose the REQUIRED quantity in the manufacturer's measure unit
+        // (e.g. fabric sold by the yard), rounded up to a whole vendor unit. The
+        // buyer can then switch the line to "roll" in the PO if they prefer to buy
+        // a whole roll. So for roll items with a linear unit_of_measure we order in
+        // that unit (linear_direct) instead of forcing whole rolls up front.
+        const rollLinearUnit = String(r.unit_of_measure ?? '').toLowerCase();
+        const rollAsLinear = r.is_roll && ['m', 'ft', 'yd'].includes(rollLinearUnit);
+
         const conversion = convertInternalToPurchaseQty({
           internalQty: needToBuy,
-          purchaseMode: model.purchaseMode,
-          purchaseUnit: r.purchase_unit || 'ea',
-          unitsPerPurchaseUnit: r.units_per_purchase_unit,
+          purchaseMode: rollAsLinear ? 'linear_direct' : model.purchaseMode,
+          purchaseUnit: rollAsLinear ? rollLinearUnit : (r.purchase_unit || 'ea'),
+          unitsPerPurchaseUnit: rollAsLinear ? 1 : r.units_per_purchase_unit,
           rollLengthValue: r.roll_length_value,
           rollLengthUom: r.roll_length_uom,
           moq: r.item_moq,

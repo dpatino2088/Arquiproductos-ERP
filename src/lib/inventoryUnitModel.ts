@@ -72,7 +72,7 @@ export function getAllowedPurchaseUnits(
   return ['each', 'pack', 'set', 'box', 'case', 'bag', 'bundle', 'carton', 'kit', 'pair'];
 }
 
-function toMeters(value: number, uom: string): number {
+export function toMeters(value: number, uom: string): number {
   switch ((uom || '').toLowerCase()) {
     case 'm':
       return value;
@@ -85,7 +85,7 @@ function toMeters(value: number, uom: string): number {
   }
 }
 
-function fromMeters(meters: number, targetUom: string): number {
+export function fromMeters(meters: number, targetUom: string): number {
   switch ((targetUom || '').toLowerCase()) {
     case 'm':
       return meters;
@@ -194,7 +194,8 @@ export function convertInternalToPurchaseQty(input: ConversionToExternalInput): 
         unitCost: (costPerUnit) => costPerUnit,
       };
     }
-    const orderQty = applyMoq(Math.ceil(converted * 100) / 100);
+    // Round up to whole vendor units (policy: never order fractional linear units).
+    const orderQty = applyMoq(Math.ceil(converted - 1e-9));
     return {
       orderQty,
       lineUnit: input.purchaseUnit || 'm',

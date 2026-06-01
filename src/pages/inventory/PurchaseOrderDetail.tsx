@@ -23,7 +23,7 @@ import { useUIStore } from '../../stores/ui-store';
 import { supabase } from '../../lib/supabase/client';
 import { useCostSettings } from '../../hooks/useCosts';
 import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
-import { convertInternalToPurchaseQty, convertPurchaseQtyToInternal, resolveInventoryUnitModel, type MeasureBasis } from '../../lib/inventoryUnitModel';
+import { convertInternalToPurchaseQty, convertPurchaseQtyToInternal, resolveInventoryUnitModel, toMeters, fromMeters, type MeasureBasis } from '../../lib/inventoryUnitModel';
 import { ArrowLeft, Plus, Trash2, Search, Package, FileDown, Eye, ChevronDown, CheckCircle2, XCircle, Archive } from 'lucide-react';
 import Input from '../../components/ui/Input';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
@@ -1707,18 +1707,33 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                           <SelectShadcn
                             value={line.unit}
                             onValueChange={(newUnit) => {
+                              if (newUnit === line.unit) return;
                               const rlv = line.roll_length_value_snapshot ?? 0;
-                              const costExw = rlv > 0 && line.unit === 'roll'
+                              const rollUom = line.roll_length_uom_snapshot ?? line.unit_of_measure_snapshot ?? 'm';
+                              const linearUom = line.unit_of_measure_snapshot ?? 'm';
+                              // meters contained in one roll
+                              const rollLengthM = rlv > 0 ? toMeters(rlv, rollUom) : 0;
+                              // base cost expressed per linear unit_of_measure (e.g. per yd)
+                              const costPerLinear = line.unit === 'roll' && rlv > 0
                                 ? line.unit_cost / rlv
-                                : line.unit !== 'roll'
-                                  ? line.unit_cost
-                                  : line.unit_cost;
-                              const newCost = newUnit === 'roll' && rlv > 0
-                                ? costExw * rlv
-                                : costExw;
+                                : line.unit_cost;
+                              // current ordered qty -> internal meters
+                              const currentMeters = line.unit === 'roll'
+                                ? line.ordered_qty * rollLengthM
+                                : toMeters(line.ordered_qty, line.unit || linearUom);
+                              let newQty = line.ordered_qty;
+                              let newCost = line.unit_cost;
+                              if (newUnit === 'roll') {
+                                newQty = rollLengthM > 0 ? Math.max(1, Math.ceil(currentMeters / rollLengthM - 1e-9)) : line.ordered_qty;
+                                newCost = costPerLinear * rlv;
+                              } else {
+                                // switch to the linear vendor unit (e.g. yd): round up to whole
+                                newQty = Math.max(line.received_qty, Math.ceil(fromMeters(currentMeters, newUnit) - 1e-9));
+                                newCost = costPerLinear;
+                              }
                               setDraftLines(prev => prev.map(dl =>
                                 dl.tempId === line.tempId
-                                  ? { ...dl, unit: newUnit, unit_cost: newCost }
+                                  ? { ...dl, unit: newUnit, unit_cost: newCost, ordered_qty: newQty }
                                   : dl
                               ));
                             }}
