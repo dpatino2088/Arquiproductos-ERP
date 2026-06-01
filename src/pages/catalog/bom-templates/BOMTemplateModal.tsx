@@ -1460,6 +1460,16 @@ export default function BOMTemplateModal({
                       previewPanelCount={previewPanelCount}
                       onPreviewPanelCountChange={handlePreviewPanelCountChange}
                       headboxMode={cutDiagramHeadboxMode}
+                      isDrapery={isDrapery}
+                      openingDirection={
+                        form.templateOpeningDirection === 'center'
+                          ? 'center'
+                          : form.templateOpeningDirection === 'left'
+                            ? 'left'
+                            : form.templateOpeningDirection === 'right'
+                              ? 'right'
+                              : null
+                      }
                     />
                     </>
                   )}

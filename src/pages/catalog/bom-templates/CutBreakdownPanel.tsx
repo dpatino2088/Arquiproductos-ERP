@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import RollerCutDiagram, { type ChipBreakdown, type HeadboxMode } from './RollerCutDiagram';
+import DraperyCutDiagram from './DraperyCutDiagram';
 import {
   buildCompositionForCuttable,
   computeSideTotal,
@@ -24,6 +25,10 @@ interface CutBreakdownPanelProps {
    *  - `required`: BOM has headbox/cassette with `is_required=true` (Dual / Triple, or Roller w/ required HB).
    */
   headboxMode?: HeadboxMode;
+  /** When true, render the drapery TRACK diagram instead of the roller panel diagram. */
+  isDrapery?: boolean;
+  /** Master-carrier opening direction (drapery only). */
+  openingDirection?: 'left' | 'right' | 'center' | null;
 }
 
 interface CuttableMeta {
@@ -197,7 +202,7 @@ function usesJointPanelDeduction(d: PreviewDeduction): boolean {
   return isIntermediateRole(d.role);
 }
 
-type ChildContrib = { role: string; sku: string; contribDx: number; contribDy: number };
+type ChildContrib = { role: string; sku: string; name?: string; contribDx: number; contribDy: number };
 
 function splitPreviewSides(
   item: PreviewBreakdownItem,
@@ -378,6 +383,8 @@ export default function CutBreakdownPanel({
   previewPanelCount = 1,
   onPreviewPanelCountChange,
   headboxMode = 'none',
+  isDrapery = false,
+  openingDirection = null,
 }: CutBreakdownPanelProps) {
   const [selectedVariants, setSelectedVariants] = useState<Record<string, string>>({});
   const onSelectVariant = (groupKey: string, value: string) => {
@@ -399,6 +406,10 @@ export default function CutBreakdownPanel({
   );
   const previewSideChannel = useMemo(
     () => previewRows.find((r) => normalizeRole(r.role).includes('side channel')),
+    [previewRows],
+  );
+  const previewTrack = useMemo(
+    () => previewRows.find((r) => normalizeRole(r.role).includes('track')),
     [previewRows],
   );
   const sectionByRoleSku = useMemo(() => {
@@ -443,6 +454,7 @@ export default function CutBreakdownPanel({
     type ChildInfo = {
       role: string;
       sku: string;
+      name?: string;
       /** Per parent-instance contribution on the X axis, mm. */
       contribDx: number;
       /** Per parent-instance contribution on the Y axis, mm. */
@@ -474,6 +486,7 @@ export default function CutBreakdownPanel({
         infos.push({
           role: k.component_role || '',
           sku: ci.sku || '?',
+          name: ci.name || '',
           contribDx: round2(dx),
           contribDy: round2(dy),
         });
@@ -482,6 +495,86 @@ export default function CutBreakdownPanel({
     }
     return m;
   }, [components]);
+
+  // ===== Drapery TRACK diagram (single continuous rail, not per-panel) =====
+  if (isDrapery && previewTrack) {
+    const trackSymbol = previewTrack.axis === 'height' ? 'H' : 'W';
+
+    // End caps are top-level track deductors with an explicit placement_section:
+    //   · 'drive'   → motor end
+    //   · 'passive' → opposite end
+    //   · 'edge'    → manual cap on both ends (split half/half)
+    // So the generic side splitter already routes each one to the correct end
+    // by placement (no name heuristics needed).
+    const trackSides = splitPreviewSides(
+      previewTrack,
+      previewDriveSide,
+      sectionByRoleSku,
+      sectionByRole,
+      catalogDeltaByRoleSku,
+      childrenByParentRoleSku,
+      1,
+    );
+
+    // Motor end exists when any deduction lands on the drive side.
+    const hasMotor = (previewTrack.deductions ?? []).some(
+      (d) => String(d.position || '').toLowerCase() === 'drive_side' || normalizeRole(d.role).includes('motor'),
+    );
+    const motorSide: 'left' | 'right' | null = hasMotor
+      ? (previewDriveSide === 'left' ? 'left' : 'right')
+      : null;
+
+    const leftMm = trackSides.left;
+    const rightMm = trackSides.right;
+    const leftRows = trackSides.leftRows;
+    const rightRows = trackSides.rightRows;
+
+    return (
+      <div className="space-y-3">
+        <DraperyCutDiagram
+          templateLabel="Drapery Track Diagram"
+          trackSymbol={trackSymbol}
+          baseMm={Number(previewTrack.base_mm ?? 0) || undefined}
+          resolvedMm={Number(previewTrack.resolved_mm ?? 0) || undefined}
+          totalDeduction={round2(Number(previewTrack.total_deduction || 0))}
+          tolerance={Number(previewTrack.tolerance_mm || 0)}
+          leftMm={leftMm}
+          rightMm={rightMm}
+          leftBreakdown={leftRows}
+          rightBreakdown={rightRows}
+          motorSide={motorSide}
+          opening={openingDirection}
+        />
+
+        <div className="rounded-md border border-slate-200 bg-white p-3 space-y-2">
+          <div className="text-xs font-semibold text-slate-700">Cut Formulas (DB Source)</div>
+          {previewRows.map((r, rowIdx) => {
+            const role = normalizeRole(r.role);
+            const placement = sectionByRole.get(role) || '';
+            if (placement === 'consumable') return null;
+            const symbol = r.axis === 'height' ? 'H' : 'W';
+            const ownDed = round2(Number(r.total_deduction || 0));
+            const resolved = Number(r.resolved_mm ?? 0);
+            const isTrack = role.includes('track');
+            return (
+              <div key={`db-dr-${r.role}-${r.sku || rowIdx}`} className="flex items-start justify-between gap-2 border-b border-slate-100 pb-2 last:border-0 last:pb-0">
+                <div className="min-w-0">
+                  <div className="text-[11px] font-medium text-slate-700">{r.label || prettifyRole(r.role)}</div>
+                  <div className="text-[10px] text-slate-400 font-mono truncate">{r.sku || '?'}</div>
+                </div>
+                <div className="text-right font-mono text-[11px] text-slate-800">
+                  <div>{symbol} - {ownDed}mm</div>
+                  {isTrack && resolved > 0 && (
+                    <div className="text-[10px] text-slate-400">cut = {resolved}mm</div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
 
   if (previewRows.length > 0) {
     const panelCount = Math.max(1, Number(previewPanelCount || 1));

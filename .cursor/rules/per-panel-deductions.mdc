@@ -33,6 +33,38 @@ Multi-panel products decompose linearly. Intermediates are **always shared** bet
 7. Fabric per-panel follows the same tube deduction pattern (fabric width = tube cut width for roller shades).
 8. Bottom bar per-panel: only outer panels get end_cap deductions; center panels get none.
 
+## Edge / both-ends deductor split (multi-panel)
+
+A deductor that physically touches **both ends** of the assembly (position `edge`, e.g. a
+headbox/cassette whose end caps clip each end) contributes `delta × qty` to the **global**
+total. In the **per-panel** distribution that same global contribution is **split across the
+two outer panels** (`(delta × qty) / 2` to panel 1 and to panel N) so it is never double-counted.
+
+- `drive_side` / `passive_side`: full global contribution applied to the single end panel it
+  belongs to. When `drive_side = 'both'`, split half/half across both ends.
+- `edge` (both ends): half to each outer panel.
+- `per_panel` deductor: applied to **every** panel (one per panel is the physical truth).
+
+Because of `per_panel` deductors (applied per panel) and shared/edge splits, the per-panel
+cuts are the physical source of truth. Therefore, for any **per-panel cuttable in multi-panel**,
+the summary `resolved_mm` is **defined as `SUM(panel_cuts.cut_mm)`** (the total of the N pieces
+you actually cut), and `total_deduction = base − resolved_mm`. This makes the invariant hold by
+construction. Single-panel keeps the classic `resolved = base − Σ(global deductions)`.
+
+## Headbox chain: Width → Headbox → Tube → Bottom bar
+
+The cut base flows down a dependency chain:
+
+- **With headbox**: the headbox is a **cuttable** (`placement_section = 'cuttable'`). It is cut
+  from the curtain `Width` minus its own end caps. That resolved headbox cut is the **base for
+  the tube** (`tube.depends_on_role = 'headbox'`). The bottom bar then depends on the tube
+  (`bottom_bar.depends_on_role = 'tube'`). The headbox deduction is applied **once** (at the
+  headbox), and every downstream cuttable inherits the already-reduced measure — no re-deduction.
+- **Without headbox**: the tube base is the curtain `Width` directly.
+- Mutually-exclusive option SKUs (e.g. two headbox variants in one template) are an **engineering
+  preview artifact**: the preview may show both; a real configured order resolves to the single
+  selected option.
+
 ## Golden rule: unequal panel widths
 
 `config_snapshot.panels` is the source of truth. Each panel carries its own `width_mm`.

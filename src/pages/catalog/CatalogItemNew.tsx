@@ -1438,12 +1438,41 @@ export default function CatalogItemNew() {
       
     } catch (err: any) {
       console.error('❌ Error saving item:', err);
-      const errorMsg = (() => {
-        if (err?.code === '23505' || String(err?.message || '').includes('CatalogItems_organization_id_sku_key')) {
-          return 'SKU already exists in this organization. Please use a unique SKU.';
+      let errorMsg = err?.message || 'Failed to save item';
+      const isSkuConflict =
+        err?.code === '23505' ||
+        String(err?.message || '').includes('CatalogItems_organization_id_sku_key');
+      if (isSkuConflict) {
+        // The unique constraint (organization_id, sku) also counts INACTIVE items,
+        // which are hidden from the catalog list. Surface the real holder so the
+        // user never hits a "phantom SKU" dead-end again.
+        const skuTrimmed = values.sku.trim();
+        const routeMatchErr = window.location.pathname.match(/\/catalog\/items\/edit\/([^/]+)/);
+        const currentItemId = itemId || (routeMatchErr && routeMatchErr[1] ? routeMatchErr[1] : null);
+        let holder: { id: string; name: string | null; is_active: boolean | null } | null = null;
+        if (activeOrganizationId && skuTrimmed) {
+          try {
+            const { data } = await supabase
+              .from('CatalogItems')
+              .select('id, name, is_active')
+              .eq('organization_id', activeOrganizationId)
+              .eq('sku', skuTrimmed)
+              .neq('id', currentItemId ?? '00000000-0000-0000-0000-000000000000')
+              .maybeSingle();
+            holder = (data as unknown as { id: string; name: string | null; is_active: boolean | null }) ?? null;
+          } catch {
+            // non-blocking lookup
+          }
         }
-        return err?.message || 'Failed to save item';
-      })();
+        if (holder && holder.is_active === false) {
+          errorMsg =
+            `El SKU "${skuTrimmed}" ya está en uso por un ítem INACTIVO ` +
+            `("${holder.name || skuTrimmed}"), que no aparece en la lista del catálogo. ` +
+            `Reactívalo/edítalo o usa un SKU distinto.`;
+        } else {
+          errorMsg = `El SKU "${skuTrimmed}" ya existe en esta organización. Usa un SKU único.`;
+        }
+      }
       setSaveError(errorMsg);
       useUIStore.getState().addNotification({
         type: 'error',
