@@ -1845,9 +1845,9 @@ export default function QuoteNew() {
           installation_location: (productConfig as any).installationLocation ?? null,
           config_snapshot: refreshedConfigSnapshot,
           drive_type: normalizedDriveType ?? null,
-          // Recompute from current config. Null allows the UI fallback
-          // to render from drive_type instead of stale legacy labels.
-          drive_system_label: null,
+          // NOTE: drive_system_label is NOT a QuoteLines column — it is a derived
+          // label recomputed in useQuotes from drive_type + manufacturer. Do not
+          // write it here (PostgREST PGRST204: column not in schema cache).
         };
         // Sync fabric/roll fields — always set (clear stale values from previous product type)
         updatePayload.catalog_item_id = cpNew?.roll_catalog_item_id ?? null;
