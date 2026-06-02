@@ -409,14 +409,6 @@ export function useManufacturingMaterials(manufacturingOrderId: string): UseManu
           console.log('🔍 useManufacturingMaterials: Fetching BOM for manufacturingOrderId:', safeManufacturingOrderId, 'organization:', activeOrganizationId);
         }
 
-        // Fetch MO quantity so we can multiply per-unit BOM lines
-        const { data: moRow } = await supabase
-          .from('ManufacturingOrders')
-          .select('quantity')
-          .eq('id', safeManufacturingOrderId)
-          .single();
-        const moQty = Math.max(1, Number(moRow?.quantity ?? 1));
-
         const { data: bomInstances, error: bomError } = await supabase
           .from('BOMInstances')
           .select('id, organization_id, quote_line_id, sales_order_line_id')
@@ -489,14 +481,17 @@ export function useManufacturingMaterials(manufacturingOrderId: string): UseManu
             .filter(Boolean)
         )];
         const biDimsMap = new Map<string, { width_mm: number | null; height_mm: number | null }>();
+        // Per-instance ordered quantity (BOMInstance is 1 per sales order line / 1 unit).
+        // Material totals = per-unit BOM qty x sol.quantity (matches the demand view).
+        const biQtyMap = new Map<string, number>();
         if (solIds.length > 0) {
           const { data: solRows } = await supabase
             .from('SaleOrderLines')
-            .select('id, width_m, height_m')
+            .select('id, width_m, height_m, quantity')
             .in('id', solIds);
           if (solRows) {
-            const solMap = new Map<string, { width_m?: number; height_m?: number }>(
-              solRows.map((s: { id: string; width_m?: number; height_m?: number }) => [s.id, s])
+            const solMap = new Map<string, { width_m?: number; height_m?: number; quantity?: number }>(
+              solRows.map((s: { id: string; width_m?: number; height_m?: number; quantity?: number }) => [s.id, s])
             );
             for (const bi of bomInstances) {
               const sol = (bi as any).sales_order_line_id ? solMap.get((bi as any).sales_order_line_id) : null;
@@ -504,6 +499,7 @@ export function useManufacturingMaterials(manufacturingOrderId: string): UseManu
                 width_mm: sol?.width_m != null ? Math.round(sol.width_m * 1000) : null,
                 height_mm: sol?.height_m != null ? Math.round(sol.height_m * 1000) : null,
               });
+              biQtyMap.set(bi.id, Math.max(1, Number(sol?.quantity ?? 1)));
             }
           }
         }
@@ -530,6 +526,7 @@ export function useManufacturingMaterials(manufacturingOrderId: string): UseManu
         const materialsList: ManufacturingMaterial[] = bomLines?.map((line: any) => {
           const catalogItem = line.resolved_part_id ? catalogItemsMap.get(line.resolved_part_id) : null;
           const dims = biDimsMap.get(line.bom_instance_id);
+          const lineQty = biQtyMap.get(line.bom_instance_id) ?? 1;
 
           const perUnitQty = Number(line.qty) || 0;
           return {
@@ -542,12 +539,12 @@ export function useManufacturingMaterials(manufacturingOrderId: string): UseManu
             location_code: catalogItem?.WarehouseLocations?.location_code ?? null,
             part_role: line.part_role || 'accessory',
             uom: line.uom || 'ea',
-            qty: perUnitQty * moQty,
-            total_qty: perUnitQty * moQty,
+            qty: perUnitQty * lineQty,
+            total_qty: perUnitQty * lineQty,
             unit_cost_exw: line.unit_cost_exw ? Number(line.unit_cost_exw) : undefined,
-            total_cost_exw: (Number(line.total_cost_exw) || 0) * moQty,
+            total_cost_exw: (Number(line.total_cost_exw) || 0) * lineQty,
             unit_msrp: line.unit_msrp ? Number(line.unit_msrp) : undefined,
-            total_msrp: (Number(line.total_msrp) || 0) * moQty,
+            total_msrp: (Number(line.total_msrp) || 0) * lineQty,
             cut_length_mm: line.cut_length_mm ? Number(line.cut_length_mm) : null,
             cut_width_mm: line.cut_width_mm ? Number(line.cut_width_mm) : null,
             cut_height_mm: line.cut_height_mm ? Number(line.cut_height_mm) : null,
