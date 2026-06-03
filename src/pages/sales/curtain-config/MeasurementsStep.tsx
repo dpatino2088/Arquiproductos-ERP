@@ -4,6 +4,7 @@ import Label from '../../../components/ui/Label';
 import Input from '../../../components/ui/Input';
 import { Plus, X, Image as ImageIcon } from 'lucide-react';
 import type { Panel } from '../product-config/types';
+import { validateMeasurements } from '../product-config/measurementValidation';
 
 interface MeasurementsStepProps {
   config: CurtainConfiguration;
@@ -155,6 +156,14 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
     const measurements = buildMeasurements(value, panels);
     onUpdate({ measurements } as any);
   };
+
+  // Live measurement validation: min limits block progression (shown as errors),
+  // size limits flag the line for factory review (shown as a non-blocking alert).
+  // The headbox-dependent rule is evaluated at save time (headbox is chosen later).
+  const measurementValidation = React.useMemo(
+    () => validateMeasurements({ productType, panels, height_mm: config.height_mm }),
+    [productType, panels, config.height_mm]
+  );
   
   return (
     <div className="max-w-4xl mx-auto">
@@ -407,6 +416,29 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
                 <div></div> {/* Empty space */}
                 <div></div> {/* Empty space */}
               </div>
+            </div>
+          )}
+
+          {/* Validation: hard errors (min limits) block progression */}
+          {measurementValidation.errors.length > 0 && (
+            <div className="mt-4 rounded-md border border-red-200 bg-red-50 p-3">
+              <ul className="text-sm text-red-700 list-disc pl-5 space-y-1">
+                {measurementValidation.errors.map((msg, i) => (
+                  <li key={i}>{msg}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Soft warnings: needs factory review (does not block) */}
+          {measurementValidation.errors.length === 0 && measurementValidation.warnings.length > 0 && (
+            <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3">
+              <p className="text-sm font-medium text-amber-800 mb-1">Needs factory review</p>
+              <ul className="text-sm text-amber-700 list-disc pl-5 space-y-1">
+                {measurementValidation.warnings.map((msg, i) => (
+                  <li key={i}>{msg}</li>
+                ))}
+              </ul>
             </div>
           )}
         </div>

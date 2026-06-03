@@ -11,6 +11,7 @@ import VariantsStepComponent from '../../../curtain-config/VariantsStep';
 import OperatingSystemStepComponent from '../../../curtain-config/OperatingSystemStep';
 import HardwareStepComponent from '../../../curtain-config/HardwareStep';
 import ReviewStepComponent from '../../../curtain-config/ReviewStep';
+import { validateMeasurements } from '../../measurementValidation';
 
 const TRIPLE_SHADE_STEPS: ProductStep[] = [
   { id: 'manufacturer', label: 'MANUFACTURER', component: ManufacturerStepComponent, isRequired: true },
@@ -30,7 +31,7 @@ function validateStep(stepId: string, config: ProductConfig): boolean {
       return !!(tripleConfig as any).manufacturer;
 
     case 'measurements':
-      return !!(tripleConfig.width_mm && tripleConfig.height_mm);
+      return !!(tripleConfig.width_mm && tripleConfig.height_mm) && validateMeasurements(tripleConfig as any).valid;
 
     case 'variants': {
       const hasCollection = !!(

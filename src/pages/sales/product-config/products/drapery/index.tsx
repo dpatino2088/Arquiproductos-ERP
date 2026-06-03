@@ -12,6 +12,7 @@ import MeasurementsStepComponent from '../../../curtain-config/MeasurementsStep'
 import VariantsStepComponent from '../../../curtain-config/VariantsStep';
 import OperatingSystemStepComponent from '../../../curtain-config/OperatingSystemStep';
 import ReviewStepComponent from '../../../curtain-config/ReviewStep';
+import { validateMeasurements } from '../../measurementValidation';
 
 const DRAPERY_STEPS: ProductStep[] = [
   { id: 'manufacturer', label: 'MANUFACTURER', component: ManufacturerStepComponent, isRequired: true },
@@ -38,7 +39,7 @@ function validateStep(stepId: string, config: ProductConfig): boolean {
       return cfg.bottom_hem_cm != null;
     }
     case 'measurements':
-      return !!(cfg.width_mm && cfg.height_mm);
+      return !!(cfg.width_mm && cfg.height_mm) && validateMeasurements(cfg).valid;
     case 'drapery-hardware': {
       const od = cfg.openingDirection || cfg.opening_direction;
       const hc = cfg.hardwareColor || cfg.hardware_color;

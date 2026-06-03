@@ -7,6 +7,7 @@ import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } fr
 import { X } from 'lucide-react';
 import { ProductType, ProductConfig } from './product-config/types';
 import { canProceedToNext, getProductDefinition } from './product-config/product-registry';
+import { validateMeasurements } from './product-config/measurementValidation';
 import ProductStep from './curtain-config/ProductStep';
 import { useBOMTemplateQuestions } from '../../hooks/useBOMTemplateQuestions';
 import { UnifiedProductConfig, normalizeConfig } from './product-config/config-contract';
@@ -1109,32 +1110,91 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
           // ✅ CRÍTICO: hardware_color debe ser EXACTO (normalizado)
           let panelsList = Array.isArray(configAny.panels) ? [...configAny.panels] : (configAny.panels ? [configAny.panels] : []);
 
-          // Drapery center-opening → split into left + right stacks
-          const openingDir = configAny.openingDirection || configAny.opening_direction || null;
-          if (String(configAny.productType || '').toLowerCase() === 'drapery' && openingDir === 'center' && panelsList.length <= 1) {
-            const totalWidth = panelsList[0]?.width_mm || configAny.width_mm || 0;
-            const halfWidth = Math.round(totalWidth / 2);
-            panelsList = [{ width_mm: halfWidth }, { width_mm: halfWidth }];
+          const isDrapery = String(configAny.productType || '').toLowerCase() === 'drapery';
+
+          // Drapery is ALWAYS a single dealer-facing dimension (total width × height).
+          // `opening_direction` (center/left/right) only sets where the curtain parts — it does
+          // NOT create panels. The track split (1500+1500, joints) is an internal manufacturing
+          // detail, transparent to the dealer, so it lives in measurements.track (NOT in panels).
+          // Track split rule:
+          //   - width > 4000mm  → mandatory split into ceil(width/4000) pieces
+          //   - width <= 4000mm → optional split into 2 pieces when forceTrackJoin is on
+          //   - otherwise       → single piece (full width)
+          let draperyMeasurements: Record<string, any> | null = null;
+          if (isDrapery) {
+            const totalWidthMm =
+              Number(configAny.width_mm) ||
+              Number(configAny.measurements?.width_total_mm) ||
+              panelsList.reduce((s: number, p: any) => s + (Number(p?.width_mm) || 0), 0) ||
+              (finalNormalizedConfig.width_m ? finalNormalizedConfig.width_m * 1000 : 0);
+            const heightMmDr =
+              (finalNormalizedConfig.height_m ? finalNormalizedConfig.height_m * 1000 : null) ??
+              configAny.height_mm ??
+              configAny.measurements?.height_mm ??
+              null;
+            const forceTrackJoin = Boolean(configAny.forceTrackJoin ?? configAny.force_track_join ?? false);
+            const trackPieces =
+              totalWidthMm > 4000
+                ? Math.ceil(totalWidthMm / 4000)
+                : (forceTrackJoin ? 2 : 1);
+            const pieceWidth = trackPieces > 0 ? Math.round(totalWidthMm / trackPieces) : Math.round(totalWidthMm);
+            // Dealer-facing: a single panel = full width. Track split stays internal.
+            panelsList = [{ width_mm: Math.round(totalWidthMm) }];
+            draperyMeasurements = {
+              height_mm: heightMmDr || undefined,
+              width_total_mm: Math.round(totalWidthMm),
+              panel_count: 1,
+              panels: [{ index: 1, width_mm: Math.round(totalWidthMm) }],
+              is_interconnected: false,
+              // Internal manufacturing metadata (Work Order only) — not shown to dealer.
+              track: {
+                pieces: Math.max(1, trackPieces),
+                joints: Math.max(0, trackPieces - 1),
+                piece_widths: Array.from({ length: Math.max(1, trackPieces) }, () => pieceWidth),
+                force_track_join: forceTrackJoin,
+              },
+            };
           }
 
-          const panelCount = configAny.measurements?.panel_count ?? (panelsList.length || 1);
-          const widthTotalMm = configAny.measurements?.width_total_mm ?? panelsList.reduce((s: number, p: any) => s + (p?.width_mm || 0), 0);
-          const measurements = configAny.measurements ?? {
-            height_mm: finalNormalizedConfig.height_m ? finalNormalizedConfig.height_m * 1000 : configAny.height_mm ?? null,
-            width_total_mm: widthTotalMm,
-            panel_count: panelCount,
-            panels: (panelsList.length ? panelsList : [{ index: 1, width_mm: configAny.width_mm || 0 }]).map((p: any, i: number) => ({ index: i + 1, width_mm: p?.width_mm ?? 0 })),
-            is_interconnected: panelCount > 1,
-          };
+          const panelCount = isDrapery
+            ? panelsList.length
+            : (configAny.measurements?.panel_count ?? (panelsList.length || 1));
+          const widthTotalMm = isDrapery
+            ? (draperyMeasurements!.width_total_mm as number)
+            : (configAny.measurements?.width_total_mm ?? panelsList.reduce((s: number, p: any) => s + (p?.width_mm || 0), 0));
+          const measurements = isDrapery
+            ? draperyMeasurements!
+            : (configAny.measurements ?? {
+                height_mm: finalNormalizedConfig.height_m ? finalNormalizedConfig.height_m * 1000 : configAny.height_mm ?? null,
+                width_total_mm: widthTotalMm,
+                panel_count: panelCount,
+                panels: (panelsList.length ? panelsList : [{ index: 1, width_mm: configAny.width_mm || 0 }]).map((p: any, i: number) => ({ index: i + 1, width_mm: p?.width_mm ?? 0 })),
+                is_interconnected: panelCount > 1,
+              });
           // BOM/backend: use total width when multi-panel (sum of all paños) for fabric area and per-width components
           const widthMmForBom = panelCount > 1 ? widthTotalMm : (panelsList[0]?.width_mm ?? configAny.width_mm ?? null);
+
+          // Factory review by size: evaluated here (handleComplete) because the headbox
+          // selection only exists after the Hardware step. The line is flagged (not blocked).
+          const hasHeadbox = !!(configAny.headbox_item_id && configAny.headbox_item_id !== 'NONE');
+          const factoryReview = validateMeasurements(
+            { productType: configAny.productType, panels: measurements.panels ?? panelsList, height_mm: measurements.height_mm },
+            { hasHeadbox }
+          );
+
           const configSnapshot: Record<string, any> = {
             ...finalNormalizedConfig,
             width_mm: widthMmForBom ?? (finalNormalizedConfig.width_m ? finalNormalizedConfig.width_m * 1000 : null),
             height_mm: finalNormalizedConfig.height_m ? finalNormalizedConfig.height_m * 1000 : (measurements.height_mm ?? configAny.height_mm ?? null),
             measurements,
-            // ✅ Persist top-level panels so MeasurementsStep can restore multi-panel configs on Edit
-            panels: Array.isArray(configAny.panels) ? configAny.panels : (measurements.panels || null),
+            // Factory-review flag by size (headbox/tube/drapery limits) — internal alert, not blocking.
+            needs_factory_review: factoryReview.needsFactoryReview,
+            factory_review_reasons: factoryReview.factoryReviewReasons,
+            // ✅ Persist top-level panels so MeasurementsStep can restore multi-panel configs on Edit.
+            // Drapery uses the freshly-derived panels (from opening_direction); other types keep user-edited panels.
+            panels: isDrapery
+              ? panelsList.map((p: any, i: number) => ({ index: i + 1, width_mm: p?.width_mm ?? 0 }))
+              : (Array.isArray(configAny.panels) ? configAny.panels : (measurements.panels || null)),
             // ✅ hardware_color: normalizar (capitalize first letter)
             hardware_color: (() => {
               const color = finalNormalizedConfig.hardware_color || configAny.hardwareColor || configAny.operatingSystemColor;
@@ -1413,7 +1473,7 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
     if (currentStep.id === 'measurements') {
       const width_m = (config as any).width_m || ((config as any).width_mm ? (config as any).width_mm / 1000 : null);
       const height_m = (config as any).height_m || ((config as any).height_mm ? (config as any).height_mm / 1000 : null);
-      return !!(width_m && width_m > 0 && height_m && height_m > 0);
+      return !!(width_m && width_m > 0 && height_m && height_m > 0) && validateMeasurements(config as any).valid;
     }
 
     return !!registryResult;

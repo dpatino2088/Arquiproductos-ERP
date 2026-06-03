@@ -10,6 +10,7 @@ import MeasurementsStepComponent from '../../../curtain-config/MeasurementsStep'
 import VariantsStepComponent from '../../../curtain-config/VariantsStep';
 import OperatingSystemStepComponent from '../../../curtain-config/OperatingSystemStep';
 import ReviewStepComponent from '../../../curtain-config/ReviewStep';
+import { validateMeasurements } from '../../measurementValidation';
 
 const AWNING_STEPS: ProductStep[] = [
   { id: 'manufacturer', label: 'MANUFACTURER', component: ManufacturerStepComponent, isRequired: true },
@@ -27,7 +28,7 @@ function validateStep(stepId: string, config: ProductConfig): boolean {
       return !!(awningConfig as any).manufacturer;
 
     case 'measurements':
-      return !!(awningConfig.width_mm && awningConfig.height_mm);
+      return !!(awningConfig.width_mm && awningConfig.height_mm) && validateMeasurements(awningConfig as any).valid;
     case 'variants':
       return !!(awningConfig.fabric?.collectionId && awningConfig.fabric?.variantId);
     case 'operating-system': {

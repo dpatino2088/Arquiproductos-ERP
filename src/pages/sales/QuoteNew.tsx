@@ -2342,6 +2342,30 @@ export default function QuoteNew() {
 
           finalLineId = result.quote_line_id;
 
+          // ✅ Persistir config_snapshot canónico del CP en la QuoteLine.
+          // La RPC commit_configured_product_to_quote_line NO escribe config_snapshot,
+          // por lo que sin esto las líneas duplicadas/nuevas quedan sin snapshot congelado
+          // (medidas/paneles) y QuoteDetail no puede mostrarlos correctamente.
+          if (finalLineId) {
+            try {
+              const { data: cpSnapRow } = await supabase
+                .from('ConfiguredProducts')
+                .select('config_snapshot')
+                .eq('id', configuredProductId)
+                .eq('organization_id', activeOrganizationId)
+                .maybeSingle();
+              if (cpSnapRow?.config_snapshot) {
+                await supabase
+                  .from('QuoteLines')
+                  .update({ config_snapshot: cpSnapRow.config_snapshot })
+                  .eq('id', finalLineId)
+                  .eq('organization_id', activeOrganizationId);
+              }
+            } catch (snapErr) {
+              if (import.meta.env.DEV) console.warn('[QuoteNew] persist config_snapshot (add path) failed:', snapErr);
+            }
+          }
+
           // ✅ Precio en QuoteLine: 1) sync desde ConfiguredProduct 2) fallback con valor del Review
           const snapshot = (productConfig as any).bom_preview_snapshot;
           const totalsFromConfig = (productConfig as any).configured_product_totals;
@@ -5191,6 +5215,14 @@ export default function QuoteNew() {
                                 panels: line.config_snapshot?.panels,
                               }}
                             />
+                            {(line.config_snapshot as any)?.needs_factory_review && (
+                              <div
+                                className="mt-1 inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700"
+                                title={((line.config_snapshot as any)?.factory_review_reasons || []).join('\n') || 'Needs factory review'}
+                              >
+                                Factory review
+                              </div>
+                            )}
                           </div>
                           )}
                         </td>

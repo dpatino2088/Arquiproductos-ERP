@@ -11,6 +11,7 @@ import VariantsStepComponent from '../../../curtain-config/VariantsStep';
 import OperatingSystemStepComponent from '../../../curtain-config/OperatingSystemStep';
 import HardwareStepComponent from '../../../curtain-config/HardwareStep';
 import ReviewStepComponent from '../../../curtain-config/ReviewStep';
+import { validateMeasurements } from '../../measurementValidation';
 
 const ROLLER_SHADE_STEPS: ProductStep[] = [
   { id: 'manufacturer', label: 'MANUFACTURER', component: ManufacturerStepComponent, isRequired: true },
@@ -30,7 +31,7 @@ function validateStep(stepId: string, config: ProductConfig): boolean {
       return !!(rollerConfig as any).manufacturer;
 
     case 'measurements':
-      return !!(rollerConfig.width_mm && rollerConfig.height_mm);
+      return !!(rollerConfig.width_mm && rollerConfig.height_mm) && validateMeasurements(rollerConfig as any).valid;
 
     case 'variants': {
       // Catalog path: collection + variantId
