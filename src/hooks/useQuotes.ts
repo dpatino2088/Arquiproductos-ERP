@@ -766,9 +766,11 @@ export function useQuoteLines(quoteId: string | null) {
             Accessories: components.accessories,
             CatalogItems: line.catalog_item_id ? catalogItemsMap.get(line.catalog_item_id) || null : null,
             ConfiguredProduct: configuredProduct || null,
+            // Canonical source for line configuration is ConfiguredProducts.config_snapshot.
+            // Keep QuoteLines.config_snapshot as fallback only for missing keys.
             config_snapshot: {
-              ...(configuredProduct?.config_snapshot || {}),
               ...(line.config_snapshot || {}),
+              ...(configuredProduct?.config_snapshot || {}),
             },
             bom_preview_snapshot: snapshot || null,
             // Created by = del Quote (QuoteLines no tiene created_by_user_id)

@@ -1789,7 +1789,7 @@ export default function QuoteNew() {
         // 3. Read CP_NEW from backend — this is the ONLY source of truth
         const { data: cpNew } = await supabase
           .from('ConfiguredProducts')
-          .select('width_mm, height_mm, roll_catalog_item_id, roll_sku, roll_collection_name, roll_variant_name')
+          .select('width_mm, height_mm, roll_catalog_item_id, roll_sku, roll_collection_name, roll_variant_name, config_snapshot')
           .eq('id', cpNewId)
           .eq('organization_id', activeOrganizationId)
           .maybeSingle();
@@ -1843,7 +1843,9 @@ export default function QuoteNew() {
           fabric_drop: (productConfig as any).fabricDrop ?? (productConfig as any).drop_type ?? null,
           installation_type: (productConfig as any).installationType ?? null,
           installation_location: (productConfig as any).installationLocation ?? null,
-          config_snapshot: refreshedConfigSnapshot,
+          // Persist the backend-canonical snapshot generated for the new ConfiguredProduct.
+          // This avoids stale/mixed measurements in QuoteLine list rendering.
+          config_snapshot: cpNew?.config_snapshot ?? refreshedConfigSnapshot,
           drive_type: normalizedDriveType ?? null,
           // NOTE: drive_system_label is NOT a QuoteLines column — it is a derived
           // label recomputed in useQuotes from drive_type + manufacturer. Do not
