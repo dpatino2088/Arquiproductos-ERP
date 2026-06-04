@@ -56,13 +56,25 @@ export async function generateNextSequentialNumber(
 }
 
 /**
- * Generates the next Quote number. Per dealer when dealerId is provided.
+ * Generates the next Quote number (org-wide sequential, atomic via DB RPC).
+ * Uses generate_next_quote_number() RPC which holds an advisory lock so
+ * concurrent requests can never receive the same number.
+ * Falls back to the client-side MAX scan if the RPC is unavailable.
  */
 export async function generateNextQuoteNumber(
   organizationId: string,
-  dealerId?: string | null
+  _dealerId?: string | null  // kept for API compatibility — numbering is always org-wide
 ): Promise<string> {
-  return generateNextSequentialNumber('QT', 'Quotes', 'quote_no', organizationId, dealerId);
+  try {
+    const { data, error } = await supabase.rpc('generate_next_quote_number', {
+      p_org_id: organizationId,
+    });
+    if (!error && typeof data === 'string' && data.startsWith('QT-')) return data;
+    if (error) throw error;
+  } catch {
+    // RPC not available yet — fall back to client-side scan
+  }
+  return generateNextSequentialNumber('QT', 'Quotes', 'quote_no', organizationId);
 }
 
 /**
