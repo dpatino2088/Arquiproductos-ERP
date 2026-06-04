@@ -1270,7 +1270,11 @@ export default function QuoteNew() {
 
   // Calculate totals from quote lines: unit × qty (misma lógica que la tabla para que no varíe el unitario al cambiar qty)
   const totals = useMemo(() => {
+    // Lines currently being edited inline (existing service lines) live in
+    // draftServiceLines with their real id; skip them here to avoid double count.
+    const editingIds = new Set(draftServiceLines.map((d) => d.id).filter((id) => !id.startsWith('temp-')));
     const subtotal = quoteLines.reduce((sum, line: any) => {
+      if (editingIds.has(line.id)) return sum;
       const { lineTotal } = getEffectiveLinePrices(line, useDealerPrice, dealerDiscountPctForDisplay);
       return sum + lineTotal;
     }, 0);
@@ -3486,6 +3490,24 @@ export default function QuoteNew() {
 
   // Handle edit line
   const handleEditLine = (lineId: string) => {
+    // Service / custom lines are edited inline (no configurator)
+    const target = quoteLines.find((l: any) => l.id === lineId) as any;
+    if (target && target.product_type === 'service') {
+      if (draftServiceLines.some((d) => d.id === lineId)) return; // already editing
+      const eff = getEffectiveLinePrices(target, true, dealerDiscountPctForDisplay);
+      setDraftServiceLines((prev) => [
+        ...prev,
+        {
+          id: lineId,
+          name: target.name ?? '',
+          qty: String(Math.max(1, Number(target.quantity) || 1)),
+          unit_price: String(eff.unitPrice ?? 0),
+          area: target.area ?? '',
+          position: target.position ?? '',
+        },
+      ]);
+      return;
+    }
     setEditingLineId(lineId);
     // Don't show configurator immediately - wait for loadLineConfig to finish
     // The useEffect will show it after config is loaded
@@ -3526,24 +3548,29 @@ export default function QuoteNew() {
         if (!d.name.trim()) continue;
         const qty = Math.max(1, Number(d.qty) || 1);
         const unitPrice = Math.max(0, Number(d.unit_price) || 0);
-        const { data: inserted } = await supabase
-          .from('QuoteLines')
-          .insert({
-            organization_id: activeOrganizationId,
-            quote_id: quoteId,
-            dealer_id: quoteRow?.dealer_id ?? null,
-            product_type: 'service',
-            product_type_id: servicePTId,
-            name: d.name.trim(),
-            quantity: qty,
-            area: d.area.trim() || null,
-            position: d.position.trim() || null,
-          })
-          .select('id')
-          .single();
-        if (inserted?.id) {
+        const isExisting = !d.id.startsWith('temp-');
+        let targetId: string | null = isExisting ? d.id : null;
+        if (!isExisting) {
+          const { data: inserted } = await supabase
+            .from('QuoteLines')
+            .insert({
+              organization_id: activeOrganizationId,
+              quote_id: quoteId,
+              dealer_id: quoteRow?.dealer_id ?? null,
+              product_type: 'service',
+              product_type_id: servicePTId,
+              name: d.name.trim(),
+              quantity: qty,
+              area: d.area.trim() || null,
+              position: d.position.trim() || null,
+            })
+            .select('id')
+            .single();
+          targetId = inserted?.id ?? null;
+        }
+        if (targetId) {
           await supabase.rpc('set_service_quote_line_pricing', {
-            p_quote_line_id: inserted.id,
+            p_quote_line_id: targetId,
             p_name: d.name.trim(),
             p_unit_price: unitPrice,
             p_qty: qty,
@@ -5154,6 +5181,8 @@ export default function QuoteNew() {
                 </thead>
                 <tbody className="divide-y divide-gray-200">
                   {quoteLines.map((line: any, index: number) => {
+                    // Hide rows currently being edited inline (shown as editable draft below)
+                    if (draftServiceLines.some((d) => d.id === line.id)) return null;
                     // Extract data from line
                     const area = line.area ?? null;
                     const position = line.position ?? null;
@@ -5381,17 +5410,20 @@ export default function QuoteNew() {
                         </td>
                         <td className="py-4 pl-3 pr-3 whitespace-nowrap text-right" style={{ width: '140px' }}>
                           <div className="flex items-center gap-0.5 justify-end">
-                            <button
-                              type="button"
-                              onClick={() => setPreviewLineId(line.id)}
-                              className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
-                              title="View configured product (customer view)"
-                            >
-                              <Eye className="w-4 h-4" />
-                            </button>
+                            {/* Preview (CP customer view) — not applicable to service lines */}
+                            {!isServiceLine && (
+                              <button
+                                type="button"
+                                onClick={() => setPreviewLineId(line.id)}
+                                className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                                title="View configured product (customer view)"
+                              >
+                                <Eye className="w-4 h-4" />
+                              </button>
+                            )}
                             {!isOrdered && (
                               <>
-                                {!isPortal && (
+                                {!isPortal && !isServiceLine && (
                                   <button
                                     onClick={() => openCommercialAdjustment(line)}
                                     className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
@@ -5400,13 +5432,16 @@ export default function QuoteNew() {
                                     <Settings2 className="w-4 h-4" />
                                   </button>
                                 )}
-                                <button
-                                  onClick={() => handleDuplicateLine(line.id)}
-                                  className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
-                                  title="Duplicar línea"
-                                >
-                                  <Copy className="w-4 h-4" />
-                                </button>
+                                {/* Duplicate clones the CP — not applicable to service lines */}
+                                {!isServiceLine && (
+                                  <button
+                                    onClick={() => handleDuplicateLine(line.id)}
+                                    className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                                    title="Duplicar línea"
+                                  >
+                                    <Copy className="w-4 h-4" />
+                                  </button>
+                                )}
                                 <button
                                   onClick={() => handleEditLine(line.id)}
                                   className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
@@ -5431,8 +5466,11 @@ export default function QuoteNew() {
                   {/* ── Draft custom / service lines ── */}
                   {draftServiceLines.map((d) => (
                     <tr key={d.id} className="border-b border-gray-100 bg-blue-50/30">
+                      {/* drag */}
                       <td className="py-3 px-2 w-10" />
+                      {/* # */}
                       <td className="py-3 px-1 text-center text-gray-400 text-sm w-[28px]">—</td>
+                      {/* Area */}
                       <td className="py-3 px-2">
                         <input
                           className="w-full text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary/40"
@@ -5441,6 +5479,7 @@ export default function QuoteNew() {
                           onChange={(e) => updateCustomLineDraft(d.id, { area: e.target.value })}
                         />
                       </td>
+                      {/* Position */}
                       <td className="py-3 px-2">
                         <input
                           className="w-full text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary/40"
@@ -5449,8 +5488,10 @@ export default function QuoteNew() {
                           onChange={(e) => updateCustomLineDraft(d.id, { position: e.target.value })}
                         />
                       </td>
+                      {/* Product type */}
                       <td className="py-3 pl-4 pr-2 text-center text-sm font-medium text-gray-500">Service</td>
-                      <td className="py-3 px-2" colSpan={2}>
+                      {/* Description */}
+                      <td className="py-3 px-2">
                         <input
                           className="w-full text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary/40"
                           placeholder="Description (e.g. Shipping, Installation…)"
@@ -5459,38 +5500,47 @@ export default function QuoteNew() {
                           autoFocus
                         />
                       </td>
-                      <td className="py-3 px-2 text-center">
+                      {/* System Drive (n/a) */}
+                      <td className="py-3 px-2 text-center text-gray-300 text-sm">—</td>
+                      {/* Measurements (n/a — empty) */}
+                      <td className="py-3 px-2" />
+                      {/* Qty (multiplier) — type=text avoids the number spinner that pushes the digit left */}
+                      <td className="py-3 pl-1 pr-2 text-right">
                         <input
-                          type="number"
-                          min="1"
-                          step="1"
+                          type="text"
                           inputMode="numeric"
-                          className="w-16 text-sm border border-gray-300 rounded px-2 py-1 text-center focus:outline-none focus:ring-1 focus:ring-primary/40"
+                          className="w-full text-sm border border-gray-300 rounded pl-1 pr-[3px] py-1 text-right tabular-nums focus:outline-none focus:ring-1 focus:ring-primary/40"
                           value={d.qty}
                           onChange={(e) => updateCustomLineDraft(d.id, { qty: e.target.value.replace(/[^0-9]/g, '') })}
                           onBlur={(e) => { if (!e.target.value || Number(e.target.value) < 1) updateCustomLineDraft(d.id, { qty: '1' }); }}
                         />
                       </td>
-                      <td className="py-3 px-2 text-right">
+                      {/* Dealer price / unit price */}
+                      <td className="py-3 pl-2 pr-2 text-right" style={{ width: '92px' }}>
                         <input
                           type="text"
                           inputMode="decimal"
                           placeholder="0.00"
-                          className="w-24 text-sm border border-gray-300 rounded px-2 py-1 text-right focus:outline-none focus:ring-1 focus:ring-primary/40"
+                          className="w-[84px] text-sm border border-gray-300 rounded px-2 py-1 text-right focus:outline-none focus:ring-1 focus:ring-primary/40"
                           value={d.unit_price}
                           onChange={(e) => updateCustomLineDraft(d.id, { unit_price: e.target.value.replace(/[^0-9.]/g, '') })}
                         />
                       </td>
-                      <td className="py-3 px-2 text-right font-medium text-gray-900 text-sm whitespace-nowrap">
+                      {/* Total */}
+                      <td className="py-3 pl-2 pr-4 text-right font-medium text-gray-900 text-sm tabular-nums whitespace-nowrap" style={{ width: '96px' }}>
                         {formatCurrency((Number(d.unit_price) || 0) * Math.max(1, Number(d.qty) || 1), watch('currency') as string ?? 'USD')}
                       </td>
-                      <td className="py-3 px-2">
-                        <div className="flex items-center justify-end gap-1">
+                      {/* Actions */}
+                      <td className="py-3 pl-3 pr-3 whitespace-nowrap text-right" style={{ width: '140px' }}>
+                        <div className="flex items-center gap-0.5 justify-end">
+                          <span className="p-1.5 rounded text-gray-300" aria-hidden><Eye className="w-4 h-4" /></span>
+                          <span className="p-1.5 rounded text-gray-300" aria-hidden><Copy className="w-4 h-4" /></span>
+                          <span className="p-1.5 rounded text-gray-300" aria-hidden><Edit className="w-4 h-4" /></span>
                           <button
                             type="button"
                             onClick={() => removeCustomLineDraft(d.id)}
-                            className="p-1.5 hover:bg-red-50 rounded transition-colors text-red-500"
-                            title="Remove custom line"
+                            className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
+                            title="Delete line"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>

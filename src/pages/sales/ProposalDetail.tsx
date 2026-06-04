@@ -1301,6 +1301,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           styleCode,
         });
         const isCatalogLine = String(productTypeRaw ?? '').trim().toLowerCase() === 'catalog';
+        const isServiceLine = String(productTypeRaw ?? '').trim().toLowerCase() === 'service';
         const catalogColor = isCatalogLine ? (qlInfo?.catalog_color ?? null) : null;
         const baseName = snapFrozen?.name ?? snapFrozen?.sku ?? qlInfo?.name ?? qlInfo?.sku ?? null;
         const catalogDescription = isCatalogLine && baseName
@@ -1310,14 +1311,14 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           area: snapFrozen?.area ?? qlInfo?.area ?? null,
           position: snapFrozen?.position ?? qlInfo?.position ?? null,
           product_type: productTypeName ?? null,
-          collection_name: snapFrozen?.collection_name ?? qlInfo?.collection_name ?? null,
-          variant_name: snapFrozen?.variant_name ?? qlInfo?.variant_name ?? null,
-          drive_type: snapFrozen?.drive_type ?? qlInfo?.drive_type ?? null,
-          drive_system_label: snapFrozen?.drive_system_label ?? qlInfo?.drive_system_label ?? null,
+          collection_name: isServiceLine ? null : (snapFrozen?.collection_name ?? qlInfo?.collection_name ?? null),
+          variant_name: isServiceLine ? null : (snapFrozen?.variant_name ?? qlInfo?.variant_name ?? null),
+          drive_type: isServiceLine ? null : (snapFrozen?.drive_type ?? qlInfo?.drive_type ?? null),
+          drive_system_label: isServiceLine ? null : (snapFrozen?.drive_system_label ?? qlInfo?.drive_system_label ?? null),
           description: catalogDescription ?? draperyTrackDescription ?? baseName,
-          sku: snapFrozen?.sku ?? qlInfo?.sku ?? null,
-          dimensions: dimensions ?? null,
-          panel_count,
+          sku: isServiceLine ? null : (snapFrozen?.sku ?? qlInfo?.sku ?? null),
+          dimensions: isServiceLine ? null : (dimensions ?? null),
+          panel_count: isServiceLine ? null : panel_count,
           opening_direction:
             (snapFrozen as { opening_direction?: string } | null)?.opening_direction ??
             (qlInfo?.config_snapshot as { opening_direction?: string; openingDirection?: string } | null)?.opening_direction ??
