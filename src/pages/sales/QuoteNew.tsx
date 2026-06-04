@@ -4201,6 +4201,16 @@ export default function QuoteNew() {
           operating_system_sku_name: line.drive_system_label ?? null,
           width_m: line.width_m,
           height_m: line.height_m,
+          dimensions_source: isCatalogLine
+            ? null
+            : {
+                width_m: line.width_m,
+                height_m: line.height_m,
+                width_mm: line.config_snapshot?.width_mm,
+                height_mm: line.config_snapshot?.height_mm,
+                measurements: line.config_snapshot?.measurements,
+                panels: line.config_snapshot?.panels,
+              },
           qty: n,
           line_total: lineTotal,
           accessories: accessoriesStr,
