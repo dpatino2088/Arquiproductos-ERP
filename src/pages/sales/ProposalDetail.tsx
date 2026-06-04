@@ -912,9 +912,12 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
       if (!proposal || !canWrite) return;
       const line = displayLines.find((l) => l.id === proposalLineId);
       if (!line) return;
+      // Qty multiplier: installation is priced per curtain unit, so sale_amount = unit_cost × markup × qty.
+      // fixed_price mode bypasses this (caller already provides the total).
+      const lineQty = getProposalLineQty(line, line.quote_line_id ? quoteLinesMap.get(line.quote_line_id) : undefined);
       const saleAmount = addon.pricing_mode === 'fixed_price' && addon.sale_amount != null
         ? addon.sale_amount
-        : (addon.cost_amount ?? 0) * (1 + ((addon.markup_pct ?? 0) / 100));
+        : (addon.cost_amount ?? 0) * (1 + ((addon.markup_pct ?? 0) / 100)) * Math.max(1, lineQty);
       const existingList = draftAddonsMap.get(proposalLineId) || [];
       const existing = existingList.find((a) => a.addon_type === (addon.addon_type || 'installation'));
       const newAddon: ProposalLineAddOn = {
