@@ -5088,9 +5088,13 @@ export default function QuoteNew() {
                         })()
                       : isDraperyTrackOnly
                         ? (draperyStyleLabel ? `Style: ${draperyStyleLabel}` : 'Style: —')
-                      : (line.collection_name && line.variant_name
-                          ? `${line.collection_name} - ${line.variant_name}`
-                          : line.collection_name || line.variant_name || 'N/A');
+                      : (() => {
+                          const systemMfr = (line.config_snapshot as any)?.manufacturer ?? null;
+                          const fabricDesc = line.collection_name && line.variant_name
+                            ? `${line.collection_name} - ${line.variant_name}`
+                            : line.collection_name || line.variant_name || 'N/A';
+                          return systemMfr ? `${systemMfr} | ${fabricDesc}` : fabricDesc;
+                        })();
                     const driveType = line.drive_type;
                     const driveLabel = line.drive_system_label
                       ? line.drive_system_label
