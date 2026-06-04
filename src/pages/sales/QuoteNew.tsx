@@ -779,7 +779,9 @@ export default function QuoteNew() {
   const [globalCommercialOpen, setGlobalCommercialOpen] = useState(false);
 
   // ── Custom / service lines (inline-editable, saved on Quote save) ──
-  type ServiceLineDraft = { id: string; name: string; qty: number; unit_price: number; area: string; position: string };
+  // qty/unit_price are kept as raw strings while editing to avoid controlled
+  // number-input quirks (stuck leading zero); parsed to numbers on save/total.
+  type ServiceLineDraft = { id: string; name: string; qty: string; unit_price: string; area: string; position: string };
   const [draftServiceLines, setDraftServiceLines] = useState<ServiceLineDraft[]>([]);
   const [savingServiceLines, setSavingServiceLines] = useState(false);
   const [globalCommercialDiscountPct, setGlobalCommercialDiscountPct] = useState<string>('');
@@ -1272,7 +1274,11 @@ export default function QuoteNew() {
       const { lineTotal } = getEffectiveLinePrices(line, useDealerPrice, dealerDiscountPctForDisplay);
       return sum + lineTotal;
     }, 0);
-    const draftSubtotal = draftServiceLines.reduce((sum, d) => sum + d.unit_price * Math.max(1, d.qty), 0);
+    const draftSubtotal = draftServiceLines.reduce((sum, d) => {
+      const price = Number(d.unit_price) || 0;
+      const qty = Math.max(1, Number(d.qty) || 1);
+      return sum + price * qty;
+    }, 0);
     const combined = subtotal + draftSubtotal;
     const taxAmount = exemptTax ? 0 : Math.round(combined * taxPct * 100) / 100;
     const total = exemptTax ? combined : combined + taxAmount;
@@ -3490,7 +3496,7 @@ export default function QuoteNew() {
     if (!quoteId) return;
     setDraftServiceLines((prev) => [
       ...prev,
-      { id: `temp-${Date.now()}`, name: '', qty: 1, unit_price: 0, area: '', position: '' },
+      { id: `temp-${Date.now()}`, name: '', qty: '1', unit_price: '', area: '', position: '' },
     ]);
   };
 
@@ -3518,6 +3524,8 @@ export default function QuoteNew() {
       const quoteRow = quoteData as any;
       for (const d of draftServiceLines) {
         if (!d.name.trim()) continue;
+        const qty = Math.max(1, Number(d.qty) || 1);
+        const unitPrice = Math.max(0, Number(d.unit_price) || 0);
         const { data: inserted } = await supabase
           .from('QuoteLines')
           .insert({
@@ -3527,7 +3535,7 @@ export default function QuoteNew() {
             product_type: 'service',
             product_type_id: servicePTId,
             name: d.name.trim(),
-            quantity: Math.max(1, d.qty),
+            quantity: qty,
             area: d.area.trim() || null,
             position: d.position.trim() || null,
           })
@@ -3537,8 +3545,8 @@ export default function QuoteNew() {
           await supabase.rpc('set_service_quote_line_pricing', {
             p_quote_line_id: inserted.id,
             p_name: d.name.trim(),
-            p_unit_price: d.unit_price,
-            p_qty: Math.max(1, d.qty),
+            p_unit_price: unitPrice,
+            p_qty: qty,
             p_area: d.area.trim() || null,
             p_position: d.position.trim() || null,
           });
@@ -5456,23 +5464,25 @@ export default function QuoteNew() {
                           type="number"
                           min="1"
                           step="1"
+                          inputMode="numeric"
                           className="w-16 text-sm border border-gray-300 rounded px-2 py-1 text-center focus:outline-none focus:ring-1 focus:ring-primary/40"
                           value={d.qty}
-                          onChange={(e) => updateCustomLineDraft(d.id, { qty: Math.max(1, Number(e.target.value) || 1) })}
+                          onChange={(e) => updateCustomLineDraft(d.id, { qty: e.target.value.replace(/[^0-9]/g, '') })}
+                          onBlur={(e) => { if (!e.target.value || Number(e.target.value) < 1) updateCustomLineDraft(d.id, { qty: '1' }); }}
                         />
                       </td>
                       <td className="py-3 px-2 text-right">
                         <input
-                          type="number"
-                          min="0"
-                          step="0.01"
+                          type="text"
+                          inputMode="decimal"
+                          placeholder="0.00"
                           className="w-24 text-sm border border-gray-300 rounded px-2 py-1 text-right focus:outline-none focus:ring-1 focus:ring-primary/40"
                           value={d.unit_price}
-                          onChange={(e) => updateCustomLineDraft(d.id, { unit_price: Math.max(0, Number(e.target.value) || 0) })}
+                          onChange={(e) => updateCustomLineDraft(d.id, { unit_price: e.target.value.replace(/[^0-9.]/g, '') })}
                         />
                       </td>
                       <td className="py-3 px-2 text-right font-medium text-gray-900 text-sm whitespace-nowrap">
-                        {formatCurrency(d.unit_price * Math.max(1, d.qty), watch('currency') as string ?? 'USD')}
+                        {formatCurrency((Number(d.unit_price) || 0) * Math.max(1, Number(d.qty) || 1), watch('currency') as string ?? 'USD')}
                       </td>
                       <td className="py-3 px-2">
                         <div className="flex items-center justify-end gap-1">
