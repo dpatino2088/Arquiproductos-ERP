@@ -777,6 +777,11 @@ export default function QuoteNew() {
   const [commercialNote, setCommercialNote] = useState('');
   const [savingCommercial, setSavingCommercial] = useState(false);
   const [globalCommercialOpen, setGlobalCommercialOpen] = useState(false);
+
+  // ── Custom / service lines (inline-editable, saved on Quote save) ──
+  type ServiceLineDraft = { id: string; name: string; qty: number; unit_price: number; area: string; position: string };
+  const [draftServiceLines, setDraftServiceLines] = useState<ServiceLineDraft[]>([]);
+  const [savingServiceLines, setSavingServiceLines] = useState(false);
   const [globalCommercialDiscountPct, setGlobalCommercialDiscountPct] = useState<string>('');
   const [globalCommercialReason, setGlobalCommercialReason] = useState('');
   const [globalCommercialNote, setGlobalCommercialNote] = useState('');
@@ -1267,11 +1272,13 @@ export default function QuoteNew() {
       const { lineTotal } = getEffectiveLinePrices(line, useDealerPrice, dealerDiscountPctForDisplay);
       return sum + lineTotal;
     }, 0);
-    const taxAmount = exemptTax ? 0 : Math.round(subtotal * taxPct * 100) / 100;
-    const total = exemptTax ? subtotal : subtotal + taxAmount;
+    const draftSubtotal = draftServiceLines.reduce((sum, d) => sum + d.unit_price * Math.max(1, d.qty), 0);
+    const combined = subtotal + draftSubtotal;
+    const taxAmount = exemptTax ? 0 : Math.round(combined * taxPct * 100) / 100;
+    const total = exemptTax ? combined : combined + taxAmount;
 
-    return { subtotal, tax: taxAmount, total };
-  }, [quoteLines, useDealerPrice, dealerDiscountPctForDisplay, taxPct, exemptTax]);
+    return { subtotal: combined, tax: taxAmount, total };
+  }, [quoteLines, draftServiceLines, useDealerPrice, dealerDiscountPctForDisplay, taxPct, exemptTax]);
 
   // Handle product configuration completion
   const handleProductConfigComplete = async (productConfig: ProductConfig) => {
@@ -3478,6 +3485,72 @@ export default function QuoteNew() {
     // The useEffect will show it after config is loaded
   };
 
+  // ── Custom / service line handlers ──
+  const addCustomLine = () => {
+    if (!quoteId) return;
+    setDraftServiceLines((prev) => [
+      ...prev,
+      { id: `temp-${Date.now()}`, name: '', qty: 1, unit_price: 0, area: '', position: '' },
+    ]);
+  };
+
+  const updateCustomLineDraft = (id: string, fields: Partial<ServiceLineDraft>) => {
+    setDraftServiceLines((prev) => prev.map((d) => (d.id === id ? { ...d, ...fields } : d)));
+  };
+
+  const removeCustomLineDraft = (id: string) => {
+    setDraftServiceLines((prev) => prev.filter((d) => d.id !== id));
+  };
+
+  const saveCustomLines = async (): Promise<void> => {
+    if (!quoteId || !activeOrganizationId || draftServiceLines.length === 0) return;
+    setSavingServiceLines(true);
+    try {
+      // Resolve 'service' product_type_id once
+      const { data: servicePT } = await supabase
+        .from('ProductTypes')
+        .select('id')
+        .eq('code', 'service')
+        .eq('organization_id', activeOrganizationId)
+        .single();
+      const servicePTId = servicePT?.id ?? null;
+
+      const quoteRow = quoteData as any;
+      for (const d of draftServiceLines) {
+        if (!d.name.trim()) continue;
+        const { data: inserted } = await supabase
+          .from('QuoteLines')
+          .insert({
+            organization_id: activeOrganizationId,
+            quote_id: quoteId,
+            dealer_id: quoteRow?.dealer_id ?? null,
+            product_type: 'service',
+            product_type_id: servicePTId,
+            name: d.name.trim(),
+            quantity: Math.max(1, d.qty),
+            area: d.area.trim() || null,
+            position: d.position.trim() || null,
+          })
+          .select('id')
+          .single();
+        if (inserted?.id) {
+          await supabase.rpc('set_service_quote_line_pricing', {
+            p_quote_line_id: inserted.id,
+            p_name: d.name.trim(),
+            p_unit_price: d.unit_price,
+            p_qty: Math.max(1, d.qty),
+            p_area: d.area.trim() || null,
+            p_position: d.position.trim() || null,
+          });
+        }
+      }
+      setDraftServiceLines([]);
+      refetchLines();
+    } finally {
+      setSavingServiceLines(false);
+    }
+  };
+
   const handleDuplicateLine = async (lineId: string) => {
     if (!activeOrganizationId) return;
     try {
@@ -3950,13 +4023,14 @@ export default function QuoteNew() {
             : null;
         const productTypeCode = String(line.product_type ?? '').trim().toLowerCase();
         const isCatalogLine = productTypeCode === 'catalog';
+        const isServiceLine = productTypeCode === 'service';
         return {
           id: line.id,
           sku: line.sku ?? line.CatalogItems?.sku ?? null,
           catalog_code: line.CatalogItems?.sku ?? null,
           area: line.area,
           position: line.position,
-          product_type: line.ProductType?.name ?? line.product_type ?? '—',
+          product_type: isServiceLine ? 'Service' : (line.ProductType?.name ?? line.product_type ?? '—'),
           style_code: line.config_snapshot?.style_code ?? line.config_snapshot?.styleCode ?? null,
           track_only: Boolean(line.config_snapshot?.track_only),
           has_side_channel:
@@ -3971,11 +4045,12 @@ export default function QuoteNew() {
             || line.config_snapshot?.bottom_channel === true,
           collection_name: line.collection_name,
           variant_name: line.variant_name,
-          drive_type: line.drive_type,
-          operating_system_sku_name: line.drive_system_label ?? null,
+          drive_type: isServiceLine ? null : line.drive_type,
+          operating_system_sku_name: isServiceLine ? null : (line.drive_system_label ?? null),
           width_m: line.width_m,
           height_m: line.height_m,
-          dimensions_source: isCatalogLine
+          service_name: isServiceLine ? (line.name ?? null) : null,
+          dimensions_source: (isCatalogLine || isServiceLine)
             ? null
             : {
                 width_m: line.width_m,
@@ -3987,7 +4062,7 @@ export default function QuoteNew() {
               },
           qty: n,
           line_total: lineTotal,
-          accessories: accessoriesStr,
+          accessories: isServiceLine ? null : accessoriesStr,
           CatalogItems: line.CatalogItems ?? null,
           catalog_name: isCatalogLine ? (line.name ?? line.CatalogItems?.name ?? null) : null,
           catalog_color: isCatalogLine ? (line.CatalogItems?.color ?? null) : null,
@@ -4176,13 +4251,14 @@ export default function QuoteNew() {
             : null;
         const productTypeCode = String(line.product_type ?? '').trim().toLowerCase();
         const isCatalogLine = productTypeCode === 'catalog';
+        const isServiceLine = productTypeCode === 'service';
         return {
           id: line.id,
           sku: line.sku ?? line.CatalogItems?.sku ?? null,
           catalog_code: line.CatalogItems?.sku ?? null,
           area: line.area,
           position: line.position,
-          product_type: line.ProductType?.name ?? line.product_type ?? '—',
+          product_type: isServiceLine ? 'Service' : (line.ProductType?.name ?? line.product_type ?? '—'),
           style_code: line.config_snapshot?.style_code ?? line.config_snapshot?.styleCode ?? null,
           track_only: Boolean(line.config_snapshot?.track_only),
           has_side_channel:
@@ -4197,11 +4273,12 @@ export default function QuoteNew() {
             || line.config_snapshot?.bottom_channel === true,
           collection_name: line.collection_name,
           variant_name: line.variant_name,
-          drive_type: line.drive_type,
-          operating_system_sku_name: line.drive_system_label ?? null,
+          drive_type: isServiceLine ? null : line.drive_type,
+          operating_system_sku_name: isServiceLine ? null : (line.drive_system_label ?? null),
           width_m: line.width_m,
           height_m: line.height_m,
-          dimensions_source: isCatalogLine
+          service_name: isServiceLine ? (line.name ?? null) : null,
+          dimensions_source: (isCatalogLine || isServiceLine)
             ? null
             : {
                 width_m: line.width_m,
@@ -4213,7 +4290,7 @@ export default function QuoteNew() {
               },
           qty: n,
           line_total: lineTotal,
-          accessories: accessoriesStr,
+          accessories: isServiceLine ? null : accessoriesStr,
           CatalogItems: line.CatalogItems ?? null,
           catalog_name: isCatalogLine ? (line.name ?? line.CatalogItems?.name ?? null) : null,
           catalog_color: isCatalogLine ? (line.CatalogItems?.color ?? null) : null,
@@ -4526,6 +4603,10 @@ export default function QuoteNew() {
             window.history.replaceState(null, '', `/sales/quotes/${created.id}/edit`);
           }
         }
+      }
+      // Persist any pending custom/service line drafts
+      if (draftServiceLines.length > 0) {
+        await saveCustomLines();
       }
     } catch (err: any) {
       // Format error message to avoid [circular] reference
@@ -5005,6 +5086,15 @@ export default function QuoteNew() {
                 </button>
                 )}
                 {!isOrdered && (
+                <>
+                <button
+                  type="button"
+                  onClick={addCustomLine}
+                  className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium"
+                >
+                  <Plus className="w-4 h-4" />
+                  Custom Line
+                </button>
                 <button
                   type="button"
                   onClick={() => {
@@ -5017,6 +5107,7 @@ export default function QuoteNew() {
                   <Plus className="w-4 h-4" />
                   Add Line
                 </button>
+                </>
                 )}
               </div>
             </div>
@@ -5061,9 +5152,11 @@ export default function QuoteNew() {
 
                     const isCatalogLine = line.product_type === 'catalog';
                     const isFilmLine = line.product_type === 'window_film';
+                    const isServiceLine = line.product_type === 'service';
                     const isDraperyTrackOnly =
                       !isCatalogLine &&
                       !isFilmLine &&
+                      !isServiceLine &&
                       String(line.product_type || '').trim().toLowerCase() === 'drapery' &&
                       Boolean(line.config_snapshot?.track_only);
                     const draperyStyleLabel = normalizeStyleLabel(
@@ -5074,10 +5167,13 @@ export default function QuoteNew() {
                           ? String(line.CatalogItems.item_role).replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())
                           : 'Catalog')
                       : isFilmLine ? 'Window Film'
+                      : isServiceLine ? 'Service'
                       : isDraperyTrackOnly
                         ? 'Drapery Track'
                         : (line.ProductType?.name || line.product_type || 'N/A');
-                    const collectionDisplay = (isCatalogLine || isFilmLine)
+                    const collectionDisplay = isServiceLine
+                      ? (line.name?.trim() || '—')
+                      : (isCatalogLine || isFilmLine)
                       ? (() => {
                           const itemName = line.CatalogItems?.name || line.name || '';
                           const itemSku = line.CatalogItems?.sku || line.sku || '';
@@ -5106,7 +5202,7 @@ export default function QuoteNew() {
                     const catalogMfr = (isCatalogLine || isFilmLine)
                       ? ((line.CatalogItems?.Manufacturers as any)?.name || line.CatalogItems?.manufacturer || null)
                       : null;
-                    const driveDisplay = (isCatalogLine || isFilmLine) ? (catalogMfr || '—') : driveLabel;
+                    const driveDisplay = isServiceLine ? '—' : (isCatalogLine || isFilmLine) ? (catalogMfr || '—') : driveLabel;
                     const snap = line.config_snapshot ?? {};
                     const isRealItemId = (value: unknown): boolean =>
                       typeof value === 'string' && value.trim().length > 10 && value.toUpperCase() !== 'NONE';
@@ -5324,6 +5420,74 @@ export default function QuoteNew() {
                       </tr>
                     );
                   })}
+                  {/* ── Draft custom / service lines ── */}
+                  {draftServiceLines.map((d) => (
+                    <tr key={d.id} className="border-b border-gray-100 bg-blue-50/30">
+                      <td className="py-3 px-2 w-10" />
+                      <td className="py-3 px-1 text-center text-gray-400 text-sm w-[28px]">—</td>
+                      <td className="py-3 px-2">
+                        <input
+                          className="w-full text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary/40"
+                          placeholder="Area"
+                          value={d.area}
+                          onChange={(e) => updateCustomLineDraft(d.id, { area: e.target.value })}
+                        />
+                      </td>
+                      <td className="py-3 px-2">
+                        <input
+                          className="w-full text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary/40"
+                          placeholder="Position"
+                          value={d.position}
+                          onChange={(e) => updateCustomLineDraft(d.id, { position: e.target.value })}
+                        />
+                      </td>
+                      <td className="py-3 pl-4 pr-2 text-center text-sm font-medium text-gray-500">Service</td>
+                      <td className="py-3 px-2" colSpan={2}>
+                        <input
+                          className="w-full text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary/40"
+                          placeholder="Description (e.g. Shipping, Installation…)"
+                          value={d.name}
+                          onChange={(e) => updateCustomLineDraft(d.id, { name: e.target.value })}
+                          autoFocus
+                        />
+                      </td>
+                      <td className="py-3 px-2 text-center">
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          className="w-16 text-sm border border-gray-300 rounded px-2 py-1 text-center focus:outline-none focus:ring-1 focus:ring-primary/40"
+                          value={d.qty}
+                          onChange={(e) => updateCustomLineDraft(d.id, { qty: Math.max(1, Number(e.target.value) || 1) })}
+                        />
+                      </td>
+                      <td className="py-3 px-2 text-right">
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          className="w-24 text-sm border border-gray-300 rounded px-2 py-1 text-right focus:outline-none focus:ring-1 focus:ring-primary/40"
+                          value={d.unit_price}
+                          onChange={(e) => updateCustomLineDraft(d.id, { unit_price: Math.max(0, Number(e.target.value) || 0) })}
+                        />
+                      </td>
+                      <td className="py-3 px-2 text-right font-medium text-gray-900 text-sm whitespace-nowrap">
+                        {formatCurrency(d.unit_price * Math.max(1, d.qty), watch('currency') as string ?? 'USD')}
+                      </td>
+                      <td className="py-3 px-2">
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            type="button"
+                            onClick={() => removeCustomLineDraft(d.id)}
+                            className="p-1.5 hover:bg-red-50 rounded transition-colors text-red-500"
+                            title="Remove custom line"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>

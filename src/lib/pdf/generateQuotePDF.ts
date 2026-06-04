@@ -357,11 +357,17 @@ export function generateQuotePDF(
   const buildDescription = (line: QuotePDFLine): string => {
     const skuCode = line.sku?.trim() || '';
     const catalogCode = line.catalog_code?.trim() || line.CatalogItems?.sku?.trim() || '';
-    const isCatalog = String(line.product_type ?? '').trim().toLowerCase() === 'catalog';
+    const ptCode = String(line.product_type ?? '').trim().toLowerCase();
+    const isCatalog = ptCode === 'catalog';
+    const isService = ptCode === 'service';
     const singleCode = isCatalog
       ? (catalogCode || skuCode)
       : (skuCode || catalogCode);
     const codeLine = singleCode || '';
+
+    if (isService) {
+      return (line as any).service_name?.trim() || line.sku?.trim() || '—';
+    }
 
     const isDraperyTrackOnly =
       String(line.product_type ?? '').trim().toLowerCase() === 'drapery' &&
