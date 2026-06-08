@@ -2,7 +2,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { CatalogItem } from '../types/catalog';
 
 const MSRP_BATCH = 200; // .in() puts UUIDs in URL; 200 * 36 chars ≈ 7KB, safe for PostgREST
-const MAX_LIST_SIZE = 2500;
+const MAX_LIST_SIZE = 5000;
+const PAGE_CHUNK = 1000; // page through to bypass PostgREST row caps
 
 type MsrpRow = { dealer_price: number; msrp: number; total_cost: number; shipping_cost: number; import_tax_cost: number };
 
@@ -79,39 +80,65 @@ export async function fetchCatalogItemsList(
   }
 ): Promise<CatalogItem[]> {
   const { orgId, filters } = params;
-  const pageSize = Math.min(filters?.pageSize ?? 500, MAX_LIST_SIZE);
-  const from = ((filters?.page ?? 1) - 1) * pageSize;
+  // status: 'all' => active + inactive | 'active' / 'inactive' => filtered.
+  const status = (filters?.status ?? 'all').toLowerCase();
+  const targetSize = Math.min(filters?.pageSize ?? 500, MAX_LIST_SIZE);
+  const categoryId = filters?.categoryId;
+  const searchTerm = filters?.q && filters.q.trim().length >= 2 ? `%${filters.q.trim()}%` : null;
 
-  let q = supabase
-    .from('CatalogItems')
-    .select('*, Manufacturers(name)')
-    .eq('organization_id', orgId)
-    .eq('is_active', true)
-    .order('sku', { ascending: true })
-    .range(from, from + pageSize - 1);
+  const buildQuery = (from: number, to: number) => {
+    let q = supabase
+      .from('CatalogItems')
+      .select('*, Manufacturers(name)')
+      .eq('organization_id', orgId)
+      .order('sku', { ascending: true })
+      .range(from, to);
+    if (status === 'active') q = q.eq('is_active', true);
+    else if (status === 'inactive') q = q.eq('is_active', false);
+    if (categoryId) q = q.eq('category_id', categoryId);
+    if (searchTerm) q = q.or(`sku.ilike.${searchTerm},name.ilike.${searchTerm}`);
+    return q;
+  };
 
-  if (filters?.categoryId) {
-    q = q.eq('category_id', filters.categoryId);
+  // Page through in chunks so a backend row cap (e.g. 1000/req) never truncates
+  // the list. `effective` locks to the server's real page size after batch #1.
+  const list: Record<string, unknown>[] = [];
+  let offset = 0;
+  let effective = PAGE_CHUNK;
+  let firstBatch = true;
+  for (;;) {
+    const want = Math.min(effective, targetSize - offset);
+    if (want <= 0) break;
+    const { data, error } = await buildQuery(offset, offset + want - 1);
+    if (error) throw error;
+    const batch = (data || []) as Record<string, unknown>[];
+    list.push(...batch);
+    if (firstBatch && batch.length > 0) {
+      effective = batch.length;
+      firstBatch = false;
+    }
+    offset += batch.length;
+    if (batch.length === 0 || batch.length < effective) break; // last (partial) page
   }
-  if (filters?.q && filters.q.trim().length >= 2) {
-    const term = `%${filters.q.trim()}%`;
-    q = q.or(`sku.ilike.${term},name.ilike.${term}`);
-  }
-
-  const { data: rows, error } = await q;
-  if (error) throw error;
-  const list = (rows || []) as Record<string, unknown>[];
 
   const ids = list.map((r) => r.id as string).filter(Boolean);
   const msrpMap = new Map<string, MsrpRow>();
   if (ids.length > 0) {
+    // Fire all MSRP batches concurrently (no sequential waterfall).
+    const batches: string[][] = [];
     for (let i = 0; i < ids.length; i += MSRP_BATCH) {
-      const batch = ids.slice(i, i + MSRP_BATCH);
-      const { data: msrpData } = await supabase
-        .from('CatalogItemsMSRP')
-        .select('catalog_item_id, dealer_price, msrp, total_cost, shipping_cost, import_tax_cost')
-        .eq('organization_id', orgId)
-        .in('catalog_item_id', batch);
+      batches.push(ids.slice(i, i + MSRP_BATCH));
+    }
+    const results = await Promise.all(
+      batches.map((batch) =>
+        supabase
+          .from('CatalogItemsMSRP')
+          .select('catalog_item_id, dealer_price, msrp, total_cost, shipping_cost, import_tax_cost')
+          .eq('organization_id', orgId)
+          .in('catalog_item_id', batch)
+      )
+    );
+    results.forEach(({ data: msrpData }) => {
       (msrpData || []).forEach((row: Record<string, unknown>) => {
         if (row?.catalog_item_id) {
           msrpMap.set(row.catalog_item_id as string, {
@@ -123,7 +150,7 @@ export async function fetchCatalogItemsList(
           });
         }
       });
-    }
+    });
   }
 
   const items = enrichItems(list, msrpMap).filter((it) => it?.id && (it.sku || it.name || it.item_name));

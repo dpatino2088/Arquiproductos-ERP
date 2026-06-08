@@ -13,7 +13,8 @@ import {
 import type { ManufacturersRef } from './Manufacturers';
 import type { CategoriesRef } from './Categories';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { useCatalogItems, useDeleteCatalogItem, useCatalogCategories } from '../../hooks/useCatalog';
+import { useDeleteCatalogItem, useCatalogCategories } from '../../hooks/useCatalog';
+import { useCatalogItemsList } from '../../hooks/useCatalogItemsList';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useActiveDealer } from '../../hooks/useActiveDealer';
 import { useAccessContext } from '../../hooks/useAccessContext';
@@ -183,7 +184,14 @@ export default function Items() {
   const { can } = usePermissions();
   const canViewBOM = can('catalog.bom.read') || can('catalog.bom.write') || can('catalog.write');
   const { canCreate: canCreateCat, canArchive: canArchiveCat, canDelete: canDeleteCat } = useGranularAccess('catalog');
-  const { items, loading, loadingMore, error, refetch } = useCatalogItems({ includeInactive: true });
+  // Cached React Query list (status 'all' => active + inactive; client-side filters/pagination below).
+  const catalogListFilters = useMemo(() => ({ status: 'all', pageSize: 3000 }), []);
+  const catalogList = useCatalogItemsList({ filters: catalogListFilters });
+  const items = catalogList.items;
+  const loading = catalogList.isInitialLoading; // blank only on cold first load (no cache)
+  const loadingMore = catalogList.isRefreshing; // "Updating…" while refetching with data present
+  const error = catalogList.error;
+  const refetch = catalogList.refetch;
   const { categories: catalogCategories } = useCatalogCategories();
   const { dialogState, showConfirm, closeDialog, setLoading, handleConfirm } = useConfirmDialog();
   const setGlobalLoading = useUIStore((s) => s.setGlobalLoading);

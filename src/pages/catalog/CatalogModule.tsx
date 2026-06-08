@@ -66,7 +66,7 @@ export default function CatalogModule({ activeTab }: Props) {
       activeDealerId: activeDealerId ?? null,
       userRole: userType,
     });
-    const filtersStable = { q: '', categoryId: '', status: 'all', sortKey: 'sku', page: 1, pageSize: 500 };
+    const filtersStable = { q: '', categoryId: '', status: 'all', sortKey: 'sku', page: 1, pageSize: 3000 };
     warmModuleQueries(queryClient, [
       {
         queryKey: catalogItemsListKey(scopeKey, filtersStable),
