@@ -2,6 +2,7 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { errorTracker } from '../lib/error-tracker';
 import { logger } from '../lib/logger';
+import { isChunkLoadFailureText, recoverFromChunkLoadFailure } from '../lib/chunk-recovery';
 
 interface Props {
   children: ReactNode;
@@ -12,20 +13,36 @@ interface Props {
 interface State {
   hasError: boolean;
   error?: Error;
+  recovering: boolean;
 }
 
 class ErrorBoundary extends Component<Props, State> {
   constructor(props: Props) {
     super(props);
-    this.state = { hasError: false };
+    this.state = { hasError: false, recovering: false };
   }
 
   static getDerivedStateFromError(error: Error): State {
-    // Update state so the next render will show the fallback UI
-    return { hasError: true, error };
+    // A failed React.lazy import surfaces here (not as unhandledrejection), so
+    // detect chunk-load failures and show the "updating" state while we recover.
+    const recovering = isChunkLoadFailureText(error?.message || '');
+    return { hasError: true, error, recovering };
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    // Stale chunk after a new deploy: clear caches/SW and reload (bounded retries).
+    if (isChunkLoadFailureText(error?.message || '')) {
+      void recoverFromChunkLoadFailure(error?.message).then((scheduled) => {
+        // Budget exhausted: fall back to the normal error UI so the user can
+        // refresh manually instead of staying on a blank "updating" screen.
+        if (!scheduled) this.setState({ recovering: false });
+      });
+      logger.warn('Error boundary caught a chunk load failure; attempting recovery', {
+        message: error?.message,
+      });
+      return;
+    }
+
     // Log the error
     logger.error('Error boundary caught an error', error, {
       errorInfo,
@@ -47,6 +64,24 @@ class ErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.hasError) {
+      // Chunk-load failure recovery in progress: show a lightweight updating
+      // state instead of "Something went wrong" while the reload kicks in.
+      if (this.state.recovering) {
+        return (
+          <div className="min-h-[400px] flex items-center justify-center p-6">
+            <div className="text-center max-w-md">
+              <div className="w-10 h-10 mx-auto mb-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+              <h2 className="text-lg font-semibold text-gray-900 mb-1">
+                Updating to the latest version…
+              </h2>
+              <p className="text-sm text-gray-600">
+                A new version was deployed. Reloading automatically.
+              </p>
+            </div>
+          </div>
+        );
+      }
+
       // Custom fallback UI
       if (this.props.fallback) {
         return this.props.fallback;
