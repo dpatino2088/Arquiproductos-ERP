@@ -11,6 +11,30 @@ interface CatalogItemStepProps {
   onUpdate: (updates: Partial<ProductConfig>) => void;
 }
 
+// Catalog image thumbnail with graceful fallback to a Package icon.
+// Uses the same image_url as the catalog (public storage URL).
+function CatalogThumb({ url, className = '' }: { url?: string | null; className?: string }) {
+  const [failed, setFailed] = useState(false);
+  const hasImage = !!url && !failed;
+  return (
+    <div
+      className={`rounded-lg bg-gray-100 border border-gray-200 overflow-hidden flex items-center justify-center ${className}`}
+    >
+      {hasImage ? (
+        <img
+          src={url as string}
+          alt=""
+          loading="lazy"
+          className="w-full h-full object-cover"
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <Package className="w-1/2 h-1/2 text-gray-400" />
+      )}
+    </div>
+  );
+}
+
 export default function CatalogItemStep({ config, onUpdate }: CatalogItemStepProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [showDropdown, setShowDropdown] = useState(false);
@@ -35,6 +59,15 @@ export default function CatalogItemStep({ config, onUpdate }: CatalogItemStepPro
     if (!found) return '';
     return String((found as any).color || (found as any).variant_name || '').trim();
   }, [cfg.color, selectedItemId, catalogItems]);
+
+  // Resolve image: prefer cfg.image_url, fall back to lookup by catalog_item_id
+  const selectedImageUrl: string = useMemo(() => {
+    if (cfg.image_url && String(cfg.image_url).trim()) return String(cfg.image_url).trim();
+    if (!selectedItemId) return '';
+    const found = catalogItems.find((it) => it.id === selectedItemId);
+    if (!found) return '';
+    return String((found as any).image_url || (found as any).metadata?.image || '').trim();
+  }, [cfg.image_url, selectedItemId, catalogItems]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -65,19 +98,22 @@ export default function CatalogItemStep({ config, onUpdate }: CatalogItemStepPro
   const filteredResults = useMemo(() => {
     if (!searchTerm.trim()) return [];
     const lower = searchTerm.toLowerCase().trim();
+    // Multi-token: every word must match somewhere (AND across tokens, OR across fields)
+    const tokens = lower.split(/\s+/).filter(Boolean);
     const results = searchableItems.filter(item => {
-      const name = String((item as any).item_name || item.name || '').toLowerCase();
-      const sku = String(item.sku || '').toLowerCase();
-      const desc = String((item as any).description || '').toLowerCase();
-      const color = String((item as any).color || '').toLowerCase();
-      const variant = String((item as any).variant_name || '').toLowerCase();
-      return (
-        name.includes(lower)
-        || sku.includes(lower)
-        || desc.includes(lower)
-        || color.includes(lower)
-        || variant.includes(lower)
-      );
+      const haystack = [
+        (item as any).item_name || item.name,
+        item.sku,
+        (item as any).description,
+        (item as any).color,
+        (item as any).variant_name,
+        (item as any).manufacturer,
+        (item as any).item_role,
+        (item as any).collection_name,
+      ]
+        .map((v) => String(v || '').toLowerCase())
+        .join(' ');
+      return tokens.every((t) => haystack.includes(t));
     });
     return results
       .sort((a, b) => {
@@ -93,13 +129,14 @@ export default function CatalogItemStep({ config, onUpdate }: CatalogItemStepPro
         if (bName.startsWith(lower) && !aName.startsWith(lower)) return 1;
         return aName.localeCompare(bName);
       })
-      .slice(0, 10);
+      .slice(0, 25);
   }, [searchTerm, searchableItems]);
 
   const handleSelectItem = (item: CatalogItem) => {
     const itemName = (item as any).item_name || item.name || 'Unknown';
     const unitPrice = (item as any).msrp || item.unit_price || 0;
     const itemColor = (item as any).color || (item as any).variant_name || '';
+    const itemImage = (item as any).image_url || (item as any).metadata?.image || '';
     setSearchTerm('');
     setShowDropdown(false);
     onUpdate({
@@ -107,6 +144,7 @@ export default function CatalogItemStep({ config, onUpdate }: CatalogItemStepPro
       name: itemName,
       sku: item.sku || '',
       color: itemColor,
+      image_url: itemImage,
       unit_price: unitPrice,
       qty: qty || 1,
     } as any);
@@ -161,9 +199,7 @@ export default function CatalogItemStep({ config, onUpdate }: CatalogItemStepPro
           <div className="border border-blue-200 bg-blue-50 rounded-lg p-4">
             <div className="flex items-start justify-between">
               <div className="flex items-start gap-3 flex-1 min-w-0">
-                <div className="p-2 bg-blue-100 rounded-lg mt-0.5 flex-shrink-0">
-                  <Package className="w-5 h-5 text-blue-600" />
-                </div>
+                <CatalogThumb url={selectedImageUrl} className="w-12 h-12 mt-0.5 flex-shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-gray-900">
                     {selectedName}
@@ -216,7 +252,7 @@ export default function CatalogItemStep({ config, onUpdate }: CatalogItemStepPro
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                 <Input
                   type="text"
-                  placeholder="Search by name, SKU, description..."
+                  placeholder="Search by name, SKU, manufacturer, role..."
                   value={searchTerm}
                   onChange={(e) => {
                     setSearchTerm(e.target.value);
@@ -242,14 +278,17 @@ export default function CatalogItemStep({ config, onUpdate }: CatalogItemStepPro
                     const sku = item.sku || '';
                     const unitPrice = (item as any).msrp || item.unit_price || 0;
                     const role = (item as any).item_role || '';
+                    const manufacturer = (item as any).manufacturer || '';
                     const color = (item as any).color || (item as any).variant_name || '';
+                    const imageUrl = (item as any).image_url || (item as any).metadata?.image || '';
                     return (
                       <button
                         key={item.id}
                         onClick={() => handleSelectItem(item)}
                         className="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-100 last:border-b-0"
                       >
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between gap-3">
+                          <CatalogThumb url={imageUrl} className="w-10 h-10 flex-shrink-0" />
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium text-gray-900 truncate">
                               {itemName}
@@ -259,6 +298,7 @@ export default function CatalogItemStep({ config, onUpdate }: CatalogItemStepPro
                             </p>
                             <div className="flex items-center gap-2 mt-0.5">
                               {sku && <span className="text-xs text-gray-500">SKU: {sku}</span>}
+                              {manufacturer && <span className="text-xs text-gray-400">{manufacturer}</span>}
                               {role && <span className="text-xs text-gray-400 capitalize">{role}</span>}
                             </div>
                           </div>
