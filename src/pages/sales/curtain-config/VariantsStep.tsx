@@ -37,6 +37,8 @@ export default function VariantsStep({ config, onUpdate, policy: policyProp }: V
 
   const isDrapery = (config as any).productType === 'drapery';
   const trackOnly = !!(config as any).track_only;
+  // Dealer/client supplies the fabric ("ghost fabric"): keep the cut list, drop fabric cost.
+  const dealerSupplyFabric = !!(config as any).dealer_supply_fabric;
 
   // Get productTypeId from config (set by ProductStep)
   const productTypeId = (config as any).productTypeId || (config as any).product_type_id;
@@ -844,6 +846,25 @@ export default function VariantsStep({ config, onUpdate, policy: policyProp }: V
     }
   };
 
+  const handleDealerSupplyToggle = (enabled: boolean) => {
+    if (enabled) {
+      // Ghost fabric: drop the selected fabric (no cost) but keep the cut list.
+      onUpdate({
+        dealer_supply_fabric: true,
+        variantId: undefined,
+        fabric_catalog_item_id: undefined,
+        fabric_variant_id: undefined,
+        variantName: undefined,
+        variant_name: undefined,
+        collectionName: undefined,
+        collection_name: undefined,
+        collectionId: undefined,
+      } as any);
+    } else {
+      onUpdate({ dealer_supply_fabric: false } as any);
+    }
+  };
+
   return (
     <div className="max-w-4xl mx-auto">
       <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-6">
@@ -865,6 +886,24 @@ export default function VariantsStep({ config, onUpdate, policy: policyProp }: V
           </div>
         )}
 
+        {!isDrapery && !trackOnly && (
+          <div className="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg">
+            <div>
+              <p className="text-sm font-medium text-gray-900">Dealer Supply Fabric</p>
+              <p className="text-xs text-gray-500">Client provides the fabric — we still produce the cut list, but the fabric cost is removed from the quote (labor & hardware stay).</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={dealerSupplyFabric}
+              onClick={() => handleDealerSupplyToggle(!dealerSupplyFabric)}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 ${dealerSupplyFabric ? 'bg-gray-900' : 'bg-gray-300'}`}
+            >
+              <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${dealerSupplyFabric ? 'translate-x-5' : 'translate-x-0'}`} />
+            </button>
+          </div>
+        )}
+
         {trackOnly ? (
           <div className="text-center py-12 space-y-3">
             <div className="mx-auto w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center">
@@ -874,6 +913,16 @@ export default function VariantsStep({ config, onUpdate, policy: policyProp }: V
             </div>
             <p className="text-sm font-medium text-gray-900">No fabric required</p>
             <p className="text-xs text-gray-500">Only track, hardware, and accessories will be quoted.</p>
+          </div>
+        ) : dealerSupplyFabric ? (
+          <div className="text-center py-12 space-y-3">
+            <div className="mx-auto w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center">
+              <svg className="w-8 h-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 9.75h16.5m-16.5 0v8.25a1.5 1.5 0 0 0 1.5 1.5h13.5a1.5 1.5 0 0 0 1.5-1.5V9.75m-16.5 0L5.25 4.5h13.5l1.5 5.25M9 13.5h6" />
+              </svg>
+            </div>
+            <p className="text-sm font-medium text-gray-900">Dealer-supplied fabric</p>
+            <p className="text-xs text-gray-500 max-w-md mx-auto">The cut list will still be calculated from the measurements and cutting rules. The fabric itself is provided by the client, so its cost is excluded from the quote — labor and hardware remain.</p>
           </div>
         ) : (
           catalogContent

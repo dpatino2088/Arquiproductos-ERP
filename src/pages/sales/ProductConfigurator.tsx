@@ -131,7 +131,7 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
     'bottom_channel_item_id', 'bottom_channel_sku', 'tube_item_id', 'tube_sku',
     'drive_item_id', 'drive_sku', 'motor_item_id', 'motor_sku', 'bracket_item_id', 'bracket_sku', 'operation_type', 'drive_type',
     '_manufacturer_filtered_templates', '_hardware_filtered_templates',
-    'measurements', 'panels', 'bottom_bar_wrapped',
+    'measurements', 'panels', 'bottom_bar_wrapped', 'dealer_supply_fabric',
   ] as const;
 
   // Any update to these fields can change BOM template resolution.
@@ -974,8 +974,9 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
     // FASE 3: Validate based on BOMTemplate questions (if template is available)
       if (questions) {
       const isTrackOnly = !!(configAny as any).track_only;
+      const isDealerSupplyFabric = !!(configAny as any).dealer_supply_fabric;
       const hasVariant = !!(normalizedConfig.fabric_variant_id || normalizedConfig.variantId);
-      if (questions.requiredSteps.variants && !hasVariant && !isTrackOnly) {
+      if (questions.requiredSteps.variants && !hasVariant && !isTrackOnly && !isDealerSupplyFabric) {
         errors.push('Fabric variant is required');
       }
       if (questions.requiredSteps.operatingSystem) {
@@ -1225,7 +1226,10 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
             // to apply LaborRules.bottom_bar_wrap_rate_per_m. Must be persisted here.
             bottom_bar_wrapped: configAny.bottom_bar_wrapped === true,
             track_only: configAny.track_only || false,
-            roll_catalog_item_id: configAny.track_only ? null : ((finalNormalizedConfig.fabric_variant_id || configAny.variantId || configAny.catalogItemId) || null),
+            // ✅ Dealer-supplied (ghost) fabric: cost engine reads config_snapshot->>'dealer_supply_fabric'
+            // to compute the cut list with zero fabric cost/price and no fabric name.
+            dealer_supply_fabric: configAny.dealer_supply_fabric === true,
+            roll_catalog_item_id: (configAny.track_only || configAny.dealer_supply_fabric) ? null : ((finalNormalizedConfig.fabric_variant_id || configAny.variantId || configAny.catalogItemId) || null),
             quantity: finalNormalizedConfig.quantity || 1,
             // ✅ Drop e instalación (para QuoteLines vía commit y config_snapshot)
             fabricDrop: configAny.fabricDrop ?? configAny.fabric_drop ?? null,
@@ -1418,6 +1422,7 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
       (finalNormalizedConfig as any).drive_side = configAny.driveSide ?? configAny.drive_side ?? null;
       (finalNormalizedConfig as any).driveSide = (finalNormalizedConfig as any).drive_side;
       (finalNormalizedConfig as any).track_only = configAny.track_only ?? false;
+      (finalNormalizedConfig as any).dealer_supply_fabric = configAny.dealer_supply_fabric ?? false;
       (finalNormalizedConfig as any).force_track_join = configAny.forceTrackJoin ?? configAny.force_track_join ?? false;
       (finalNormalizedConfig as any).bottom_hem_cm = configAny.bottom_hem_cm ?? null;
       (finalNormalizedConfig as any).bottom_hem_profile = configAny.bottom_hem_profile ?? null;

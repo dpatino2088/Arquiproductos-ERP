@@ -42,6 +42,10 @@ export interface UnifiedProductConfig {
   // Bottom bar wrapped with fabric (adds labor surcharge via LaborRules.bottom_bar_wrap_rate_per_m)
   bottom_bar_wrapped?: boolean;
 
+  // Dealer/client supplies the fabric ("ghost fabric"): keep the cut list but
+  // exclude fabric cost/price and never show a fabric name. Labor & hardware stay.
+  dealer_supply_fabric?: boolean;
+
   // Accessories
   accessories?: Array<{ id: string; name: string; qty: number; price: number }>;
 }
@@ -89,6 +93,9 @@ export function normalizeConfig(config: Partial<UnifiedProductConfig>): UnifiedP
 
     // Bottom bar wrapped flag (preserve so it reaches config_snapshot → labor wrap surcharge)
     bottom_bar_wrapped: (config as any).bottom_bar_wrapped ?? false,
+
+    // Dealer-supplied (ghost) fabric flag (preserve so it reaches config_snapshot)
+    dealer_supply_fabric: (config as any).dealer_supply_fabric ?? false,
 
     // Accessories
     accessories: config.accessories || [],

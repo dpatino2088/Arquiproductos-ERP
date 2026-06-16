@@ -34,6 +34,8 @@ function validateStep(stepId: string, config: ProductConfig): boolean {
       return !!(tripleConfig.width_mm && tripleConfig.height_mm) && validateMeasurements(tripleConfig as any).valid;
 
     case 'variants': {
+      // Dealer-supplied (ghost) fabric: no fabric selection required
+      if ((tripleConfig as any).dealer_supply_fabric) return true;
       const hasCollection = !!(
         (tripleConfig as any).collectionName ||
         (tripleConfig as any).collection_name ||

@@ -34,6 +34,8 @@ function validateStep(stepId: string, config: ProductConfig): boolean {
       return !!(rollerConfig.width_mm && rollerConfig.height_mm) && validateMeasurements(rollerConfig as any).valid;
 
     case 'variants': {
+      // Dealer-supplied (ghost) fabric: no fabric selection required
+      if ((rollerConfig as any).dealer_supply_fabric) return true;
       // Catalog path: collection + variantId
       const hasCollection = !!(
         (rollerConfig as any).collectionName ||

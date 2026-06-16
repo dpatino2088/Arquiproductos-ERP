@@ -30,6 +30,7 @@ function validateStep(stepId: string, config: ProductConfig): boolean {
     case 'measurements':
       return !!(awningConfig.width_mm && awningConfig.height_mm) && validateMeasurements(awningConfig as any).valid;
     case 'variants':
+      if ((awningConfig as any).dealer_supply_fabric) return true;
       return !!(awningConfig.fabric?.collectionId && awningConfig.fabric?.variantId);
     case 'operating-system': {
       const hasDriveType = !!((awningConfig as any).drive_type || awningConfig.operatingSystem);

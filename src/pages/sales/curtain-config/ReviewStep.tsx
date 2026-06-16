@@ -909,8 +909,23 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
               </div>
             )}
 
+            {/* Dealer Supply Fabric indicator (ghost fabric: cut list kept, fabric cost excluded) */}
+            {(config as any).dealer_supply_fabric && (
+              <div className="pb-5 border-b border-gray-200">
+                <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                  <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-gray-200">
+                    <svg className="w-4 h-4 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 9.75h16.5m-16.5 0v8.25a1.5 1.5 0 0 0 1.5 1.5h13.5a1.5 1.5 0 0 0 1.5-1.5V9.75m-16.5 0L5.25 4.5h13.5l1.5 5.25M9 13.5h6" /></svg>
+                  </span>
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">Dealer-supplied fabric</p>
+                    <p className="text-xs text-gray-500">Client provides the fabric — cut list included, fabric cost excluded. Labor & hardware remain.</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Fabric Technical Data Section */}
-            {hasRollData && !(config as any).track_only && (
+            {hasRollData && !(config as any).track_only && !(config as any).dealer_supply_fabric && (
               <div className="pb-5 border-b border-gray-200">
                 <h3 className="text-sm font-semibold text-gray-700 mb-3">Roll (Fabric) – technical data</h3>
                 <div className="grid grid-cols-2 gap-x-8 gap-y-0 text-sm">

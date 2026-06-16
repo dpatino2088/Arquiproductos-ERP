@@ -207,6 +207,8 @@ export interface DraperyConfig extends BaseProductConfig {
   driveSide?: 'left' | 'right';
   // Track Only — customer supplies their own fabric
   track_only?: boolean;
+  // Dealer Supply Fabric — client provides the fabric: keep cut list, drop fabric cost/price, no fabric name
+  dealer_supply_fabric?: boolean;
   // Fabric
   fabric?: {
     manufacturer?: 'coulisse' | 'vertilux';
