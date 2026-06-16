@@ -297,6 +297,28 @@ const buildBreakdown = (
   return { raw, lines };
 };
 
+/**
+ * Compute the labor breakdown for a SPECIFIC rule (no matcher). Display-only.
+ * Use to reconstruct, for verification, how a stored labor cost was composed when
+ * the matched rule id is already known (e.g. from ConfiguredProducts.labor_calc_meta).
+ * Mirrors the SQL math; intermediate rounding (round_to_increment) is NOT applied here,
+ * so callers should reconcile the sum against the authoritative rounded cost.
+ */
+export function computeLaborBreakdownForRule(
+  rule: LaborRuleRow,
+  ctx: LaborTestContext,
+): { laborCost: number; rawCost: number; breakdown: LaborTestBreakdownLine[] } {
+  const { raw, lines } = buildBreakdown(rule as LaborRuleRow & Record<string, any>, ctx);
+  let bounded = raw;
+  if (rule.min_charge != null) bounded = Math.max(bounded, Number(rule.min_charge));
+  if (rule.max_charge != null) bounded = Math.min(bounded, Number(rule.max_charge));
+  return {
+    laborCost: Number(bounded.toFixed(4)),
+    rawCost: Number(raw.toFixed(4)),
+    breakdown: lines,
+  };
+}
+
 export function resolveLaborRuleClient(rules: LaborRuleRow[], ctx: LaborTestContext): LaborTestResult {
   const candidates = rules
     .filter((rule) => ruleApplies(rule, ctx))

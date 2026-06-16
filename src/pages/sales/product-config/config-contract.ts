@@ -38,7 +38,10 @@ export interface UnifiedProductConfig {
   operation_type?: 'manual' | 'motor';
   operating_system_variant?: string | null;
   bottom_rail_type?: 'standard' | 'wrapped' | null;
-  
+
+  // Bottom bar wrapped with fabric (adds labor surcharge via LaborRules.bottom_bar_wrap_rate_per_m)
+  bottom_bar_wrapped?: boolean;
+
   // Accessories
   accessories?: Array<{ id: string; name: string; qty: number; price: number }>;
 }
@@ -83,7 +86,10 @@ export function normalizeConfig(config: Partial<UnifiedProductConfig>): UnifiedP
     operation_type: config.operation_type || (config.drive_type === 'manual' ? 'manual' : config.drive_type === 'motorized' ? 'motor' : undefined),
     operating_system_variant: config.operating_system_variant || null,
     bottom_rail_type: config.bottom_rail_type || null,
-    
+
+    // Bottom bar wrapped flag (preserve so it reaches config_snapshot → labor wrap surcharge)
+    bottom_bar_wrapped: (config as any).bottom_bar_wrapped ?? false,
+
     // Accessories
     accessories: config.accessories || [],
   };

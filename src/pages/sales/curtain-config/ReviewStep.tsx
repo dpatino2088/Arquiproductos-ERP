@@ -9,6 +9,8 @@ import { formatMoney, formatUom } from '../../../lib/format';
 import { useCostSettings } from '../../../hooks/useCosts';
 import { computeSelectedSnapshotTotals } from '../../../lib/bom/snapshotSelectedTotals';
 import { useAccessContext } from '../../../hooks/useAccessContext';
+import { computeLaborBreakdownForRule, type LaborTestBreakdownLine } from '../../../lib/laborRules';
+import type { LaborRuleRow } from '../../../hooks/useCostEngineSettings';
 
 // ============================================================================
 // BOM Preview Snapshot types (from ConfiguredProducts.bom_preview_snapshot)
@@ -616,6 +618,64 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
     if (msrpMaterials <= 0 || laborPctDec <= 0) return 0;
     return msrpMaterials * laborPctDec;
   }, [effectiveTotals]);
+
+  // ── Labor COST breakdown (verification, display-only) ────────────────
+  // Reconstructs how the stored labor COST was composed (base, heatseal, bottom bar
+  // wrap, confection, size escalation) from the authoritative ConfiguredProducts.labor_calc_meta
+  // (which carries the matched rule_id + input context) plus the matched LaborRule rates.
+  // It does NOT recompute or alter any stored price — it mirrors the SQL engine for transparency.
+  const laborMeta = useMemo(
+    () => (snapshotTotals as any)?.labor_calc_meta || (configuredProductTotals as any)?.labor_meta || null,
+    [snapshotTotals, configuredProductTotals],
+  );
+  const [laborRule, setLaborRule] = useState<LaborRuleRow | null>(null);
+  useEffect(() => {
+    const ruleId = laborMeta?.rule_id;
+    if (!ruleId || laborMeta?.source !== 'labor_rule') {
+      setLaborRule(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from('LaborRules')
+        .select('*')
+        .eq('id', ruleId)
+        .maybeSingle();
+      if (!cancelled && !error && data) setLaborRule(data as LaborRuleRow);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [laborMeta?.rule_id, laborMeta?.source]);
+
+  const laborCostBreakdown = useMemo(() => {
+    if (!laborRule || !laborMeta) return null;
+    const ctx = laborMeta.context || {};
+    const lines: LaborTestBreakdownLine[] = computeLaborBreakdownForRule(laborRule, {
+      productTypeId: (laborRule as any).product_type_id ?? null,
+      widthMm: Number(ctx.width_mm ?? 0),
+      heightMm: Number(ctx.height_mm ?? 0),
+      panelCount: Number(ctx.panel_count ?? 1),
+      drops: Number(ctx.drops ?? 1),
+      hasMotor: Boolean(ctx.has_motor),
+      operatingType: ctx.operating_type ?? null,
+      materialsCost: Number(laborMeta.materials_cost ?? 0),
+      heatsealLengthM: Number(ctx.heatseal_length_m ?? 0),
+      bottomBarWrapped: Boolean(ctx.bottom_bar_wrapped),
+    }).breakdown.filter((l) => l.active || Math.abs(l.contribution) > 0.005);
+    const sum = lines.reduce((s, l) => s + (Number(l.contribution) || 0), 0);
+    const authoritative = Number(laborMeta.rounded_cost ?? laborMeta.raw_cost ?? sum);
+    const rounding = authoritative - sum;
+    return {
+      lines,
+      sum,
+      authoritative,
+      rounding,
+      ruleName: laborMeta.display_name ?? (laborRule as any).display_name ?? 'Labor rule',
+      calcMode: laborMeta.calc_mode ?? (laborRule as any).calc_mode ?? null,
+    };
+  }, [laborRule, laborMeta]);
 
   // Pricing ladder params from totals/settings
   const t = totals as Record<string, number> | null;
@@ -1444,6 +1504,46 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
                           </td>
                           <td className="px-3 py-2 whitespace-nowrap text-right font-medium text-gray-900">
                             ${effectiveLaborMsrpAmount.toFixed(2)}
+                          </td>
+                        </tr>
+                      )}
+                      {/* Labor COST breakdown (verification): how the labor cost was composed from the matched LaborRule */}
+                      {laborCostBreakdown && laborCostBreakdown.lines.length > 0 && (
+                        <tr className="bg-amber-50/40">
+                          <td colSpan={6} className="px-3 py-2 pl-7">
+                            <div className="text-[11px] text-gray-600 space-y-1">
+                              <div className="font-semibold text-gray-700">
+                                Labor cost breakdown — verification
+                                {laborCostBreakdown.ruleName && (
+                                  <span className="ml-1 font-normal text-gray-500">
+                                    (rule: {laborCostBreakdown.ruleName}
+                                    {laborCostBreakdown.calcMode ? ` · ${laborCostBreakdown.calcMode}` : ''})
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[10px] text-gray-400 italic">
+                                Cost figures (pre-MSRP). These compose the labor cost; the Labor MSRP above is this cost marked up.
+                              </div>
+                              {laborCostBreakdown.lines.map((l, li) => (
+                                <div key={li} className="flex items-baseline justify-between gap-4">
+                                  <span className="text-gray-600">
+                                    <span className="font-medium text-gray-700">{l.label}</span>
+                                    <span className="ml-2 text-gray-400">{l.description}</span>
+                                  </span>
+                                  <span className="tabular-nums text-gray-700 shrink-0">{formatMoney(l.contribution)}</span>
+                                </div>
+                              ))}
+                              {Math.abs(laborCostBreakdown.rounding) > 0.005 && (
+                                <div className="flex items-baseline justify-between gap-4">
+                                  <span className="text-gray-500">Rounding / min-max adjustment</span>
+                                  <span className="tabular-nums text-gray-600 shrink-0">{formatMoney(laborCostBreakdown.rounding)}</span>
+                                </div>
+                              )}
+                              <div className="flex items-baseline justify-between gap-4 border-t border-amber-200 pt-1 mt-1">
+                                <span className="font-semibold text-gray-700">Total labor cost</span>
+                                <span className="tabular-nums font-semibold text-gray-900 shrink-0">{formatMoney(laborCostBreakdown.authoritative)}</span>
+                              </div>
+                            </div>
                           </td>
                         </tr>
                       )}

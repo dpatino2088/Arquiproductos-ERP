@@ -33,6 +33,7 @@ const COLORS = {
   materials: '#8b5cf6',
   labor: '#f59e0b',
   accessories: '#06b6d4',
+  services: '#ec4899',
   profit: '#22c55e',
 };
 
@@ -98,22 +99,28 @@ export default function QuotePerformanceTab({
     let totalMaterials = 0;
     let totalLabor = 0;
     let totalAccessories = 0;
+    let totalServices = 0;
     let totalCost = 0;
     let totalRevenue = 0; // Before tax
 
     const lineDetails = lines.map((l, idx) => {
       const qty = l.quantity || 0;
       const revenue = Number(l.dealer_price_total ?? l.msrp ?? 0) || 0;
+      const isService = (l.product_type ?? '').toLowerCase() === 'service';
       const fabricCost = (Number(l.roll_cost_snapshot ?? 0) || 0) * qty;
       const materialsCost = (Number(l.bom_cost_snapshot ?? 0) || 0) * qty;
       const laborCost = (Number(l.labor_cost_snapshot ?? 0) || 0) * qty;
       const accessoriesCost = (Number(l.accessories_cost_snapshot ?? 0) || 0) * qty;
       const lineCost = (Number(l.unit_cost_total_snapshot ?? 0) || 0) * qty;
+      // Custom/service lines carry their cost only in unit_cost_total_snapshot
+      // (no roll/bom/labor/accessories split), so they go to their own bucket.
+      const servicesCost = isService ? lineCost : 0;
 
       totalFabric += fabricCost;
       totalMaterials += materialsCost;
       totalLabor += laborCost;
       totalAccessories += accessoriesCost;
+      totalServices += servicesCost;
       totalCost += lineCost;
       totalRevenue += revenue;
 
@@ -145,6 +152,7 @@ export default function QuotePerformanceTab({
       totalMaterials,
       totalLabor,
       totalAccessories,
+      totalServices,
       totalCost,
       totalRevenue,
       totalWithTax,
@@ -160,6 +168,7 @@ export default function QuotePerformanceTab({
     if (analysis.totalMaterials > 0) segments.push({ name: 'Materials', value: analysis.totalMaterials, color: COLORS.materials });
     if (analysis.totalLabor > 0) segments.push({ name: 'Labor', value: analysis.totalLabor, color: COLORS.labor });
     if (analysis.totalAccessories > 0) segments.push({ name: 'Accessories', value: analysis.totalAccessories, color: COLORS.accessories });
+    if (analysis.totalServices > 0) segments.push({ name: 'Services / Shipping', value: analysis.totalServices, color: COLORS.services });
     if (analysis.grossProfit > 0) segments.push({ name: 'Profit', value: analysis.grossProfit, color: COLORS.profit });
     if (segments.length === 0) segments.push({ name: 'No data', value: 1, color: '#e5e7eb' });
     return segments;
@@ -209,6 +218,9 @@ export default function QuotePerformanceTab({
               <BreakdownRow color={COLORS.labor} label="Labor" sublabel="Assembly & production" amount={analysis.totalLabor} currency={currency} />
               {analysis.totalAccessories > 0 && (
                 <BreakdownRow color={COLORS.accessories} label="Accessories" sublabel="Optional add-ons" amount={analysis.totalAccessories} currency={currency} />
+              )}
+              {analysis.totalServices > 0 && (
+                <BreakdownRow color={COLORS.services} label="Services / Shipping" sublabel="Custom line cost" amount={analysis.totalServices} currency={currency} />
               )}
               <div className="border-t border-gray-200 pt-3">
                 <div className="flex justify-between text-sm">

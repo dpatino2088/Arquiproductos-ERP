@@ -131,7 +131,7 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
     'bottom_channel_item_id', 'bottom_channel_sku', 'tube_item_id', 'tube_sku',
     'drive_item_id', 'drive_sku', 'motor_item_id', 'motor_sku', 'bracket_item_id', 'bracket_sku', 'operation_type', 'drive_type',
     '_manufacturer_filtered_templates', '_hardware_filtered_templates',
-    'measurements', 'panels',
+    'measurements', 'panels', 'bottom_bar_wrapped',
   ] as const;
 
   // Any update to these fields can change BOM template resolution.
@@ -1221,6 +1221,9 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
             tube_item_id: configAny.tube_item_id || null,
             tube_sku: pickSku(configAny, ['tube_sku', 'tubeSku', 'tube_type', 'tubeType']) || null,
             operating_type: configAny.operation_type || configAny.drive_type || null,
+            // ✅ Bottom bar wrapped: cost engine reads config_snapshot->>'bottom_bar_wrapped'
+            // to apply LaborRules.bottom_bar_wrap_rate_per_m. Must be persisted here.
+            bottom_bar_wrapped: configAny.bottom_bar_wrapped === true,
             track_only: configAny.track_only || false,
             roll_catalog_item_id: configAny.track_only ? null : ((finalNormalizedConfig.fabric_variant_id || configAny.variantId || configAny.catalogItemId) || null),
             quantity: finalNormalizedConfig.quantity || 1,

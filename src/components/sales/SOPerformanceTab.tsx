@@ -33,6 +33,7 @@ const COLORS = {
   materials: '#8b5cf6',
   labor: '#f59e0b',
   accessories: '#06b6d4',
+  services: '#ec4899',
   profit: '#22c55e',
 };
 
@@ -103,6 +104,7 @@ export default function SOPerformanceTab({ salesOrderId, organizationId, currenc
     let totalMaterials = 0;
     let totalLabor = 0;
     let totalAccessories = 0;
+    let totalServices = 0;
     let totalCost = 0;
     let totalRevenue = 0;
 
@@ -124,17 +126,21 @@ export default function SOPerformanceTab({ salesOrderId, organizationId, currenc
 
     for (const l of lines) {
       const qty = l.quantity;
+      const isService = (l.product_type ?? '').toLowerCase() === 'service';
       const fabricCost = l.roll_cost * qty;
       const materialsCost = l.bom_cost * qty;
       const laborCost = l.labor_cost * qty;
       const accessoriesCost = l.accessories_cost * qty;
       const lineCost = l.unit_cost_total * qty;
       const revenue = l.line_total;
+      // Custom/service lines hold their cost only in unit_cost_total (no split) → own bucket.
+      const servicesCost = isService ? lineCost : 0;
 
       totalFabric += fabricCost;
       totalMaterials += materialsCost;
       totalLabor += laborCost;
       totalAccessories += accessoriesCost;
+      totalServices += servicesCost;
       totalCost += lineCost;
       totalRevenue += revenue;
 
@@ -163,6 +169,7 @@ export default function SOPerformanceTab({ salesOrderId, organizationId, currenc
       totalMaterials,
       totalLabor,
       totalAccessories,
+      totalServices,
       totalCost,
       totalRevenue,
       grossProfit,
@@ -177,6 +184,7 @@ export default function SOPerformanceTab({ salesOrderId, organizationId, currenc
     if (analysis.totalMaterials > 0) segments.push({ name: 'Materials', value: analysis.totalMaterials, color: COLORS.materials });
     if (analysis.totalLabor > 0) segments.push({ name: 'Labor', value: analysis.totalLabor, color: COLORS.labor });
     if (analysis.totalAccessories > 0) segments.push({ name: 'Accessories', value: analysis.totalAccessories, color: COLORS.accessories });
+    if (analysis.totalServices > 0) segments.push({ name: 'Services / Shipping', value: analysis.totalServices, color: COLORS.services });
     if (analysis.grossProfit > 0) segments.push({ name: 'Profit', value: analysis.grossProfit, color: COLORS.profit });
     if (segments.length === 0) segments.push({ name: 'No data', value: 1, color: '#e5e7eb' });
     return segments;
@@ -275,6 +283,15 @@ export default function SOPerformanceTab({ salesOrderId, organizationId, currenc
                   label="Accessories"
                   sublabel="Optional add-ons"
                   amount={analysis.totalAccessories}
+                  currency={currency}
+                />
+              )}
+              {analysis.totalServices > 0 && (
+                <BreakdownRow
+                  color={COLORS.services}
+                  label="Services / Shipping"
+                  sublabel="Custom line cost"
+                  amount={analysis.totalServices}
                   currency={currency}
                 />
               )}

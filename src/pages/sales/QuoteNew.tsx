@@ -16,7 +16,7 @@ import { useAccessContext } from '../../hooks/useAccessContext';
 import { useDirectoryCustomers } from '../../hooks/useDirectoryCustomers';
 import { useCreateQuote, useUpdateQuote, useQuoteLines, approveQuote, normalizeStatus } from '../../hooks/useQuotes';
 import { QuoteStatus } from '../../types/catalog';
-import { Plus, Edit, Trash2, X, Download, GripVertical, Eye, Copy, FileText, Printer, ChevronDown, Settings2, ArrowLeft, Ruler, ShoppingBag, Ban } from 'lucide-react';
+import { Plus, Edit, Trash2, X, Download, GripVertical, Eye, Copy, FileText, Printer, ChevronDown, Settings2, ArrowLeft, Ruler, ShoppingBag, Ban, Check } from 'lucide-react';
 import { useProposalsByQuote, createProposalFromQuote } from '../../hooks/useProposals';
 import { useActiveDealer } from '../../hooks/useActiveDealer';
 import ProductConfigurator from './ProductConfigurator';
@@ -781,7 +781,23 @@ export default function QuoteNew() {
   // ── Custom / service lines (inline-editable, saved on Quote save) ──
   // qty/unit_price are kept as raw strings while editing to avoid controlled
   // number-input quirks (stuck leading zero); parsed to numbers on save/total.
-  type ServiceLineDraft = { id: string; name: string; qty: string; unit_price: string; area: string; position: string };
+  type CustomLineCategory = 'service' | 'shipping' | 'installation' | 'delivery' | 'other';
+  type ServiceLineDraft = { id: string; name: string; qty: string; unit_cost: string; markup_pct: string; unit_price: string; category: CustomLineCategory; area: string; position: string };
+  const CUSTOM_LINE_CATEGORIES: { value: CustomLineCategory; label: string }[] = [
+    { value: 'service', label: 'Service' },
+    { value: 'shipping', label: 'Shipping' },
+    { value: 'installation', label: 'Installation' },
+    { value: 'delivery', label: 'Delivery' },
+    { value: 'other', label: 'Other' },
+  ];
+  // Sale price from cost + markup. Returns '' so the field can stay empty while editing.
+  const customLinePriceFromCostMarkup = (cost: string, markup: string): string => {
+    const c = Number(cost);
+    const m = Number(markup);
+    if (!Number.isFinite(c) || c <= 0) return '';
+    const pct = Number.isFinite(m) ? m : 0;
+    return String(Math.round(c * (1 + pct / 100) * 100) / 100);
+  };
   const [draftServiceLines, setDraftServiceLines] = useState<ServiceLineDraft[]>([]);
   const [savingServiceLines, setSavingServiceLines] = useState(false);
   const [globalCommercialDiscountPct, setGlobalCommercialDiscountPct] = useState<string>('');
@@ -801,9 +817,12 @@ export default function QuoteNew() {
   const { settings: costSettings } = useCostSettings();
   const { tiers: dealerTiers } = useDealerTiers();
   const normalizedInternalRole = (internalRole ?? '').toString().trim().toLowerCase();
-  const canManageGlobalDiscount =
+  // Org-only quote tools (Custom Line + Global Discount): same rule for both.
+  // Dealers (userType === 'portal') must never see these.
+  const canManageOrgQuoteTools =
     userType === 'internal' &&
     ['superadmin', 'admin', 'sales', 'sales_coordinator'].includes(normalizedInternalRole);
+  const canManageGlobalDiscount = canManageOrgQuoteTools;
   const requiresActingDealerSelection =
     userType === 'internal' &&
     ['superadmin', 'admin', 'sales', 'sales_coordinator'].includes(normalizedInternalRole);
@@ -3495,13 +3514,17 @@ export default function QuoteNew() {
     if (target && target.product_type === 'service') {
       if (draftServiceLines.some((d) => d.id === lineId)) return; // already editing
       const eff = getEffectiveLinePrices(target, true, dealerDiscountPctForDisplay);
+      const cost = Number(target.unit_cost_total_snapshot ?? 0) || 0;
       setDraftServiceLines((prev) => [
         ...prev,
         {
           id: lineId,
           name: target.name ?? '',
           qty: String(Math.max(1, Number(target.quantity) || 1)),
+          unit_cost: cost > 0 ? String(cost) : '',
+          markup_pct: target.markup_pct != null ? String(target.markup_pct) : '',
           unit_price: String(eff.unitPrice ?? 0),
+          category: (target.custom_category as CustomLineCategory) ?? 'service',
           area: target.area ?? '',
           position: target.position ?? '',
         },
@@ -3518,66 +3541,124 @@ export default function QuoteNew() {
     if (!quoteId) return;
     setDraftServiceLines((prev) => [
       ...prev,
-      { id: `temp-${Date.now()}`, name: '', qty: '1', unit_price: '', area: '', position: '' },
+      { id: `temp-${Date.now()}`, name: '', qty: '1', unit_cost: '', markup_pct: '', unit_price: '', category: 'service', area: '', position: '' },
     ]);
   };
 
   const updateCustomLineDraft = (id: string, fields: Partial<ServiceLineDraft>) => {
-    setDraftServiceLines((prev) => prev.map((d) => (d.id === id ? { ...d, ...fields } : d)));
+    setDraftServiceLines((prev) =>
+      prev.map((d) => {
+        if (d.id !== id) return d;
+        const next = { ...d, ...fields };
+        // When cost or markup changes, re-derive the sale price (unless price was the edited field).
+        const touchedCostOrMarkup = 'unit_cost' in fields || 'markup_pct' in fields;
+        if (touchedCostOrMarkup && !('unit_price' in fields)) {
+          const derived = customLinePriceFromCostMarkup(next.unit_cost, next.markup_pct);
+          if (derived !== '') next.unit_price = derived;
+        }
+        // When price is edited directly, back-solve the markup so performance stays consistent.
+        if ('unit_price' in fields) {
+          const c = Number(next.unit_cost);
+          const p = Number(next.unit_price);
+          if (Number.isFinite(c) && c > 0 && Number.isFinite(p)) {
+            next.markup_pct = String(Math.round((p / c - 1) * 1000) / 10);
+          }
+        }
+        return next;
+      }),
+    );
   };
 
   const removeCustomLineDraft = (id: string) => {
     setDraftServiceLines((prev) => prev.filter((d) => d.id !== id));
   };
 
+  // Persist a single custom/service draft line (insert if new, then price via RPC).
+  // Returns the resolved QuoteLine id, or null if skipped/failed.
+  const persistCustomLineDraft = async (d: ServiceLineDraft): Promise<string | null> => {
+    if (!quoteId || !activeOrganizationId || !d.name.trim()) return null;
+    const { data: servicePT } = await supabase
+      .from('ProductTypes')
+      .select('id')
+      .eq('code', 'service')
+      .eq('organization_id', activeOrganizationId)
+      .single();
+    const servicePTId = servicePT?.id ?? null;
+    const quoteRow = quoteData as any;
+
+    const qty = Math.max(1, Number(d.qty) || 1);
+    const unitCost = Math.max(0, Number(d.unit_cost) || 0);
+    const markupPct = Number(d.markup_pct);
+    // Sale price: explicit value, else derived from cost × (1 + markup/100).
+    const unitPrice = Math.max(
+      0,
+      Number(d.unit_price) || (unitCost > 0 ? unitCost * (1 + (Number.isFinite(markupPct) ? markupPct : 0) / 100) : 0),
+    );
+    const isExisting = !d.id.startsWith('temp-');
+    let targetId: string | null = isExisting ? d.id : null;
+    if (!isExisting) {
+      const { data: inserted } = await supabase
+        .from('QuoteLines')
+        .insert({
+          organization_id: activeOrganizationId,
+          quote_id: quoteId,
+          dealer_id: quoteRow?.dealer_id ?? null,
+          product_type: 'service',
+          product_type_id: servicePTId,
+          name: d.name.trim(),
+          quantity: qty,
+          area: d.area.trim() || null,
+          position: d.position.trim() || null,
+        })
+        .select('id')
+        .single();
+      targetId = inserted?.id ?? null;
+    }
+    if (targetId) {
+      await supabase.rpc('set_custom_quote_line_pricing', {
+        p_quote_line_id: targetId,
+        p_name: d.name.trim(),
+        p_unit_cost: unitCost,
+        p_markup_pct: Number.isFinite(markupPct) ? markupPct : 0,
+        p_unit_price: unitPrice,
+        p_qty: qty,
+        p_category: d.category || 'service',
+        p_area: d.area.trim() || null,
+        p_position: d.position.trim() || null,
+      });
+    }
+    return targetId;
+  };
+
+  // Commit ONE draft line immediately so it becomes a real, draggable/reorderable line.
+  const commitCustomLine = async (id: string): Promise<void> => {
+    const draft = draftServiceLines.find((d) => d.id === id);
+    if (!draft) return;
+    if (!draft.name.trim()) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Missing description',
+        message: 'Add a description before saving the custom line.',
+      });
+      return;
+    }
+    setSavingServiceLines(true);
+    try {
+      await persistCustomLineDraft(draft);
+      setDraftServiceLines((prev) => prev.filter((d) => d.id !== id));
+      await refetchLines();
+    } finally {
+      setSavingServiceLines(false);
+    }
+  };
+
   const saveCustomLines = async (): Promise<void> => {
     if (!quoteId || !activeOrganizationId || draftServiceLines.length === 0) return;
     setSavingServiceLines(true);
     try {
-      // Resolve 'service' product_type_id once
-      const { data: servicePT } = await supabase
-        .from('ProductTypes')
-        .select('id')
-        .eq('code', 'service')
-        .eq('organization_id', activeOrganizationId)
-        .single();
-      const servicePTId = servicePT?.id ?? null;
-
-      const quoteRow = quoteData as any;
       for (const d of draftServiceLines) {
         if (!d.name.trim()) continue;
-        const qty = Math.max(1, Number(d.qty) || 1);
-        const unitPrice = Math.max(0, Number(d.unit_price) || 0);
-        const isExisting = !d.id.startsWith('temp-');
-        let targetId: string | null = isExisting ? d.id : null;
-        if (!isExisting) {
-          const { data: inserted } = await supabase
-            .from('QuoteLines')
-            .insert({
-              organization_id: activeOrganizationId,
-              quote_id: quoteId,
-              dealer_id: quoteRow?.dealer_id ?? null,
-              product_type: 'service',
-              product_type_id: servicePTId,
-              name: d.name.trim(),
-              quantity: qty,
-              area: d.area.trim() || null,
-              position: d.position.trim() || null,
-            })
-            .select('id')
-            .single();
-          targetId = inserted?.id ?? null;
-        }
-        if (targetId) {
-          await supabase.rpc('set_service_quote_line_pricing', {
-            p_quote_line_id: targetId,
-            p_name: d.name.trim(),
-            p_unit_price: unitPrice,
-            p_qty: qty,
-            p_area: d.area.trim() || null,
-            p_position: d.position.trim() || null,
-          });
-        }
+        await persistCustomLineDraft(d);
       }
       setDraftServiceLines([]);
       refetchLines();
@@ -5122,6 +5203,7 @@ export default function QuoteNew() {
                 )}
                 {!isOrdered && (
                 <>
+                {canManageOrgQuoteTools && (
                 <button
                   type="button"
                   onClick={addCustomLine}
@@ -5130,6 +5212,7 @@ export default function QuoteNew() {
                   <Plus className="w-4 h-4" />
                   Custom Line
                 </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {
@@ -5465,75 +5548,128 @@ export default function QuoteNew() {
                   })}
                   {/* ── Draft custom / service lines ── */}
                   {draftServiceLines.map((d) => (
-                    <tr key={d.id} className="border-b border-gray-100 bg-blue-50/30">
-                      {/* drag */}
-                      <td className="py-3 px-2 w-10" />
+                    <tr key={d.id} className="border-b border-gray-100 bg-blue-50/30 align-middle">
+                      {/* drag (disabled until the line is saved) */}
+                      <td className="py-3 px-2 w-10 align-middle text-gray-200" title="Save the line to enable drag & reorder">
+                        <GripVertical className="w-4 h-4" />
+                      </td>
                       {/* # */}
-                      <td className="py-3 px-1 text-center text-gray-400 text-sm w-[28px]">—</td>
+                      <td className="py-3 px-1 text-center text-gray-400 text-sm w-[28px] align-middle">—</td>
                       {/* Area */}
-                      <td className="py-3 px-2">
+                      <td className="py-3 px-2 align-middle">
                         <input
-                          className="w-full text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary/40"
+                          className="w-full h-8 text-xs border border-gray-300 rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary/40"
                           placeholder="Area"
                           value={d.area}
                           onChange={(e) => updateCustomLineDraft(d.id, { area: e.target.value })}
                         />
                       </td>
                       {/* Position */}
-                      <td className="py-3 px-2">
+                      <td className="py-3 px-2 align-middle">
                         <input
-                          className="w-full text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary/40"
+                          className="w-full h-8 text-xs border border-gray-300 rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary/40"
                           placeholder="Position"
                           value={d.position}
                           onChange={(e) => updateCustomLineDraft(d.id, { position: e.target.value })}
                         />
                       </td>
-                      {/* Product type */}
-                      <td className="py-3 pl-4 pr-2 text-center text-sm font-medium text-gray-500">Service</td>
+                      {/* Product type → category selector (styled dropdown) */}
+                      <td className="py-3 pl-4 pr-2 align-middle">
+                        <SelectShadcn
+                          value={d.category}
+                          onValueChange={(v) => updateCustomLineDraft(d.id, { category: v as CustomLineCategory })}
+                        >
+                          <SelectTrigger
+                            className="!h-8 !rounded-md !border-gray-300 px-2.5 font-medium text-gray-700 hover:!border-gray-400 focus:!ring-primary/30 transition-colors"
+                            title="Custom line category"
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="!rounded-md min-w-[9rem]">
+                            {CUSTOM_LINE_CATEGORIES.map((c) => (
+                              <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </SelectShadcn>
+                      </td>
                       {/* Description */}
-                      <td className="py-3 px-2">
+                      <td className="py-3 px-2 align-middle">
                         <input
-                          className="w-full text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary/40"
+                          className="w-full h-8 text-sm border border-gray-300 rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary/40"
                           placeholder="Description (e.g. Shipping, Installation…)"
                           value={d.name}
                           onChange={(e) => updateCustomLineDraft(d.id, { name: e.target.value })}
                           autoFocus
                         />
                       </td>
-                      {/* System Drive (n/a) */}
-                      <td className="py-3 px-2 text-center text-gray-300 text-sm">—</td>
-                      {/* Measurements (n/a — empty) */}
-                      <td className="py-3 px-2" />
+                      {/* System Drive → unit cost (internal) */}
+                      <td className="py-3 px-2 align-middle">
+                        <div className="relative">
+                          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-gray-400 pointer-events-none">$</span>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            placeholder="Cost"
+                            className="w-full h-8 text-xs border border-gray-300 rounded pl-5 pr-2 text-right tabular-nums focus:outline-none focus:ring-1 focus:ring-primary/40"
+                            value={d.unit_cost}
+                            onChange={(e) => updateCustomLineDraft(d.id, { unit_cost: e.target.value.replace(/[^0-9.]/g, '') })}
+                            title="Internal unit cost (not shown to dealer)"
+                          />
+                        </div>
+                      </td>
+                      {/* Measurements → markup % */}
+                      <td className="py-3 px-2 align-middle">
+                        <div className="relative">
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            placeholder="Markup"
+                            className="w-full h-8 text-xs border border-gray-300 rounded pl-2 pr-5 text-right tabular-nums focus:outline-none focus:ring-1 focus:ring-primary/40"
+                            value={d.markup_pct}
+                            onChange={(e) => updateCustomLineDraft(d.id, { markup_pct: e.target.value.replace(/[^0-9.\-]/g, '') })}
+                            title="Sale markup over cost"
+                          />
+                          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-gray-400 pointer-events-none">%</span>
+                        </div>
+                      </td>
                       {/* Qty (multiplier) — type=text avoids the number spinner that pushes the digit left */}
-                      <td className="py-3 pl-1 pr-2 text-right">
+                      <td className="py-3 pl-1 pr-2 text-right align-middle">
                         <input
                           type="text"
                           inputMode="numeric"
-                          className="w-full text-sm border border-gray-300 rounded pl-1 pr-[3px] py-1 text-right tabular-nums focus:outline-none focus:ring-1 focus:ring-primary/40"
+                          className="w-full h-8 text-sm border border-gray-300 rounded pl-1 pr-[3px] text-right tabular-nums focus:outline-none focus:ring-1 focus:ring-primary/40"
                           value={d.qty}
                           onChange={(e) => updateCustomLineDraft(d.id, { qty: e.target.value.replace(/[^0-9]/g, '') })}
                           onBlur={(e) => { if (!e.target.value || Number(e.target.value) < 1) updateCustomLineDraft(d.id, { qty: '1' }); }}
                         />
                       </td>
                       {/* Dealer price / unit price */}
-                      <td className="py-3 pl-2 pr-2 text-right" style={{ width: '92px' }}>
+                      <td className="py-3 pl-2 pr-2 text-right align-middle" style={{ width: '92px' }}>
                         <input
                           type="text"
                           inputMode="decimal"
                           placeholder="0.00"
-                          className="w-[84px] text-sm border border-gray-300 rounded px-2 py-1 text-right focus:outline-none focus:ring-1 focus:ring-primary/40"
+                          className="w-[84px] h-8 text-sm border border-gray-300 rounded px-2 text-right focus:outline-none focus:ring-1 focus:ring-primary/40"
                           value={d.unit_price}
                           onChange={(e) => updateCustomLineDraft(d.id, { unit_price: e.target.value.replace(/[^0-9.]/g, '') })}
                         />
                       </td>
                       {/* Total */}
-                      <td className="py-3 pl-2 pr-4 text-right font-medium text-gray-900 text-sm tabular-nums whitespace-nowrap" style={{ width: '96px' }}>
+                      <td className="py-3 pl-2 pr-4 text-right font-medium text-gray-900 text-sm tabular-nums whitespace-nowrap align-middle" style={{ width: '96px' }}>
                         {formatCurrency((Number(d.unit_price) || 0) * Math.max(1, Number(d.qty) || 1), watch('currency') as string ?? 'USD')}
                       </td>
                       {/* Actions */}
-                      <td className="py-3 pl-3 pr-3 whitespace-nowrap text-right" style={{ width: '140px' }}>
+                      <td className="py-3 pl-3 pr-3 whitespace-nowrap text-right align-middle" style={{ width: '140px' }}>
                         <div className="flex items-center gap-0.5 justify-end">
-                          <span className="p-1.5 rounded text-gray-300" aria-hidden><Eye className="w-4 h-4" /></span>
+                          <button
+                            type="button"
+                            onClick={() => commitCustomLine(d.id)}
+                            disabled={savingServiceLines || !d.name.trim()}
+                            className="p-1.5 rounded transition-colors text-green-600 hover:bg-green-50 disabled:text-gray-300 disabled:hover:bg-transparent disabled:cursor-not-allowed"
+                            title={d.name.trim() ? 'Save line (enables reorder)' : 'Add a description first'}
+                          >
+                            <Check className="w-4 h-4" />
+                          </button>
                           <span className="p-1.5 rounded text-gray-300" aria-hidden><Copy className="w-4 h-4" /></span>
                           <span className="p-1.5 rounded text-gray-300" aria-hidden><Edit className="w-4 h-4" /></span>
                           <button
