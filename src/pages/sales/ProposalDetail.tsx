@@ -19,7 +19,7 @@ import { useResolvedStorageUrl } from '../../hooks/useResolvedStorageUrl';
 import Input from '../../components/ui/Input';
 import Label from '../../components/ui/Label';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
-import { ChevronDown, ChevronRight, GripVertical, Plus, AlertTriangle, Printer, Eye, ArrowLeft, Download, Trash2, ExternalLink } from 'lucide-react';
+import { ChevronDown, ChevronRight, GripVertical, Plus, AlertTriangle, Printer, Eye, ArrowLeft, Download, Trash2, ExternalLink, RefreshCw, Lock } from 'lucide-react';
 import DetailPageLayout from '../../components/shared/DetailPageLayout';
 import StatusBadge from '../../components/shared/StatusBadge';
 import TimelineView from '../../components/shared/TimelineView';
@@ -333,6 +333,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
   const [showAdjTotal, setShowAdjTotal] = useState(false);
   const [targetSubtotalInput, setTargetSubtotalInput] = useState('');
   const [targetTotalInput, setTargetTotalInput] = useState('');
+  const [recalculating, setRecalculating] = useState(false);
 
   const resolvedLogoUrl = useResolvedStorageUrl(dealerLogoUrl ?? null);
   const [logoError, setLogoError] = useState(false);
@@ -758,6 +759,46 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     });
   }, [handleSave]);
 
+  /**
+   * Recompute and persist the frozen totals snapshot using the canonical rule
+   * (proposal_recalc_totals_v2): global discount/fee on Material+Custom only, labor discount/fee
+   * on installation only, tax on the resulting base. The DB guards this to DRAFT proposals — sent
+   * and accepted proposals are locked and return { ok: false, reason: 'locked' }. If the proposal
+   * has unsaved edits, persist them first so the recalc sees the latest lines/adjustments.
+   */
+  const handleRecalculate = useCallback(async () => {
+    if (!proposal || !canWrite || recalculating) return;
+    if (proposal.status !== 'draft') return;
+    setRecalculating(true);
+    try {
+      if (headerDirty || linesDirty || addonsDirty || removedCustomLineIds.length > 0) {
+        await handleSave();
+      }
+      const { data, error: rpcErr } = await supabase.rpc('proposal_recalc_totals_v2', {
+        p_proposal_id: proposal.id,
+      });
+      if (rpcErr) {
+        useUIStore.getState().addNotification({ type: 'error', title: 'Recalculate failed', message: getSupabaseErrorMessage(rpcErr) });
+        return;
+      }
+      const res = (data ?? {}) as { ok?: boolean; reason?: string };
+      if (res.ok === false) {
+        useUIStore.getState().addNotification({
+          type: res.reason === 'locked' ? 'warning' : 'error',
+          title: res.reason === 'locked' ? 'Proposal locked' : 'Recalculate failed',
+          message: res.reason === 'locked'
+            ? 'Only draft proposals can be recalculated.'
+            : 'Could not recalculate totals.',
+        });
+        return;
+      }
+      await refetch();
+      useUIStore.getState().addNotification({ type: 'success', title: 'Recalculated', message: 'Totals updated.' });
+    } finally {
+      setRecalculating(false);
+    }
+  }, [proposal, canWrite, recalculating, headerDirty, linesDirty, addonsDirty, removedCustomLineIds, handleSave, refetch]);
+
   const listPath = '/sales/proposals';
   const queryReturnTo = getReturnToFromCurrentQuery();
   const normalizePath = (path: string | null | undefined) => {
@@ -1039,18 +1080,70 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
   }, [displayLines, quoteLinesMap, displayAddonsMap, proposal?.status, proposal?.tax_pct, headerForm.global_discount_pct, headerForm.global_fee_amount, headerForm.global_installation_discount_pct, headerForm.global_installation_fee_pct, headerForm.exempt_tax]);
 
   /**
-   * Resolve desired taxable base (subtotal after global discount) into Global Discount %.
-   * Mirrors DB formula where discount is applied to subtotal_before_discount.
+   * Displayed Summary = FROZEN SNAPSHOT (Proposals.* columns) — the single source of truth shared
+   * with the list and the PDF. Editing a draft does NOT change these numbers; they only change when
+   * the user presses Recalcular (proposal_recalc_totals_v2, drafts only) or at proposal creation.
+   * Falls back to the live `totals` only when there is no snapshot yet (brand-new proposal that has
+   * not been recalculated). `totals` above stays the live engine for per-line amounts and the
+   * recalc preview, but it is intentionally NOT what the Summary renders.
+   */
+  const summary = useMemo(() => {
+    const hasSnapshot = proposal?.total_amount != null;
+    if (!hasSnapshot) {
+      return {
+        totalProduct: totals.totalProduct,
+        discountPct: totals.discountPct,
+        discountAmount: totals.discountAmount,
+        installationTotal: totals.installationTotal,
+        installationNet: totals.installationNet,
+        installationAmount: totals.installationAmount,
+        laborDiscountAmount: totals.laborDiscountAmount,
+        instDiscountPct: totals.instDiscountPct,
+        otherAddonsTotal: totals.otherAddonsTotal,
+        globalFeeAmount: totals.globalFeeAmount,
+        subtotal: totals.subtotal,
+        taxAmount: totals.taxAmount,
+        total: totals.total,
+        fromSnapshot: false,
+      };
+    }
+    const net = Number(proposal?.installation_amount ?? 0);
+    return {
+      totalProduct: Number(proposal?.total_product_amount ?? totals.totalProduct),
+      discountPct: Number(proposal?.global_discount_pct ?? 0),
+      discountAmount: Number(proposal?.discount_amount ?? 0),
+      installationTotal: net,
+      installationNet: net,
+      installationAmount: net,
+      laborDiscountAmount: 0,
+      instDiscountPct: Number(proposal?.global_installation_discount_pct ?? 0),
+      otherAddonsTotal: 0,
+      globalFeeAmount: Number(proposal?.global_fee_amount ?? 0),
+      subtotal: Number(proposal?.subtotal_amount ?? 0),
+      taxAmount: Number(proposal?.tax_amount ?? 0),
+      total: Number(proposal?.total_amount ?? 0),
+      fromSnapshot: true,
+    };
+  }, [proposal, totals]);
+
+  /**
+   * Resolve a desired taxable base (Subtotal) into the Global Discount % that proposal_recalc_totals_v2
+   * will apply. Inverts the CANONICAL rule (discount on Material+Custom only):
+   *   taxableBase = totalProduct*(1 - d) + globalFee + installationNet + otherAddons
+   * so  d = 1 - (target - globalFee - installationNet - otherAddons) / totalProduct.
+   * The discount % is set on the header (dirty); the user then presses Recalculate to persist it.
    */
   const setHeaderFromTargetProductNet = useCallback(
-    (targetAfterDiscount: number) => {
-      const base = totals.subtotalBeforeDiscount ?? 0;
-      if (base <= 0) return;
+    (targetSubtotal: number) => {
+      const product = totals.totalProduct ?? 0;
+      if (product <= 0) return;
+      const fixed = (totals.globalFeeAmount ?? 0) + (totals.installationNet ?? 0) + (totals.otherAddonsTotal ?? 0);
+      const productAfterDiscount = targetSubtotal - fixed; // = product * (1 - d)
       let nextDiscount = 0;
-      if (targetAfterDiscount <= 0) {
+      if (productAfterDiscount <= 0) {
         nextDiscount = 100;
-      } else if (targetAfterDiscount < base) {
-        nextDiscount = Math.round(((base - targetAfterDiscount) / base) * 1000000) / 10000;
+      } else if (productAfterDiscount < product) {
+        nextDiscount = Math.round(((product - productAfterDiscount) / product) * 1000000) / 10000;
       }
       setHeaderForm((f) => ({
         ...f,
@@ -1058,7 +1151,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
       }));
       setHeaderDirty(true);
     },
-    [totals.subtotalBeforeDiscount]
+    [totals.totalProduct, totals.globalFeeAmount, totals.installationNet, totals.otherAddonsTotal]
   );
 
   /** Target subtotal (sin tax) == taxable base after global discount. */
@@ -1071,19 +1164,18 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     [setHeaderFromTargetProductNet]
   );
 
-  /** Target total (con o sin ITBMS) -> derive taxable base using DB equation. */
+  /** Target total (inc. tax) -> taxable base. Global fee is taxed (inside the base), so
+   *  total = base * (1 + taxPct)  ->  base = total / (1 + taxPct). */
   const applyTargetTotal = useCallback(
     (raw: string) => {
       const targetTotal = parseFloat(raw);
       if (Number.isNaN(targetTotal) || targetTotal < 0) return;
-      const globalFeeAmount = Number(headerForm.global_fee_amount) || 0;
-      const targetAfterFee = Math.max(targetTotal - globalFeeAmount, 0);
       const exemptTax = headerForm.exempt_tax;
       const taxPct = exemptTax ? 0 : (proposal?.tax_pct ?? 0.07);
-      const targetSub = targetAfterFee / (1 + taxPct);
+      const targetSub = targetTotal / (1 + taxPct);
       setHeaderFromTargetProductNet(targetSub);
     },
-    [headerForm.exempt_tax, headerForm.global_fee_amount, proposal?.tax_pct, setHeaderFromTargetProductNet]
+    [headerForm.exempt_tax, proposal?.tax_pct, setHeaderFromTargetProductNet]
   );
 
   const customLinesInvalid = useMemo(() => {
@@ -1381,12 +1473,12 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           customerEmail: contact?.contact_email ?? customer?.customer_email ?? undefined,
           customerPhone: customer?.customer_phone ?? undefined,
           overrideTotals: {
-            totalProduct: totals.totalProduct ?? 0,
-            discountAmount: totals.discountAmount ?? 0,
-            installationAmount: totals.installationAmount ?? 0,
-            subtotal: totals.subtotal ?? 0,
-            taxAmount: totals.taxAmount ?? 0,
-            total: totals.total ?? 0,
+            totalProduct: summary.totalProduct ?? 0,
+            discountAmount: summary.discountAmount ?? 0,
+            installationAmount: summary.installationAmount ?? 0,
+            subtotal: summary.subtotal ?? 0,
+            taxAmount: summary.taxAmount ?? 0,
+            total: summary.total ?? 0,
           },
           global_discount_pct: proposal.global_discount_pct ?? undefined,
           tax_pct: proposal.tax_pct ?? undefined,
@@ -1402,7 +1494,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
       const fileName = `${proposalNo}_${customerPart}.PDF`;
       return { doc, fileName };
     },
-    [proposal, proposalId, displayLines, quoteLinesMap, configuredProductsMap, customer, contact, totals, formatAccessoriesForPDF, dealerLogoUrl, headerForm]
+    [proposal, proposalId, displayLines, quoteLinesMap, configuredProductsMap, customer, contact, totals, summary, formatAccessoriesForPDF, dealerLogoUrl, headerForm]
   );
 
   const handlePreviewPDF = useCallback(
@@ -1893,7 +1985,18 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
 
               <div className="border-t border-gray-200 mt-5 pt-4">
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-sm font-semibold text-gray-900">Summary</h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-semibold text-gray-900">Summary</h3>
+                    {proposal?.status === 'draft' ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200" title="Draft totals are frozen and only change when you press Recalculate.">
+                        Draft
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-gray-100 text-gray-600 border border-gray-200" title="Totals are locked; this proposal has been sent/accepted.">
+                        <Lock className="w-3 h-3" /> Locked
+                      </span>
+                    )}
+                  </div>
                   <label className="flex items-center gap-1.5 cursor-pointer">
                     <input
                       type="checkbox"
@@ -1905,51 +2008,67 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                     <span className="text-xs text-gray-600">Exempt Tax</span>
                   </label>
                 </div>
-                <div className="flex justify-between py-1 text-sm">
-                  <span className="text-gray-600">Total Product</span>
-                  <span className="tabular-nums">{formatCurrency(totals.totalProduct ?? 0, currency)}</span>
-                </div>
-                {(totals.discountAmount ?? 0) > 0 && (
-                  <div className="flex justify-between py-1 text-sm">
-                    <span className="text-gray-600">Discount {totals.discountPct ? `(${totals.discountPct}%)` : ''}</span>
-                    <span className="tabular-nums">-{formatCurrency(totals.discountAmount ?? 0, currency)}</span>
+                {proposal?.status === 'draft' && !contentReadOnly && (
+                  <div className="mb-3 flex items-center justify-between gap-2 rounded-md bg-amber-50/60 border border-amber-100 px-2.5 py-1.5">
+                    <span className="text-[11px] text-amber-700">
+                      Totals are frozen. Recalculate to apply edits to the snapshot.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleRecalculate}
+                      disabled={recalculating}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border border-amber-300 bg-white text-amber-800 hover:bg-amber-50 disabled:opacity-50 text-xs font-medium shrink-0"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${recalculating ? 'animate-spin' : ''}`} />
+                      {recalculating ? 'Recalculating…' : 'Recalculate'}
+                    </button>
                   </div>
                 )}
-                {(totals.installationTotal ?? totals.installationAmount ?? 0) > 0 && (
+                <div className="flex justify-between py-1 text-sm">
+                  <span className="text-gray-600">Total Product</span>
+                  <span className="tabular-nums">{formatCurrency(summary.totalProduct ?? 0, currency)}</span>
+                </div>
+                {(summary.discountAmount ?? 0) > 0 && (
+                  <div className="flex justify-between py-1 text-sm">
+                    <span className="text-gray-600">Discount {summary.discountPct ? `(${summary.discountPct}%)` : ''}</span>
+                    <span className="tabular-nums">-{formatCurrency(summary.discountAmount ?? 0, currency)}</span>
+                  </div>
+                )}
+                {(summary.installationTotal ?? summary.installationAmount ?? 0) > 0 && (
                   <>
-                    {(totals.laborDiscountAmount ?? 0) > 0 ? (
+                    {(summary.laborDiscountAmount ?? 0) > 0 ? (
                       <>
                         <div className="flex justify-between py-1 text-sm">
                           <span className="text-gray-600">Installation</span>
-                          <span className="tabular-nums">{formatCurrency(totals.installationTotal ?? 0, currency)}</span>
+                          <span className="tabular-nums">{formatCurrency(summary.installationTotal ?? 0, currency)}</span>
                         </div>
                         <div className="flex justify-between py-1 text-sm">
-                          <span className="text-gray-600">Labor discount {totals.instDiscountPct ? `(${totals.instDiscountPct}%)` : ''}</span>
-                          <span className="tabular-nums">-{formatCurrency(totals.laborDiscountAmount ?? 0, currency)}</span>
+                          <span className="text-gray-600">Labor discount {summary.instDiscountPct ? `(${summary.instDiscountPct}%)` : ''}</span>
+                          <span className="tabular-nums">-{formatCurrency(summary.laborDiscountAmount ?? 0, currency)}</span>
                         </div>
                         <div className="flex justify-between py-1 text-sm font-medium">
                           <span className="text-gray-700">Installation (net)</span>
-                          <span className="tabular-nums">{formatCurrency(totals.installationNet ?? 0, currency)}</span>
+                          <span className="tabular-nums">{formatCurrency(summary.installationNet ?? 0, currency)}</span>
                         </div>
                       </>
                     ) : (
                       <div className="flex justify-between py-1 text-sm">
                         <span className="text-gray-600">Installation</span>
-                        <span className="tabular-nums">{formatCurrency(totals.installationNet ?? totals.installationAmount ?? 0, currency)}</span>
+                        <span className="tabular-nums">{formatCurrency(summary.installationNet ?? summary.installationAmount ?? 0, currency)}</span>
                       </div>
                     )}
                   </>
                 )}
-                {(totals.otherAddonsTotal ?? 0) > 0 && (
+                {(summary.otherAddonsTotal ?? 0) > 0 && (
                   <div className="flex justify-between py-1 text-sm">
                     <span className="text-gray-600">Other add-ons</span>
-                    <span className="tabular-nums">{formatCurrency(totals.otherAddonsTotal ?? 0, currency)}</span>
+                    <span className="tabular-nums">{formatCurrency(summary.otherAddonsTotal ?? 0, currency)}</span>
                   </div>
                 )}
-                {(totals.globalFeeAmount ?? 0) > 0 && (
+                {(summary.globalFeeAmount ?? 0) > 0 && (
                   <div className="flex justify-between py-1 text-sm">
                     <span className="text-gray-600">Global fee</span>
-                    <span className="tabular-nums">{formatCurrency(totals.globalFeeAmount ?? 0, currency)}</span>
+                    <span className="tabular-nums">{formatCurrency(summary.globalFeeAmount ?? 0, currency)}</span>
                   </div>
                 )}
                 <div
@@ -1962,7 +2081,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                       ? <ChevronDown className="w-3 h-3 text-gray-400 group-hover:text-gray-600" />
                       : <ChevronRight className="w-3 h-3 text-gray-400 group-hover:text-gray-600" />
                     )}
-                    {formatCurrency(totals.subtotal ?? 0, currency)}
+                    {formatCurrency(summary.subtotal ?? 0, currency)}
                   </span>
                 </div>
                 {showAdjSubtotal && !contentReadOnly && (
@@ -1976,7 +2095,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                           min="0"
                           className="w-32 mt-0.5"
                           value={targetSubtotalInput}
-                          placeholder={String(Math.round((totals.subtotal ?? 0) * 100) / 100)}
+                          placeholder={String(Math.round((summary.subtotal ?? 0) * 100) / 100)}
                           onChange={(e) => setTargetSubtotalInput(e.target.value)}
                           onBlur={() => applyTargetSubtotal(targetSubtotalInput)}
                           onKeyDown={(e) => {
@@ -2001,7 +2120,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                 {!headerForm.exempt_tax && (
                   <div className="flex justify-between py-1 text-sm">
                     <span className="text-gray-600">Tax</span>
-                    <span className="tabular-nums">{formatCurrency(totals.taxAmount ?? 0, currency)}</span>
+                    <span className="tabular-nums">{formatCurrency(summary.taxAmount ?? 0, currency)}</span>
                   </div>
                 )}
                 <div
@@ -2014,7 +2133,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                       ? <ChevronDown className="w-3 h-3 text-gray-400 group-hover:text-gray-600" />
                       : <ChevronRight className="w-3 h-3 text-gray-400 group-hover:text-gray-600" />
                     )}
-                    {formatCurrency(totals.total, currency)}
+                    {formatCurrency(summary.total, currency)}
                   </span>
                 </div>
                 {showAdjTotal && !contentReadOnly && (
@@ -2028,7 +2147,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                           min="0"
                           className="w-32 mt-0.5"
                           value={targetTotalInput}
-                          placeholder={String(Math.round((totals.total ?? 0) * 100) / 100)}
+                          placeholder={String(Math.round((summary.total ?? 0) * 100) / 100)}
                           onChange={(e) => setTargetTotalInput(e.target.value)}
                           onBlur={() => applyTargetTotal(targetTotalInput)}
                           onKeyDown={(e) => {
@@ -2704,52 +2823,52 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
               </div>
               <div className="flex justify-between py-1 text-sm">
                 <span className="text-gray-600">Total Product</span>
-                <span>{formatCurrency(totals.totalProduct ?? 0, currency)}</span>
+                <span>{formatCurrency(summary.totalProduct ?? 0, currency)}</span>
               </div>
-              {(totals.discountAmount ?? 0) > 0 && (
+              {(summary.discountAmount ?? 0) > 0 && (
                 <div className="flex justify-between py-1 text-sm">
-                  <span className="text-gray-600">Discount {totals.discountPct ? `(${totals.discountPct}%)` : ''}</span>
-                  <span>-{formatCurrency(totals.discountAmount ?? 0, currency)}</span>
+                  <span className="text-gray-600">Discount {summary.discountPct ? `(${summary.discountPct}%)` : ''}</span>
+                  <span>-{formatCurrency(summary.discountAmount ?? 0, currency)}</span>
                 </div>
               )}
-              {(totals.installationTotal ?? totals.installationAmount ?? 0) > 0 && (
+              {(summary.installationTotal ?? summary.installationAmount ?? 0) > 0 && (
                 <>
-                  {(totals.laborDiscountAmount ?? 0) > 0 ? (
+                  {(summary.laborDiscountAmount ?? 0) > 0 ? (
                     <>
                       <div className="flex justify-between py-1 text-sm">
                         <span className="text-gray-600">Installation</span>
-                        <span>{formatCurrency(totals.installationTotal ?? 0, currency)}</span>
+                        <span>{formatCurrency(summary.installationTotal ?? 0, currency)}</span>
                       </div>
                       <div className="flex justify-between py-1 text-sm">
-                        <span className="text-gray-600">Labor discount {totals.instDiscountPct ? `(${totals.instDiscountPct}%)` : ''}</span>
-                        <span>-{formatCurrency(totals.laborDiscountAmount ?? 0, currency)}</span>
+                        <span className="text-gray-600">Labor discount {summary.instDiscountPct ? `(${summary.instDiscountPct}%)` : ''}</span>
+                        <span>-{formatCurrency(summary.laborDiscountAmount ?? 0, currency)}</span>
                       </div>
                       <div className="flex justify-between py-1 text-sm font-medium">
                         <span className="text-gray-700">Installation (net)</span>
-                        <span>{formatCurrency(totals.installationNet ?? 0, currency)}</span>
+                        <span>{formatCurrency(summary.installationNet ?? 0, currency)}</span>
                       </div>
                     </>
                   ) : (
                     <div className="flex justify-between py-1 text-sm">
                       <span className="text-gray-600">Installation</span>
-                      <span>{formatCurrency(totals.installationNet ?? totals.installationAmount ?? 0, currency)}</span>
+                      <span>{formatCurrency(summary.installationNet ?? summary.installationAmount ?? 0, currency)}</span>
                     </div>
                   )}
                 </>
               )}
               <div className="flex justify-between py-1 text-sm">
                 <span className="text-gray-600">Subtotal</span>
-                <span>{formatCurrency(totals.subtotal ?? 0, currency)}</span>
+                <span>{formatCurrency(summary.subtotal ?? 0, currency)}</span>
               </div>
               {!headerForm.exempt_tax && (
                 <div className="flex justify-between py-1 text-sm">
                   <span className="text-gray-600">Tax</span>
-                  <span>{formatCurrency(totals.taxAmount ?? 0, currency)}</span>
+                  <span>{formatCurrency(summary.taxAmount ?? 0, currency)}</span>
                 </div>
               )}
               <div className="flex justify-between py-2 mt-2 border-t border-gray-200 font-semibold">
                 <span>Total {currency ? `(${currency})` : ''}</span>
-                <span>{formatCurrency(totals.total, currency)}</span>
+                <span>{formatCurrency(summary.total, currency)}</span>
               </div>
             </div>
           </div>

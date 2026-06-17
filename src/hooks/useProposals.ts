@@ -16,7 +16,28 @@ import { getEffectiveOrgAndDealer } from '../lib/directoryContext';
 import { generateNextProposalNumber } from '../lib/sequential-numbers';
 import { buildDirectoryScopeKey } from '../lib/directoryScopeKey';
 import { proposalDetailKey } from '../lib/queryKeys';
+import { fetchAllPaginated, chunkArray } from '../lib/supabasePagination';
 import type { Proposal, ProposalLine, ProposalLineAddOn } from '../types/proposals';
+
+/** Dealer-price subtotal per quote (sum of dealer line prices, MSRP fallback), aggregated
+ *  server-side via `quote_list_totals`. Replaces the old client-side QuoteLines download that
+ *  truncated at 1000 rows for quotes with many lines. */
+async function fetchQuoteDealerSubtotalMap(
+  quoteIds: string[],
+  signal?: AbortSignal,
+): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  if (quoteIds.length === 0) return map;
+  for (const ids of chunkArray(quoteIds, 500)) {
+    if (signal?.aborted) return map;
+    const { data, error } = await supabase.rpc('quote_list_totals', { p_quote_ids: ids });
+    if (error) throw error;
+    (data ?? []).forEach((row: any) => {
+      map.set(row.quote_id, Number(row.dealer_subtotal ?? 0));
+    });
+  }
+  return map;
+}
 
 export interface ProposalListItem {
   id: string;
@@ -87,60 +108,62 @@ export function useProposalsList() {
         effectiveDealerId = scopeEffectiveDealerId ?? activeDealerId ?? null;
       }
 
-      let query = supabase
-        .from('Proposals')
-        .select('id, proposal_no, version_no, status, quote_id, dealer_id, customer_id, updated_at, created_at, total_amount, subtotal_amount, discount_amount, tax_amount, created_by_user_id, archived')
-        .eq('organization_id', activeOrganizationId)
-        .or('deleted.is.false,deleted.is.null')
-        .order('created_at', { ascending: false });
+      const makeProposalsQuery = (from: number, to: number) => {
+        let q = supabase
+          .from('Proposals')
+          .select('id, proposal_no, version_no, status, quote_id, dealer_id, customer_id, updated_at, created_at, total_amount, subtotal_amount, discount_amount, tax_amount, created_by_user_id, archived')
+          .eq('organization_id', activeOrganizationId)
+          .or('deleted.is.false,deleted.is.null')
+          .order('created_at', { ascending: false })
+          .range(from, to);
+        if (effectiveDealerId) {
+          q = q.eq('dealer_id', effectiveDealerId);
+        }
+        return q;
+      };
 
-      if (effectiveDealerId) {
-        query = query.eq('dealer_id', effectiveDealerId);
-      }
-
-      const { data, error: e } = await query;
-      if (e) {
-        setError(e.message);
+      let rows: ProposalListItem[];
+      try {
+        rows = await fetchAllPaginated<ProposalListItem>(
+          (from, to) => makeProposalsQuery(from, to),
+          signal,
+        );
+      } catch (queryErr: any) {
+        setError(queryErr?.message ?? 'Error loading proposals');
         setList([]);
         return;
       }
       if (signal?.aborted) return;
 
-      const rows = (data || []) as ProposalListItem[];
       // Standalone proposals have quote_id=null and skip the Quote join.
       const quoteIds = [...new Set(rows.map((r) => r.quote_id).filter((id): id is string => !!id))];
 
-      const quotesRes = quoteIds.length
-        ? await supabase.from('Quotes').select('id, quote_no, status, created_at, updated_at, created_by_user_id, customer_id, contact_id, total_amount').in('id', quoteIds).or('deleted.is.false,deleted.is.null')
-        : { data: [] };
-      if (signal?.aborted) return;
-
+      // Quotes header (chunked so large proposal sets don't truncate at 1000 ids).
       const quoteMap = new Map<string, { quote_no?: string; status?: string; created_at?: string; updated_at?: string; created_by_user_id?: string | null; customer_id?: string; contact_id?: string; total_amount?: number | null }>();
-      (quotesRes.data || []).forEach((q: any) => {
-        quoteMap.set(q.id, {
-          quote_no: q.quote_no,
-          status: q.status,
-          created_at: q.created_at,
-          updated_at: q.updated_at,
-          created_by_user_id: q.created_by_user_id ?? undefined,
-          customer_id: q.customer_id ?? undefined,
-          contact_id: q.contact_id ?? undefined,
-          total_amount: q.total_amount ?? null,
+      for (const ids of chunkArray(quoteIds, 500)) {
+        if (signal?.aborted) return;
+        const quotesRes = await supabase
+          .from('Quotes')
+          .select('id, quote_no, status, created_at, updated_at, created_by_user_id, customer_id, contact_id, total_amount')
+          .in('id', ids)
+          .or('deleted.is.false,deleted.is.null');
+        (quotesRes.data || []).forEach((q: any) => {
+          quoteMap.set(q.id, {
+            quote_no: q.quote_no,
+            status: q.status,
+            created_at: q.created_at,
+            updated_at: q.updated_at,
+            created_by_user_id: q.created_by_user_id ?? undefined,
+            customer_id: q.customer_id ?? undefined,
+            contact_id: q.contact_id ?? undefined,
+            total_amount: q.total_amount ?? null,
+          });
         });
-      });
+      }
 
-      const quoteLinesRes = quoteIds.length
-        ? await supabase.from('QuoteLines').select('quote_id, msrp, dealer_price_total').in('quote_id', quoteIds)
-        : { data: [] };
+      // Dealer-price subtotal per quote, aggregated server-side (no 1000-line truncation).
+      const quoteDealerTotalMap = await fetchQuoteDealerSubtotalMap(quoteIds, signal);
       if (signal?.aborted) return;
-
-      const quoteDealerTotalMap = new Map<string, number>();
-      (quoteLinesRes.data || []).forEach((l: any) => {
-        const prev = quoteDealerTotalMap.get(l.quote_id) ?? 0;
-        const dealerTotal = Number(l.dealer_price_total ?? 0);
-        const msrpTotal = Number(l.msrp ?? 0);
-        quoteDealerTotalMap.set(l.quote_id, prev + (dealerTotal > 0 ? dealerTotal : msrpTotal));
-      });
 
       const customerIds = new Set<string>();
       rows.forEach((r) => {
@@ -151,16 +174,14 @@ export function useProposalsList() {
         }
       });
 
-      const customersRes =
-        customerIds.size > 0
-          ? await supabase.from('DirectoryCustomers').select('id, customer_name').in('id', [...customerIds])
-          : { data: [] };
-      if (signal?.aborted) return;
-
       const customerMap = new Map<string, string>();
-      (customersRes.data || []).forEach((c: { id: string; customer_name?: string }) => {
-        customerMap.set(c.id, c.customer_name || '-');
-      });
+      for (const ids of chunkArray([...customerIds], 500)) {
+        if (signal?.aborted) return;
+        const customersRes = await supabase.from('DirectoryCustomers').select('id, customer_name').in('id', ids);
+        (customersRes.data || []).forEach((c: { id: string; customer_name?: string }) => {
+          customerMap.set(c.id, c.customer_name || '-');
+        });
+      }
 
       const appUserIds: string[] = [];
       rows.forEach((r) => {
@@ -189,6 +210,9 @@ export function useProposalsList() {
               ? (appUsersMap.get(q.created_by_user_id) ?? 'Legacy / Imported')
               : 'Legacy / Imported');
         r.quote_total_amount = r.quote_id ? (quoteDealerTotalMap.get(r.quote_id) ?? null) : null;
+        // Total = frozen snapshot (Proposals.total_amount). It only changes via the explicit
+        // Recalcular button (drafts) / proposal creation, never silently — so the list always
+        // matches the committed value shown in the detail and the PDF.
         const quoteUpdatedTs = q?.updated_at ? Date.parse(q.updated_at) : NaN;
         const proposalCreatedTs = r.created_at ? Date.parse(r.created_at) : NaN;
         r.is_outdated = Number.isFinite(quoteUpdatedTs) && Number.isFinite(proposalCreatedTs) && quoteUpdatedTs > proposalCreatedTs;
@@ -997,6 +1021,10 @@ export async function createProposalFromQuote(
       return { error: snapshotErr.message || 'Error freezing proposal snapshot' };
     }
   }
+
+  // Auto-recalc triggers are disabled (snapshot model); seed the initial totals snapshot with the
+  // canonical rule so the new draft already shows correct totals in list/detail/PDF. Best effort.
+  await supabase.rpc('proposal_recalc_totals_v2', { p_proposal_id: proposalId });
 
   return { proposalId };
 }

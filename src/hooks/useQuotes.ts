@@ -6,6 +6,7 @@ import { useDealerScope } from './useDealerScope';
 import { useActiveDealer } from './useActiveDealer';
 import { useAccessContext } from './useAccessContext';
 import { getEffectiveOrgAndDealer } from '../lib/directoryContext';
+import { fetchAllPaginated, chunkArray } from '../lib/supabasePagination';
 import { Quote, QuoteLine } from '../types/catalog';
 import type { QuoteStatus } from '../types/catalog';
 
@@ -22,7 +23,16 @@ export interface QuoteListItem {
   description?: string | null;
   /** low | normal | high | urgent | rush */
   priority?: string | null;
+  /** Grand total WITH tax (= subtotal + tax_amount). Source of truth for the list. */
   total: number;
+  /** Sum of dealer line prices (pre-tax), aggregated server-side. */
+  subtotal?: number;
+  /** Tax computed from CostSettings.tax_pct (0 when exempt_tax). */
+  tax_amount?: number;
+  /** Alias of `total` (subtotal + tax) for callers that expect *_amount naming. */
+  total_amount?: number;
+  /** Number of quote lines (server-side count). */
+  line_count?: number;
   created_at: string;
   organization_id: string;
   dealer_id: string | null;
@@ -37,6 +47,44 @@ export interface QuoteListItem {
   version_no?: number | null;
   is_version?: boolean | null;
   [key: string]: unknown;
+}
+
+export interface QuoteTotals {
+  line_count: number;
+  dealer_subtotal: number;
+  msrp_subtotal: number;
+  tax_amount: number;
+  total_amount: number;
+}
+
+/**
+ * Per-quote totals (subtotal + tax + total) aggregated in Postgres via the
+ * `quote_list_totals` RPC. The SUM runs server-side, so the client never
+ * downloads raw QuoteLines and the result cannot be truncated by the 1000-row
+ * cap no matter how many lines a quote has. quote_ids are chunked so the RPC
+ * return also stays under the cap for very large quote sets.
+ */
+async function fetchQuoteTotalsMap(
+  quoteIds: string[],
+  signal?: AbortSignal,
+): Promise<Map<string, QuoteTotals>> {
+  const map = new Map<string, QuoteTotals>();
+  if (quoteIds.length === 0) return map;
+  for (const ids of chunkArray(quoteIds, 500)) {
+    if (signal?.aborted) return map;
+    const { data, error } = await supabase.rpc('quote_list_totals', { p_quote_ids: ids });
+    if (error) throw error;
+    (data ?? []).forEach((row: any) => {
+      map.set(row.quote_id, {
+        line_count: Number(row.line_count ?? 0),
+        dealer_subtotal: Number(row.dealer_subtotal ?? 0),
+        msrp_subtotal: Number(row.msrp_subtotal ?? 0),
+        tax_amount: Number(row.tax_amount ?? 0),
+        total_amount: Number(row.total_amount ?? 0),
+      });
+    });
+  }
+  return map;
 }
 
 /**
@@ -86,20 +134,19 @@ export function useQuotes(dealerId?: string | null) {
         effectiveDealerId = selectedDealerId ?? null;
       }
 
-      let query = supabase
-        .from('Quotes')
-        .select('id, quote_no, status, priority, created_at, created_by_user_id, customer_id, contact_id, dealer_id, organization_id, description, archived, parent_quote_id, root_quote_id, version_no, is_version')
-        .eq('organization_id', activeOrganizationId)
-        .or('deleted.is.false,deleted.is.null');
-
-      if (effectiveDealerId) {
-        query = query.eq('dealer_id', effectiveDealerId);
-      }
-
-      const { data: quotesData, error: quotesError } = await query
-        .order('created_at', { ascending: false });
-
-      if (quotesError) throw quotesError;
+      // Quotes header: paginated so a very large quote set is never truncated at 1000 rows.
+      const quotesData = await fetchAllPaginated<any>(
+        (from, to) => {
+          let query = supabase
+            .from('Quotes')
+            .select('id, quote_no, status, priority, created_at, created_by_user_id, customer_id, contact_id, dealer_id, organization_id, description, archived, parent_quote_id, root_quote_id, version_no, is_version')
+            .eq('organization_id', activeOrganizationId)
+            .or('deleted.is.false,deleted.is.null');
+          if (effectiveDealerId) query = query.eq('dealer_id', effectiveDealerId);
+          return query.order('created_at', { ascending: false }).range(from, to);
+        },
+        signal,
+      );
       if (signal?.aborted) return;
 
       if (!quotesData || quotesData.length === 0) {
@@ -121,92 +168,82 @@ export function useQuotes(dealerId?: string | null) {
         quotesData.map((q: any) => q.contact_id).filter((id: any): id is string => !!id)
       )];
 
-      const [customersRes, contactsRes] = await Promise.all([
-        customerIds.length > 0
-          ? supabase.from('DirectoryCustomers').select('id, customer_name').in('id', customerIds).or('deleted.is.false,deleted.is.null')
-          : Promise.resolve({ data: [] }),
-        contactIds.length > 0
-          ? supabase.from('DirectoryContacts').select('id, contact_name').in('id', contactIds).eq('deleted', false)
-          : Promise.resolve({ data: [] }),
+      // Names: chunked .in() so neither customers nor contacts can hit the 1000-row cap.
+      const customersMap = new Map<string, string>();
+      const contactsMap = new Map<string, string>();
+      await Promise.all([
+        ...chunkArray(customerIds, 500).map(async (ids) => {
+          const { data } = await supabase.from('DirectoryCustomers').select('id, customer_name').in('id', ids).or('deleted.is.false,deleted.is.null');
+          (data || []).forEach((c: any) => customersMap.set(c.id, c.customer_name ?? 'Sin nombre'));
+        }),
+        ...chunkArray(contactIds, 500).map(async (ids) => {
+          const { data } = await supabase.from('DirectoryContacts').select('id, contact_name').in('id', ids).eq('deleted', false);
+          (data || []).forEach((c: any) => contactsMap.set(c.id, (c.contact_name ?? '').toString().trim() || 'Sin nombre'));
+        }),
       ]);
       if (signal?.aborted) return;
 
-      const customersMap = new Map<string, string>();
-      const contactsMap = new Map<string, string>();
-      (customersRes.data || []).forEach((c: any) => customersMap.set(c.id, c.customer_name ?? 'Sin nombre'));
-      (contactsRes.data || []).forEach((c: any) => contactsMap.set(c.id, (c.contact_name ?? '').toString().trim() || 'Sin nombre'));
-
       const quoteIds = quotesData.map((q: any) => q.id);
-      let quoteLinesMap = new Map<string, Array<{ id: string; msrp: number; dealer_price_total: number; roll_msrp_snapshot: number; bom_msrp_snapshot: number }>>();
-      if (quoteIds.length > 0) {
-        const { data: linesData } = await supabase
-          .from('QuoteLines')
-          .select('id, quote_id, msrp, dealer_price_total, roll_msrp_snapshot, bom_msrp_snapshot')
-          .in('quote_id', quoteIds);
-        if (signal?.aborted) return;
-        if (linesData) {
-          linesData.forEach((line: any) => {
-            if (!quoteLinesMap.has(line.quote_id)) quoteLinesMap.set(line.quote_id, []);
-            quoteLinesMap.get(line.quote_id)!.push({
-              id: line.id,
-              msrp: Number(line.msrp ?? 0),
-              dealer_price_total: Number(line.dealer_price_total ?? 0),
-              roll_msrp_snapshot: Number(line.roll_msrp_snapshot ?? 0),
-              bom_msrp_snapshot: Number(line.bom_msrp_snapshot ?? 0),
-            });
-          });
-        }
-      }
 
-      let saleOrderByQuoteId = new Map<string, { id: string; quote_id: string }>();
-      if (quoteIds.length > 0) {
-        const { data: saleOrdersData } = await supabase
-          .from('SalesOrders')
-          .select('id, quote_id, created_at')
-          .in('quote_id', quoteIds)
-          .eq('organization_id', activeOrganizationId)
-          .or('deleted.is.false,deleted.is.null')
-          .order('created_at', { ascending: false });
-        if (signal?.aborted) return;
-        (saleOrdersData || []).forEach((so: any) => {
-          if (so?.quote_id && so?.id && !saleOrderByQuoteId.has(so.quote_id)) {
-            saleOrderByQuoteId.set(so.quote_id, { id: so.id, quote_id: so.quote_id });
-          }
-        });
-      }
+      // Totals aggregated server-side (subtotal + tax + total). No raw lines downloaded → no truncation.
+      const totalsMap = await fetchQuoteTotalsMap(quoteIds, signal);
+      if (signal?.aborted) return;
+
+      // SalesOrders + payments: chunked .in() to stay under the row cap.
+      const saleOrderByQuoteId = new Map<string, { id: string; quote_id: string }>();
+      await Promise.all(
+        chunkArray(quoteIds, 500).map(async (ids) => {
+          const { data } = await supabase
+            .from('SalesOrders')
+            .select('id, quote_id, created_at')
+            .in('quote_id', ids)
+            .eq('organization_id', activeOrganizationId)
+            .or('deleted.is.false,deleted.is.null')
+            .order('created_at', { ascending: false });
+          (data || []).forEach((so: any) => {
+            if (so?.quote_id && so?.id && !saleOrderByQuoteId.has(so.quote_id)) {
+              saleOrderByQuoteId.set(so.quote_id, { id: so.id, quote_id: so.quote_id });
+            }
+          });
+        }),
+      );
+      if (signal?.aborted) return;
 
       const salesOrderIds = Array.from(new Set(Array.from(saleOrderByQuoteId.values()).map((so) => so.id)));
       const paidBySalesOrderId = new Map<string, number>();
-      if (salesOrderIds.length > 0) {
-        const { data: financialData } = await supabase
-          .from('sales_order_financial_summary')
-          .select('sales_order_id, total_paid')
-          .in('sales_order_id', salesOrderIds);
-        if (signal?.aborted) return;
-        (financialData || []).forEach((row: any) => {
-          paidBySalesOrderId.set(row.sales_order_id, Number(row.total_paid ?? 0));
-        });
-      }
+      await Promise.all(
+        chunkArray(salesOrderIds, 500).map(async (ids) => {
+          const { data } = await supabase
+            .from('sales_order_financial_summary')
+            .select('sales_order_id, total_paid')
+            .in('sales_order_id', ids);
+          (data || []).forEach((row: any) => {
+            paidBySalesOrderId.set(row.sales_order_id, Number(row.total_paid ?? 0));
+          });
+        }),
+      );
+      if (signal?.aborted) return;
 
       const enrichedQuotes = quotesData.map((quote: any) => {
-        const lines = quoteLinesMap.get(quote.id) || [];
         const salesOrder = saleOrderByQuoteId.get(quote.id) ?? null;
         const totalPaid = salesOrder?.id ? (paidBySalesOrderId.get(salesOrder.id) ?? 0) : 0;
-        const total = lines.reduce((sum: number, l: any) => {
-          const dealerTotal = Number(l.dealer_price_total ?? 0);
-          const msrpTotal = Number(l.msrp ?? 0);
-          return sum + (dealerTotal > 0 ? dealerTotal : msrpTotal);
-        }, 0);
+        const t = totalsMap.get(quote.id);
+        const subtotal = t?.dealer_subtotal ?? 0;
+        const taxAmount = t?.tax_amount ?? 0;
+        const total = t?.total_amount ?? subtotal;
         const createdBy = quote.created_by_user_id
           ? (appUsersMap.get(quote.created_by_user_id) ?? 'Legacy / Imported')
           : 'Legacy / Imported';
         return {
           ...quote,
           DirectoryCustomers: quote.customer_id ? { id: quote.customer_id, customer_name: customersMap.get(quote.customer_id) || 'Cliente no encontrado' } : null,
-          QuoteLines: lines,
           customer_name: quote.customer_id ? (customersMap.get(quote.customer_id) || 'Cliente no encontrado') : 'Consumidor Final',
           contact_name: quote.contact_id ? (contactsMap.get(quote.contact_id) || 'Contacto no encontrado') : '-',
+          subtotal,
+          tax_amount: taxAmount,
+          total_amount: total,
           total,
+          line_count: t?.line_count ?? 0,
           created_by: createdBy,
           sale_order_id: salesOrder?.id ?? null,
           total_paid: totalPaid,
@@ -329,80 +366,53 @@ export function useApprovedQuotesWithProgress(dealerId?: string | null) {
             .filter((id: any): id is string => !!id)
         )];
 
-        let customersMap = new Map<string, { id: string; customer_name: string }>();
-        if (customerIds.length > 0) {
-          const { data: customersData } = await supabase
-            .from('DirectoryCustomers')
-            .select('id, customer_name')
-            .in('id', customerIds)
-            .or('deleted.is.false,deleted.is.null');
+        const customersMap = new Map<string, { id: string; customer_name: string }>();
+        await Promise.all(
+          chunkArray(customerIds, 500).map(async (ids) => {
+            const { data } = await supabase
+              .from('DirectoryCustomers')
+              .select('id, customer_name')
+              .in('id', ids)
+              .or('deleted.is.false,deleted.is.null');
+            (data || []).forEach((c: any) => customersMap.set(c.id, { id: c.id, customer_name: c.customer_name }));
+          }),
+        );
 
-          if (customersData) {
-            customersMap = new Map(
-            customersData.map((c: any) => [c.id, { id: c.id, customer_name: c.customer_name }])
-            );
-          }
-        }
-
-        // Obtener QuoteLines
-        // Note: QuoteLines does NOT have a 'deleted' column in the schema
+        // Per-quote totals aggregated server-side (no raw QuoteLines download → no 1000-row truncation).
         const quoteIds = quotesData.map((q: any) => q.id);
-        let quoteLinesMap = new Map<string, Array<{ id: string; msrp: number; roll_msrp_snapshot: number; bom_msrp_snapshot: number }>>();
-        
-        if (quoteIds.length > 0) {
-          const { data: linesData } = await supabase
-            .from('QuoteLines')
-            .select('id, quote_id, msrp, roll_msrp_snapshot, bom_msrp_snapshot')
-            .in('quote_id', quoteIds);
+        const totalsMap = await fetchQuoteTotalsMap(quoteIds);
 
-          if (linesData) {
-            linesData.forEach((line: any) => {
-              if (!quoteLinesMap.has(line.quote_id)) {
-                quoteLinesMap.set(line.quote_id, []);
-              }
-              quoteLinesMap.get(line.quote_id)!.push({
-                id: line.id,
-                msrp: Number(line.msrp ?? 0),
-                roll_msrp_snapshot: Number(line.roll_msrp_snapshot ?? 0),
-                bom_msrp_snapshot: Number(line.bom_msrp_snapshot ?? 0),
-              });
-            });
-          }
-        }
-
-        // Obtener SalesOrders
-        const quoteIdsForSO = quotesData.map((q: any) => q.id);
-        let saleOrdersMap = new Map<string, any[]>();
-        
-        if (quoteIdsForSO.length > 0) {
-          const { data: saleOrdersData } = await supabase
-            .from('SalesOrders')
-            .select('id, quote_id, sale_order_no, order_progress_status, status, organization_id')
-            .in('quote_id', quoteIdsForSO)
-            .eq('organization_id', activeOrganizationId)
-            .or('deleted.is.false,deleted.is.null');
-
-          if (saleOrdersData) {
-            saleOrdersData.forEach((so: any) => {
+        // Obtener SalesOrders (chunked .in() para no topar el límite de 1000 filas)
+        const saleOrdersMap = new Map<string, any[]>();
+        await Promise.all(
+          chunkArray(quoteIds, 500).map(async (ids) => {
+            const { data } = await supabase
+              .from('SalesOrders')
+              .select('id, quote_id, sale_order_no, order_progress_status, status, organization_id')
+              .in('quote_id', ids)
+              .eq('organization_id', activeOrganizationId)
+              .or('deleted.is.false,deleted.is.null');
+            (data || []).forEach((so: any) => {
               if (so.quote_id) {
-                if (!saleOrdersMap.has(so.quote_id)) {
-                  saleOrdersMap.set(so.quote_id, []);
-                }
+                if (!saleOrdersMap.has(so.quote_id)) saleOrdersMap.set(so.quote_id, []);
                 saleOrdersMap.get(so.quote_id)!.push(so);
               }
             });
-          }
-        }
+          }),
+        );
 
         // Enriquecer quotes
         const enrichedQuotes = quotesData.map((quote: any) => {
           const saleOrders = saleOrdersMap.get(quote.id) || [];
           const firstSO = saleOrders.length > 0 ? saleOrders[0] : null;
+          const t = totalsMap.get(quote.id);
 
           return {
             ...quote,
             DirectoryCustomers: quote.customer_id ? customersMap.get(quote.customer_id) || null : null,
-            QuoteLines: quoteLinesMap.get(quote.id) || [],
+            QuoteLines: [],
+            totals: { total: t?.dealer_subtotal ?? 0, tax: t?.tax_amount ?? 0, grand_total: t?.total_amount ?? 0 },
+            total: t?.dealer_subtotal ?? 0,
             SaleOrders: saleOrders,
             saleOrderNo: firstSO?.sale_order_no || null,
             saleOrderStatus: firstSO?.status || null,

@@ -53,6 +53,9 @@ export interface Proposal {
   global_installation_fee_pct?: number | null;
   subtotal_amount: number | null;
   installation_amount?: number | null;
+  /** Snapshot of Material+Custom subtotal (pre-discount). Frozen value; only the
+   *  Recalcular button (proposal_recalc_totals_v2, drafts only) updates it. */
+  total_product_amount?: number | null;
   discount_amount: number | null;
   tax_amount: number | null;
   tax_pct?: number | null;

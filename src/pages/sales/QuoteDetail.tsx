@@ -199,6 +199,9 @@ export default function QuoteDetail() {
 
   const [quote, setQuote] = useState<Quote | null>(null);
   const [lines, setLines] = useState<QuoteLine[]>([]);
+  // Server-side totals (subtotal + tax + total) from quote_list_totals — same source
+  // of truth as the Quotes list, so list and detail can never disagree.
+  const [serverTotals, setServerTotals] = useState<{ subtotal: number; tax: number; total: number } | null>(null);
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [salesOrder, setSalesOrder] = useState<SalesOrder | null>(null);
   const [salesOrderFinancial, setSalesOrderFinancial] = useState<SalesOrderFinancialSummary | null>(null);
@@ -258,7 +261,7 @@ export default function QuoteDetail() {
       setQuote(quoteRes.data as Quote);
       loadedQuoteIdRef.current = quoteId;
 
-      const [linesRes, proposalsRes, soRes, timelineRes] = await Promise.all([
+      const [linesRes, proposalsRes, soRes, timelineRes, totalsRes] = await Promise.all([
         supabase
           .from('QuoteLines')
           .select('id, name, sku, product_type, width_m, height_m, quantity, unit_msrp, msrp, unit_dealer_price_snapshot, dealer_price_total, config_snapshot')
@@ -283,9 +286,24 @@ export default function QuoteDetail() {
           .eq('entity_type', 'quote')
           .eq('entity_id', quoteId)
           .order('created_at', { ascending: false }),
+        supabase.rpc('quote_list_totals', { p_quote_ids: [quoteId] }),
       ]);
 
       if (myId !== requestIdRef.current) return;
+
+      // Totals from the shared SQL aggregate (subtotal + tax + total). Tolerate RLS
+      // failures: fall back to the line-based calc below if the RPC is unavailable.
+      if (!totalsRes.error && Array.isArray(totalsRes.data) && totalsRes.data.length > 0) {
+        const row = totalsRes.data[0] as any;
+        setServerTotals({
+          subtotal: Number(row.dealer_subtotal ?? 0),
+          tax: Number(row.tax_amount ?? 0),
+          total: Number(row.total_amount ?? 0),
+        });
+      } else {
+        setServerTotals(null);
+        if (totalsRes.error && import.meta.env.DEV) console.warn('[QuoteDetail] quote_list_totals error:', totalsRes.error);
+      }
 
       // Secondary fetches: tolerar fallos de RLS/dealer para que el detalle siempre muestre el quote
       if (linesRes.error) {
@@ -716,13 +734,25 @@ export default function QuoteDetail() {
         { id: 'timeline', label: 'Timeline' },
       ];
 
-  const displaySubtotal = lines.length > 0
-    ? lines.reduce((s, l) => s + Number(l.dealer_price_total ?? l.msrp ?? 0), 0)
+  // Line-based fallback (mirrors the SQL rule dealer>0 ? dealer : msrp) used only
+  // if the server totals RPC is unavailable (e.g. RLS for some portal roles).
+  const lineSubtotalFallback = lines.length > 0
+    ? lines.reduce((s, l) => {
+        const dealer = Number(l.dealer_price_total ?? 0);
+        return s + (dealer > 0 ? dealer : Number(l.msrp ?? 0));
+      }, 0)
     : Number(quote.subtotal ?? 0);
-  const displayTax = Number(quote.tax_amount ?? salesOrder?.tax_amount ?? 0);
-  const displayTotal = lines.length > 0
-    ? displaySubtotal + displayTax
-    : (quote.total_amount ?? (displaySubtotal + displayTax));
+  // Source of truth = server totals (identical to the Quotes list). Tax is always
+  // reflected (computed from CostSettings.tax_pct unless the quote is tax-exempt).
+  const displaySubtotal = serverTotals ? serverTotals.subtotal : lineSubtotalFallback;
+  const displayTax = serverTotals
+    ? serverTotals.tax
+    : Number(quote.tax_amount ?? salesOrder?.tax_amount ?? 0);
+  const displayTotal = serverTotals
+    ? serverTotals.total
+    : (lines.length > 0
+        ? displaySubtotal + displayTax
+        : (quote.total_amount ?? (displaySubtotal + displayTax)));
 
   const hasAnyPayment = (salesOrderFinancial?.total_paid ?? 0) > 0;
   const hasSalesOrder = Boolean(salesOrder);
@@ -912,7 +942,7 @@ export default function QuoteDetail() {
               <dl className="space-y-2 text-sm">
                 <div className="flex justify-between">
                   <dt className="text-gray-500">Subtotal</dt>
-                  <dd className="font-mono">{formatCurrencyDisplay(lines.length > 0 ? displaySubtotal : quote.subtotal)}</dd>
+                  <dd className="font-mono">{formatCurrencyDisplay(displaySubtotal)}</dd>
                 </div>
                 <div className="flex justify-between">
                   <dt className="text-gray-500">Tax</dt>

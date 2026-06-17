@@ -117,6 +117,7 @@ export default function ProposalPrint() {
   const { proposal, lines, addonsMap, quoteLinesMap, configuredProductsMap, quote, customer, contact, dealerLogoUrl, loading, error } =
     useProposalDetail(proposalId);
   const [orgName, setOrgName] = useState<string | null>(null);
+  const [orgTaxPct, setOrgTaxPct] = useState<number>(0.07);
   const [dealerInfo, setDealerInfo] = useState<{
     dealer_name?: string | null;
     dealer_email?: string | null;
@@ -139,6 +140,26 @@ export default function ProposalPrint() {
         .eq('id', proposal.organization_id)
         .maybeSingle();
       if (!cancelled && data) setOrgName((data as { name?: string }).name ?? null);
+    })();
+    return () => { cancelled = true; };
+  }, [proposal?.organization_id]);
+
+  // Live tax rate from CostSettings (same source as recalc_proposal_totals / the list RPC),
+  // so the PDF tax is never the hardcoded 0.07 fallback nor a stale persisted value.
+  useEffect(() => {
+    if (!proposal?.organization_id) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('CostSettings')
+        .select('tax_pct')
+        .eq('organization_id', proposal.organization_id)
+        .or('is_active.is.true,is_active.is.null')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const pct = (data as { tax_pct?: number } | null)?.tax_pct;
+      if (!cancelled && pct != null) setOrgTaxPct(Number(pct));
     })();
     return () => { cancelled = true; };
   }, [proposal?.organization_id]);
@@ -185,6 +206,24 @@ export default function ProposalPrint() {
       const installationAddons = (addonsMap?.get(line.id) || []).filter((a) => a.addon_type === 'installation');
       installationTotal += installationAddons.reduce((s, a) => s + ((Number(a.sale_amount) || 0) * lineQty), 0);
     });
+    // Summary = frozen snapshot (single source of truth shared with the list + detail).
+    // The snapshot is written only by proposal_recalc_totals_v2 (drafts) / creation, so the PDF
+    // never drifts from the committed value. Fall back to a live computation only when the
+    // proposal has no snapshot yet (e.g. brand-new, not recalculated).
+    const hasSnapshot = proposal?.total_amount != null;
+    if (hasSnapshot) {
+      return {
+        totals: {
+          totalProduct: Number(proposal?.total_product_amount ?? totalProduct),
+          discountAmount: Number(proposal?.discount_amount ?? 0),
+          installationAmount: Number(proposal?.installation_amount ?? 0),
+          subtotal: Number(proposal?.subtotal_amount ?? 0),
+          taxAmount: Number(proposal?.tax_amount ?? 0),
+          total: Number(proposal?.total_amount ?? 0),
+        },
+        lineTotals,
+      };
+    }
     const discountPct = proposal?.global_discount_pct ?? 0;
     const discountAmount = totalProduct * (discountPct / 100);
     const installationAmount = proposal?.installation_amount ?? installationTotal ?? 0;
@@ -203,27 +242,13 @@ export default function ProposalPrint() {
         lineTotals,
       };
     }
-    if (proposal?.tax_amount != null && proposal?.total_amount != null) {
-      return {
-        totals: {
-          totalProduct,
-          discountAmount,
-          installationAmount,
-          subtotal,
-          taxAmount: proposal.tax_amount,
-          total: proposal.total_amount,
-        },
-        lineTotals,
-      };
-    }
-    const taxPct = 0.07;
-    const taxAmount = subtotal * taxPct;
-    const total = subtotal + taxAmount;
+    const taxAmount = Math.round(subtotal * orgTaxPct * 100) / 100;
+    const total = Math.round((subtotal + taxAmount) * 100) / 100;
     return {
       totals: { totalProduct, discountAmount, installationAmount, subtotal, taxAmount, total },
       lineTotals,
     };
-  }, [lines, addonsMap, quoteLinesMap, proposal?.subtotal_amount, proposal?.installation_amount, proposal?.discount_amount, proposal?.tax_amount, proposal?.total_amount, proposal?.global_discount_pct, proposal?.exempt_tax]);
+  }, [lines, addonsMap, quoteLinesMap, proposal?.total_product_amount, proposal?.subtotal_amount, proposal?.installation_amount, proposal?.discount_amount, proposal?.tax_amount, proposal?.total_amount, proposal?.global_discount_pct, proposal?.exempt_tax, orgTaxPct]);
 
   const currency = proposal?.currency || 'USD';
 
