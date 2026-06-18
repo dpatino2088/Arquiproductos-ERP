@@ -19,6 +19,28 @@ import { proposalDetailKey } from '../lib/queryKeys';
 import { fetchAllPaginated, chunkArray } from '../lib/supabasePagination';
 import type { Proposal, ProposalLine, ProposalLineAddOn } from '../types/proposals';
 
+/**
+ * Live proposal totals aggregated in Postgres via `proposal_list_totals` (mirrors the
+ * ProposalDetail live formula). Used for DRAFT proposals so the list updates live like the detail.
+ * Sent/accepted proposals are NOT overridden — they keep their frozen `total_amount` snapshot.
+ */
+async function fetchProposalTotalsMap(
+  proposalIds: string[],
+  signal?: AbortSignal,
+): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  if (proposalIds.length === 0) return map;
+  for (const ids of chunkArray(proposalIds, 500)) {
+    if (signal?.aborted) return map;
+    const { data, error } = await supabase.rpc('proposal_list_totals', { p_proposal_ids: ids });
+    if (error) throw error;
+    (data ?? []).forEach((row: any) => {
+      map.set(row.proposal_id, Number(row.total_amount ?? 0));
+    });
+  }
+  return map;
+}
+
 /** Dealer-price subtotal per quote (sum of dealer line prices, MSRP fallback), aggregated
  *  server-side via `quote_list_totals`. Replaces the old client-side QuoteLines download that
  *  truncated at 1000 rows for quotes with many lines. */
@@ -165,6 +187,11 @@ export function useProposalsList() {
       const quoteDealerTotalMap = await fetchQuoteDealerSubtotalMap(quoteIds, signal);
       if (signal?.aborted) return;
 
+      // Live totals only for DRAFT proposals (sent/accepted keep their frozen snapshot).
+      const draftIds = rows.filter((r) => r.status === 'draft').map((r) => r.id);
+      const proposalTotalsMap = await fetchProposalTotalsMap(draftIds, signal);
+      if (signal?.aborted) return;
+
       const customerIds = new Set<string>();
       rows.forEach((r) => {
         if (r.customer_id) customerIds.add(r.customer_id);
@@ -210,9 +237,12 @@ export function useProposalsList() {
               ? (appUsersMap.get(q.created_by_user_id) ?? 'Legacy / Imported')
               : 'Legacy / Imported');
         r.quote_total_amount = r.quote_id ? (quoteDealerTotalMap.get(r.quote_id) ?? null) : null;
-        // Total = frozen snapshot (Proposals.total_amount). It only changes via the explicit
-        // Recalcular button (drafts) / proposal creation, never silently — so the list always
-        // matches the committed value shown in the detail and the PDF.
+        // Draft → live total (matches the detail's live Summary). Sent/accepted → keep the frozen
+        // snapshot (Proposals.total_amount), the value committed when the proposal was sent.
+        if (r.status === 'draft') {
+          const live = proposalTotalsMap.get(r.id);
+          if (live != null) r.total_amount = live;
+        }
         const quoteUpdatedTs = q?.updated_at ? Date.parse(q.updated_at) : NaN;
         const proposalCreatedTs = r.created_at ? Date.parse(r.created_at) : NaN;
         r.is_outdated = Number.isFinite(quoteUpdatedTs) && Number.isFinite(proposalCreatedTs) && quoteUpdatedTs > proposalCreatedTs;
@@ -1021,10 +1051,6 @@ export async function createProposalFromQuote(
       return { error: snapshotErr.message || 'Error freezing proposal snapshot' };
     }
   }
-
-  // Auto-recalc triggers are disabled (snapshot model); seed the initial totals snapshot with the
-  // canonical rule so the new draft already shows correct totals in list/detail/PDF. Best effort.
-  await supabase.rpc('proposal_recalc_totals_v2', { p_proposal_id: proposalId });
 
   return { proposalId };
 }

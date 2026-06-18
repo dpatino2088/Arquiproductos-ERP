@@ -19,7 +19,7 @@ import { useResolvedStorageUrl } from '../../hooks/useResolvedStorageUrl';
 import Input from '../../components/ui/Input';
 import Label from '../../components/ui/Label';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
-import { ChevronDown, ChevronRight, GripVertical, Plus, AlertTriangle, Printer, Eye, ArrowLeft, Download, Trash2, ExternalLink, RefreshCw, Lock } from 'lucide-react';
+import { ChevronDown, ChevronRight, GripVertical, Plus, AlertTriangle, Printer, Eye, ArrowLeft, Download, Trash2, ExternalLink, Lock } from 'lucide-react';
 import DetailPageLayout from '../../components/shared/DetailPageLayout';
 import StatusBadge from '../../components/shared/StatusBadge';
 import TimelineView from '../../components/shared/TimelineView';
@@ -333,7 +333,16 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
   const [showAdjTotal, setShowAdjTotal] = useState(false);
   const [targetSubtotalInput, setTargetSubtotalInput] = useState('');
   const [targetTotalInput, setTargetTotalInput] = useState('');
-  const [recalculating, setRecalculating] = useState(false);
+  // Always-latest live totals, so saveHeader (defined before the `totals` useMemo) can freeze the
+  // committed snapshot at send time without a TDZ/stale-closure problem.
+  const totalsRef = useRef<{
+    totalProduct: number;
+    discountAmount: number;
+    installationNet: number;
+    subtotal: number;
+    taxAmount: number;
+    total: number;
+  } | null>(null);
 
   const resolvedLogoUrl = useResolvedStorageUrl(dealerLogoUrl ?? null);
   const [logoError, setLogoError] = useState(false);
@@ -461,6 +470,17 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
       const nextStatus = headerForm.status;
       const wasFrozen = prevStatus === 'sent' || prevStatus === 'accepted';
       const nowFrozen = nextStatus === 'sent' || nextStatus === 'accepted';
+      const liveTotals = totalsRef.current;
+      if (nowFrozen && !wasFrozen && liveTotals) {
+        // Commit the totals snapshot at exactly the live value the user is sending. From here the
+        // proposal is locked and every surface (detail/list/PDF) reads these frozen columns.
+        payload.total_product_amount = liveTotals.totalProduct;
+        payload.discount_amount = liveTotals.discountAmount;
+        payload.installation_amount = liveTotals.installationNet;
+        payload.subtotal_amount = liveTotals.subtotal; // taxable base
+        payload.tax_amount = liveTotals.taxAmount;
+        payload.total_amount = liveTotals.total;
+      }
       const hasSnapshot =
         !!proposal.customer_snapshot_name ||
         !!proposal.contact_snapshot_name ||
@@ -759,46 +779,6 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     });
   }, [handleSave]);
 
-  /**
-   * Recompute and persist the frozen totals snapshot using the canonical rule
-   * (proposal_recalc_totals_v2): global discount/fee on Material+Custom only, labor discount/fee
-   * on installation only, tax on the resulting base. The DB guards this to DRAFT proposals — sent
-   * and accepted proposals are locked and return { ok: false, reason: 'locked' }. If the proposal
-   * has unsaved edits, persist them first so the recalc sees the latest lines/adjustments.
-   */
-  const handleRecalculate = useCallback(async () => {
-    if (!proposal || !canWrite || recalculating) return;
-    if (proposal.status !== 'draft') return;
-    setRecalculating(true);
-    try {
-      if (headerDirty || linesDirty || addonsDirty || removedCustomLineIds.length > 0) {
-        await handleSave();
-      }
-      const { data, error: rpcErr } = await supabase.rpc('proposal_recalc_totals_v2', {
-        p_proposal_id: proposal.id,
-      });
-      if (rpcErr) {
-        useUIStore.getState().addNotification({ type: 'error', title: 'Recalculate failed', message: getSupabaseErrorMessage(rpcErr) });
-        return;
-      }
-      const res = (data ?? {}) as { ok?: boolean; reason?: string };
-      if (res.ok === false) {
-        useUIStore.getState().addNotification({
-          type: res.reason === 'locked' ? 'warning' : 'error',
-          title: res.reason === 'locked' ? 'Proposal locked' : 'Recalculate failed',
-          message: res.reason === 'locked'
-            ? 'Only draft proposals can be recalculated.'
-            : 'Could not recalculate totals.',
-        });
-        return;
-      }
-      await refetch();
-      useUIStore.getState().addNotification({ type: 'success', title: 'Recalculated', message: 'Totals updated.' });
-    } finally {
-      setRecalculating(false);
-    }
-  }, [proposal, canWrite, recalculating, headerDirty, linesDirty, addonsDirty, removedCustomLineIds, handleSave, refetch]);
-
   const listPath = '/sales/proposals';
   const queryReturnTo = getReturnToFromCurrentQuery();
   const normalizePath = (path: string | null | undefined) => {
@@ -1079,17 +1059,27 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     };
   }, [displayLines, quoteLinesMap, displayAddonsMap, proposal?.status, proposal?.tax_pct, headerForm.global_discount_pct, headerForm.global_fee_amount, headerForm.global_installation_discount_pct, headerForm.global_installation_fee_pct, headerForm.exempt_tax]);
 
+  // Keep the ref in sync so saveHeader can read the latest live totals when freezing on send.
+  totalsRef.current = {
+    totalProduct: totals.totalProduct,
+    discountAmount: totals.discountAmount,
+    installationNet: totals.installationNet,
+    subtotal: totals.subtotal,
+    taxAmount: totals.taxAmount,
+    total: totals.total,
+  };
+
   /**
-   * Displayed Summary = FROZEN SNAPSHOT (Proposals.* columns) — the single source of truth shared
-   * with the list and the PDF. Editing a draft does NOT change these numbers; they only change when
-   * the user presses Recalcular (proposal_recalc_totals_v2, drafts only) or at proposal creation.
-   * Falls back to the live `totals` only when there is no snapshot yet (brand-new proposal that has
-   * not been recalculated). `totals` above stays the live engine for per-line amounts and the
-   * recalc preview, but it is intentionally NOT what the Summary renders.
+   * Displayed Summary (hybrid model):
+   *  - DRAFT (editable): live `totals`, so the Summary updates as you edit — exactly like before.
+   *  - SENT / ACCEPTED (committed): the FROZEN snapshot (Proposals.* columns), captured at send time,
+   *    so a closed proposal never drifts. Falls back to live only if the snapshot was never written.
+   * The quote-derived base is already frozen in quote_line_snapshot, so even the live draft total is
+   * immune to later Quote edits.
    */
   const summary = useMemo(() => {
-    const hasSnapshot = proposal?.total_amount != null;
-    if (!hasSnapshot) {
+    const locked = proposal?.status === 'sent' || proposal?.status === 'accepted';
+    if (!locked || proposal?.total_amount == null) {
       return {
         totalProduct: totals.totalProduct,
         discountPct: totals.discountPct,
@@ -1127,23 +1117,18 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
   }, [proposal, totals]);
 
   /**
-   * Resolve a desired taxable base (Subtotal) into the Global Discount % that proposal_recalc_totals_v2
-   * will apply. Inverts the CANONICAL rule (discount on Material+Custom only):
-   *   taxableBase = totalProduct*(1 - d) + globalFee + installationNet + otherAddons
-   * so  d = 1 - (target - globalFee - installationNet - otherAddons) / totalProduct.
-   * The discount % is set on the header (dirty); the user then presses Recalculate to persist it.
+   * Resolve desired taxable base (subtotal after global discount) into Global Discount %.
+   * Mirrors the live `totals` formula where discount is applied to subtotal_before_discount.
    */
   const setHeaderFromTargetProductNet = useCallback(
-    (targetSubtotal: number) => {
-      const product = totals.totalProduct ?? 0;
-      if (product <= 0) return;
-      const fixed = (totals.globalFeeAmount ?? 0) + (totals.installationNet ?? 0) + (totals.otherAddonsTotal ?? 0);
-      const productAfterDiscount = targetSubtotal - fixed; // = product * (1 - d)
+    (targetAfterDiscount: number) => {
+      const base = totals.subtotalBeforeDiscount ?? 0;
+      if (base <= 0) return;
       let nextDiscount = 0;
-      if (productAfterDiscount <= 0) {
+      if (targetAfterDiscount <= 0) {
         nextDiscount = 100;
-      } else if (productAfterDiscount < product) {
-        nextDiscount = Math.round(((product - productAfterDiscount) / product) * 1000000) / 10000;
+      } else if (targetAfterDiscount < base) {
+        nextDiscount = Math.round(((base - targetAfterDiscount) / base) * 1000000) / 10000;
       }
       setHeaderForm((f) => ({
         ...f,
@@ -1151,7 +1136,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
       }));
       setHeaderDirty(true);
     },
-    [totals.totalProduct, totals.globalFeeAmount, totals.installationNet, totals.otherAddonsTotal]
+    [totals.subtotalBeforeDiscount]
   );
 
   /** Target subtotal (sin tax) == taxable base after global discount. */
@@ -1164,18 +1149,19 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     [setHeaderFromTargetProductNet]
   );
 
-  /** Target total (inc. tax) -> taxable base. Global fee is taxed (inside the base), so
-   *  total = base * (1 + taxPct)  ->  base = total / (1 + taxPct). */
+  /** Target total (con o sin ITBMS) -> derive taxable base using the live equation. */
   const applyTargetTotal = useCallback(
     (raw: string) => {
       const targetTotal = parseFloat(raw);
       if (Number.isNaN(targetTotal) || targetTotal < 0) return;
+      const globalFeeAmount = Number(headerForm.global_fee_amount) || 0;
+      const targetAfterFee = Math.max(targetTotal - globalFeeAmount, 0);
       const exemptTax = headerForm.exempt_tax;
       const taxPct = exemptTax ? 0 : (proposal?.tax_pct ?? 0.07);
-      const targetSub = targetTotal / (1 + taxPct);
+      const targetSub = targetAfterFee / (1 + taxPct);
       setHeaderFromTargetProductNet(targetSub);
     },
-    [headerForm.exempt_tax, proposal?.tax_pct, setHeaderFromTargetProductNet]
+    [headerForm.exempt_tax, headerForm.global_fee_amount, proposal?.tax_pct, setHeaderFromTargetProductNet]
   );
 
   const customLinesInvalid = useMemo(() => {
@@ -1733,13 +1719,6 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     { id: 'timeline', label: 'Timeline' },
   ];
   // Keep this as a plain value (not a hook) because this block is after early returns.
-  const isProposalOutdated = (() => {
-    if (!proposal?.quote_id || !quote?.updated_at || !proposal.created_at) return false;
-    const quoteUpdatedTs = Date.parse(quote.updated_at);
-    const proposalCreatedTs = Date.parse(proposal.created_at);
-    return Number.isFinite(quoteUpdatedTs) && Number.isFinite(proposalCreatedTs) && quoteUpdatedTs > proposalCreatedTs;
-  })();
-
   return (
     <DetailPageLayout
       title={proposal.proposal_no || proposal.id.slice(0, 8)}
@@ -1751,15 +1730,6 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
       onBack={handleBack}
       actions={actionButtons}
     >
-      {isProposalOutdated && (
-        <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 flex items-start gap-2">
-          <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
-          <span>
-            This proposal is <span className="font-semibold">Outdated</span>: the linked quote was modified after this proposal was created.
-            Create a new proposal version if you need the latest quote pricing.
-          </span>
-        </div>
-      )}
       {activeTab === 'overview' && (
         <div className="space-y-6 w-full max-w-full">
           {/* Header cards (2 columns: Left = names/details, Right = discounts + summary) */}
@@ -1987,12 +1957,8 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
                     <h3 className="text-sm font-semibold text-gray-900">Summary</h3>
-                    {proposal?.status === 'draft' ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200" title="Draft totals are frozen and only change when you press Recalculate.">
-                        Draft
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-gray-100 text-gray-600 border border-gray-200" title="Totals are locked; this proposal has been sent/accepted.">
+                    {(proposal?.status === 'sent' || proposal?.status === 'accepted') && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-gray-100 text-gray-600 border border-gray-200" title="Committed proposal: totals are locked at the value sent to the customer.">
                         <Lock className="w-3 h-3" /> Locked
                       </span>
                     )}
@@ -2008,22 +1974,6 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                     <span className="text-xs text-gray-600">Exempt Tax</span>
                   </label>
                 </div>
-                {proposal?.status === 'draft' && !contentReadOnly && (
-                  <div className="mb-3 flex items-center justify-between gap-2 rounded-md bg-amber-50/60 border border-amber-100 px-2.5 py-1.5">
-                    <span className="text-[11px] text-amber-700">
-                      Totals are frozen. Recalculate to apply edits to the snapshot.
-                    </span>
-                    <button
-                      type="button"
-                      onClick={handleRecalculate}
-                      disabled={recalculating}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border border-amber-300 bg-white text-amber-800 hover:bg-amber-50 disabled:opacity-50 text-xs font-medium shrink-0"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${recalculating ? 'animate-spin' : ''}`} />
-                      {recalculating ? 'Recalculating…' : 'Recalculate'}
-                    </button>
-                  </div>
-                )}
                 <div className="flex justify-between py-1 text-sm">
                   <span className="text-gray-600">Total Product</span>
                   <span className="tabular-nums">{formatCurrency(summary.totalProduct ?? 0, currency)}</span>

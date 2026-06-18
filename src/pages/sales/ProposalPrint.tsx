@@ -206,12 +206,10 @@ export default function ProposalPrint() {
       const installationAddons = (addonsMap?.get(line.id) || []).filter((a) => a.addon_type === 'installation');
       installationTotal += installationAddons.reduce((s, a) => s + ((Number(a.sale_amount) || 0) * lineQty), 0);
     });
-    // Summary = frozen snapshot (single source of truth shared with the list + detail).
-    // The snapshot is written only by proposal_recalc_totals_v2 (drafts) / creation, so the PDF
-    // never drifts from the committed value. Fall back to a live computation only when the
-    // proposal has no snapshot yet (e.g. brand-new, not recalculated).
-    const hasSnapshot = proposal?.total_amount != null;
-    if (hasSnapshot) {
+    // Hybrid: SENT/ACCEPTED read the frozen snapshot committed at send time; DRAFT computes live so
+    // the PDF preview matches the live detail. Fall back to live if a locked proposal has no snapshot.
+    const locked = proposal?.status === 'sent' || proposal?.status === 'accepted';
+    if (locked && proposal?.total_amount != null) {
       return {
         totals: {
           totalProduct: Number(proposal?.total_product_amount ?? totalProduct),
@@ -248,7 +246,7 @@ export default function ProposalPrint() {
       totals: { totalProduct, discountAmount, installationAmount, subtotal, taxAmount, total },
       lineTotals,
     };
-  }, [lines, addonsMap, quoteLinesMap, proposal?.total_product_amount, proposal?.subtotal_amount, proposal?.installation_amount, proposal?.discount_amount, proposal?.tax_amount, proposal?.total_amount, proposal?.global_discount_pct, proposal?.exempt_tax, orgTaxPct]);
+  }, [lines, addonsMap, quoteLinesMap, proposal?.status, proposal?.total_product_amount, proposal?.subtotal_amount, proposal?.installation_amount, proposal?.discount_amount, proposal?.tax_amount, proposal?.total_amount, proposal?.global_discount_pct, proposal?.exempt_tax, orgTaxPct]);
 
   const currency = proposal?.currency || 'USD';
 

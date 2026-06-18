@@ -1,65 +1,59 @@
 ---
-description: Proposal totals are a frozen snapshot; never auto-recalculate. Read before touching Proposal totals, ProposalDetail/ProposalPrint summary, useProposals totals, or proposal recalc DB functions/triggers.
+description: Proposal totals are LIVE while draft and FROZEN once sent/accepted. Read before touching Proposal totals, ProposalDetail/ProposalPrint summary, useProposals totals, or the proposal freeze logic.
 globs: src/pages/sales/ProposalDetail.tsx,src/pages/sales/ProposalPrint.tsx,src/hooks/useProposals.ts,supabase/migrations/*proposal*totals*.sql
 alwaysApply: false
 ---
 
-# Proposal Totals — Snapshot + Manual Recalc
+# Proposal Totals — Live (draft) + Frozen (committed)
 
-A proposal is a **price commitment to the customer**. Its totals must never change silently.
+Hybrid model. A proposal is a price commitment, but while it is a draft it must behave like before
+(update live as you edit).
 
-## Source of truth = the frozen snapshot
+## Behaviour by status
 
-All displayed totals (list, ProposalDetail Summary, ProposalPrint, downloadable PDF) read the
-persisted snapshot on `Proposals`:
-
-| Column | Meaning (Summary row) |
+| Status | Totals source |
 |---|---|
-| `total_product_amount` | Material+Custom subtotal (pre-discount) → "Total Product" |
-| `discount_amount` | Global discount amount → "Discount" |
-| `installation_amount` | Installation **net** (after labor disc/fee) → "Installation" |
-| `subtotal_amount` | Taxable base (post-discount, pre-tax) → "Subtotal" |
-| `tax_amount` | Tax → "Tax" |
-| `total_amount` | Grand total → "Total" |
+| `draft` | **LIVE** — recomputed from lines/adjustments on every edit (the `totals` useMemo in ProposalDetail; `proposal_list_totals` RPC for the list; live compute in ProposalPrint). Updates instantly, no button. |
+| `sent` / `accepted` | **FROZEN** — read the snapshot columns on `Proposals`, committed at send time. A "Locked" badge is shown; content is read-only. |
 
-- `useProposals` list reads `Proposals.total_amount` directly (never overrides it with a live RPC).
-- `ProposalDetail` renders the `summary` object (snapshot), **not** the live `totals` useMemo. `totals`
-  stays the live engine only for per-line amounts and the recalc preview math.
-- `ProposalPrint` and `buildProposalPDFDoc` read the snapshot columns (fallback to a live compute only
-  when `total_amount` is null, i.e. a brand-new proposal not yet recalculated).
+The quote-derived base is frozen in `ProposalLines.quote_line_snapshot.base_line_msrp` at proposal
+creation, so even the LIVE draft total is immune to later Quote edits.
 
-## When the snapshot changes (the ONLY times)
+## Freezing (the moment totals are committed)
 
-1. **Proposal creation** (`createProposalFromQuote`) seeds it via `proposal_recalc_totals_v2`.
-2. **Recalculate button** in `ProposalDetail` — **drafts only**. It saves pending edits, then calls
-   `proposal_recalc_totals_v2`, then refetches.
+In `ProposalDetail.saveHeader`, when status transitions draft → sent/accepted, the current LIVE
+`totals` are written into the snapshot columns in the same UPDATE:
 
-There are **NO** auto-recalc triggers. The old `trg_proposal_lines_recalc_totals`,
-`trg_proposal_line_addons_recalc_totals`, `trg_proposals_recalc_totals` were dropped on purpose. Do
-**not** re-add them. Editing lines/adjustments does not change totals until Recalculate is pressed.
+| Column | Live value written |
+|---|---|
+| `total_product_amount` | `totals.totalProduct` (Material+Custom, pre-discount) |
+| `discount_amount` | `totals.discountAmount` |
+| `installation_amount` | `totals.installationNet` |
+| `subtotal_amount` | `totals.subtotal` (taxable base) |
+| `tax_amount` | `totals.taxAmount` |
+| `total_amount` | `totals.total` |
 
-## Lock by status
+From then on every surface (detail Summary, list, PDF) reads these columns for that proposal.
 
-- `draft` → editable; shows a "Draft" badge + Recalculate button.
-- `sent` / `accepted` → **locked**; shows a "Locked" badge. `proposal_recalc_totals_v2` refuses
-  non-draft proposals (`{ ok:false, reason:'locked' }`). Never bypass this.
+## Live rule (drafts) — must stay in sync across the 3 surfaces
 
-## Canonical rule — `proposal_recalc_totals_v2`
+`totals` (ProposalDetail), `proposal_list_totals` (RPC, used by the list) and ProposalPrint's live
+compute all implement the SAME formula:
+- `from_quote` line = `base_line_msrp` (snapshot) or live QuoteLine MSRP fallback, `× (1 + line_adjustment_pct/100)`.
+- `custom` line = `qty × unit_price`.
+- Global discount applies to `subtotal_before_discount` (product + installation net + other add-ons).
+- Installation net = `installation_total × (1 - labor_disc%) × (1 + labor_fee%)`.
+- Tax from `CostSettings.tax_pct` (exempt_tax aware); global fee added after tax.
 
-- Global **discount** and global **fee** apply to **Material+Custom only** (not installation).
-- Global fee is **not discounted** but **is taxed** (it sits inside the taxable base).
-- Labor **discount/fee** apply to **installation only**.
-- Tax uses `CostSettings.tax_pct` (exempt_tax aware).
-- `from_quote` line base = `quote_line_snapshot.base_line_msrp` (frozen) or live QuoteLine MSRP
-  fallback, then `× (1 + line_adjustment_pct/100)`. `custom` line = `qty × unit_price`.
+If you change this formula, change it in **all three** places or the list/detail/PDF will disagree.
 
-The `setHeaderFromTargetProductNet` / `applyTargetTotal` adjust tools invert this same rule.
+## Do / Don't
 
-## Hard guarantees (do not break)
-
-1. **Already-committed amounts are frozen** and were backfilled to the legacy value shown at the time
-   (e.g. PR-00197 = 16,637.60, PR-00214 = 38,016.78). Never run `proposal_recalc_totals_v2` against a
-   real committed proposal "to test" — it would overwrite the commitment. Verify the rule read-only.
-2. List, detail, PDF and SO conversion must always agree on the proposal total → because they all read
-   the same snapshot.
-3. The Quote is independent: Proposal discounts never write back to the Quote.
+1. **Do NOT** re-add auto-recalc triggers. They were dropped on purpose
+   (`trg_proposal_lines_recalc_totals`, `trg_proposal_line_addons_recalc_totals`,
+   `trg_proposals_recalc_totals`). Draft totals are live in the app; committed totals are frozen at send.
+2. **Do NOT** run any recompute against a `sent`/`accepted` proposal — it would overwrite the
+   committed amount (e.g. PR-00197=16,637.60, PR-00214=38,016.78).
+3. List/detail/PDF must agree: drafts via the live RPC/compute, locked via the snapshot.
+4. `proposal_recalc_totals_v2` exists in DB but is NOT used by the UI (legacy of an earlier
+   button-based design). Do not wire it into the live flow.
