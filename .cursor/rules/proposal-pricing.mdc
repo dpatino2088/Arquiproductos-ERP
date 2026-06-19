@@ -1,0 +1,80 @@
+---
+description: How discounts and fees work on a Proposal (Global/Line Fee, Global/Labor Discount) and how a Proposal derives its price. Read before touching Proposal totals, line adjustments, the Adjustments card, ProposalPrint, or proposal_list_totals.
+globs: src/pages/sales/ProposalDetail.tsx,src/pages/sales/ProposalPrint.tsx,src/hooks/useProposals.ts,src/lib/pdf/generateProposalPDF.ts,supabase/migrations/*proposal*.sql
+alwaysApply: false
+---
+
+# Proposal — Discounts & Fees
+
+A Proposal is the **customer-facing** document (MSRP / final-client price). It is built from a Quote
+(dealer pricing) and frozen once sent. This rule defines how charges and discounts behave.
+
+Golden distinction:
+- **FEE = hidden charge.** The customer must NOT see it. It is distributed into the item prices.
+- **DISCOUNT = visible concession.** The customer SHOULD see it, as a line in the Summary.
+
+## Per-line adjustment — the single source of truth for line price
+
+Every line carries one net field `ProposalLines.line_adjustment_pct` (a percent):
+- **positive = Fee**, **negative = Discount**.
+- Applied on the **immutable base**, never compounding:
+  - `from_quote`: `base_line_msrp` (snapshot) or live QuoteLine MSRP fallback `× (1 + line_adjustment_pct/100)`.
+  - `custom`: `qty × unit_price × (1 + line_adjustment_pct/100)`.
+- This is computed by `computeLineTotal` in **both** `ProposalDetail.tsx` and `ProposalPrint.tsx`, and
+  mirrored in the SQL `proposal_list_totals` (the `mat` CTE). All three MUST stay in sync.
+
+The base (`base_line_msrp` / `unit_price`) is **never mutated** — only the percent changes. That is why
+re-applying any adjustment is idempotent.
+
+## Global Fee — distributed into lines, invisible
+
+`Proposals.global_fee_amount` holds a **percent** (legacy column name; it is a %, not a $).
+
+- The "Global Fee %" header input **writes `line_adjustment_pct` on EVERY line** (`applyGlobalFeePct`),
+  i.e. it is a bulk **set** (last-writer-wins), absolute and from base → never compounds.
+- It is therefore already inside each line total → inside the taxable base → **taxed** with the rest.
+- It is **never** rendered as a "Global fee" line and **never** added as a post-tax lump (do not bring
+  back the old `total = … + global_fee_amount`).
+- **Last-writer-wins:** changing the Global Fee % re-sets all lines (incl. ones edited by hand). A later
+  per-line edit overrides only that line. Setting it overwrites any per-line discount/fee on every line.
+
+## Global Discount — visible line in the Summary
+
+`Proposals.global_discount_pct`. Applied at the Summary level (NOT cascaded into lines), shown as a
+`Discount (X%)` line. Current base = `subtotal_before_discount` = `material + installation_net + other`.
+
+## Labor (installation) — same philosophy
+
+- **Labor Fee %** (`global_installation_fee_pct`): baked into `installation_net` via the multiplier
+  `installation_total × (1 − labor_disc%) × (1 + labor_fee%)`. It is invisible and spread proportionally
+  across installations → satisfies the "fee is hidden" rule.
+- **Labor Discount %** (`global_installation_discount_pct`): shown as a visible `Labor discount` line.
+
+## Totals formula (drafts, live — keep in sync across 3 surfaces)
+
+`totals` useMemo (ProposalDetail), `proposal_list_totals` (RPC/list), and ProposalPrint's live compute:
+
+```
+material        = Σ line totals (incl. Global Fee already baked via line_adjustment_pct)
+installation_net= installation_total × (1 − labor_disc%) × (1 + labor_fee%)
+subtotal        = material + installation_net + other_addons
+discount_amount = subtotal × global_discount_pct      ← visible
+taxable_base    = subtotal − discount_amount
+tax             = taxable_base × tax_pct               (0 if exempt_tax)
+TOTAL           = taxable_base + tax                   (NO separate fee lump)
+```
+
+## Live vs Frozen (see proposal-totals-snapshot rule)
+
+- `draft` → totals are LIVE (above), recomputed on edit. List uses `proposal_list_totals`.
+- `sent`/`accepted` → FROZEN: read the snapshot columns committed at send time. Never recompute a
+  committed proposal (e.g. PR-00197 = 16,637.60 must not move).
+
+## Do / Don't
+
+1. **Do NOT** render the Global Fee as a Summary/PDF line, and **do NOT** add it post-tax. It lives in
+   `line_adjustment_pct`.
+2. Keep `computeLineTotal` (detail + print) and the `proposal_list_totals` `mat` CTE identical, including
+   the `custom` line `× (1 + line_adjustment_pct/100)` factor.
+3. Fees are hidden; discounts are visible. Don't swap that.
+4. Existing/committed proposals are immutable (snapshot). New behaviour only affects live drafts.

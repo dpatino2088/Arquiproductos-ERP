@@ -143,7 +143,10 @@ function computeLineTotal(
   if (line.line_type === 'custom') {
     const qty = Number(line.qty) || 0;
     const up = Number(line.unit_price) || 0;
-    return qty * up;
+    // line_adjustment_pct carries the per-line fee/discount (incl. a cascaded Global Fee %),
+    // applied on the immutable base (qty × unit_price) so it never compounds.
+    const adj = Number(line.line_adjustment_pct) || 0;
+    return qty * up * (1 + adj / 100);
   }
   if (line.line_type === 'from_quote') {
     let base = 0;
@@ -813,6 +816,23 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     [canWrite]
   );
 
+  /**
+   * Global Fee % — distributed into EVERY line by setting its line_adjustment_pct (last-writer-wins).
+   * The fee is absolute (set, not added) and applied on the immutable line base, so re-applying never
+   * compounds. It becomes part of each line total → taxable base → taxed, and is never shown as a
+   * separate charge. Changing it re-sets all lines (a later per-line edit overrides that single line).
+   */
+  const applyGlobalFeePct = useCallback(
+    (raw: string) => {
+      if (!canWrite) return;
+      const pct = raw === '' ? 0 : (parseFloat(raw) || 0);
+      const clamped = Math.max(0, Math.min(100, Number.isNaN(pct) ? 0 : pct));
+      setDraftLines((prev) => prev.map((l) => ({ ...l, line_adjustment_pct: clamped })));
+      setLinesDirty(true);
+    },
+    [canWrite]
+  );
+
   const updateCustomLine = useCallback(
     (lineId: string, fields: {
       description?: string;
@@ -1034,7 +1054,9 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     const exemptTax = headerForm.exempt_tax;
     const taxPct = proposal?.tax_pct ?? 0.07;
     const taxAmount = exemptTax ? 0 : roundMoney(taxableBase * taxPct);
-    const total = roundMoney(taxableBase + taxAmount + (Number.isNaN(globalFeeAmount) ? 0 : globalFeeAmount));
+    // Global Fee is NOT a separate charge: it is distributed into each line via line_adjustment_pct,
+    // so it is already inside totalProduct → taxableBase → taxed. No post-tax lump is added.
+    const total = roundMoney(taxableBase + taxAmount);
 
     return {
       totalProduct,
@@ -1154,14 +1176,13 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     (raw: string) => {
       const targetTotal = parseFloat(raw);
       if (Number.isNaN(targetTotal) || targetTotal < 0) return;
-      const globalFeeAmount = Number(headerForm.global_fee_amount) || 0;
-      const targetAfterFee = Math.max(targetTotal - globalFeeAmount, 0);
+      // Global Fee is no longer a post-tax lump; it lives inside the line totals (line_adjustment_pct).
       const exemptTax = headerForm.exempt_tax;
       const taxPct = exemptTax ? 0 : (proposal?.tax_pct ?? 0.07);
-      const targetSub = targetAfterFee / (1 + taxPct);
+      const targetSub = targetTotal / (1 + taxPct);
       setHeaderFromTargetProductNet(targetSub);
     },
-    [headerForm.exempt_tax, headerForm.global_fee_amount, proposal?.tax_pct, setHeaderFromTargetProductNet]
+    [headerForm.exempt_tax, proposal?.tax_pct, setHeaderFromTargetProductNet]
   );
 
   const customLinesInvalid = useMemo(() => {
@@ -1914,14 +1935,17 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                   />
                 </div>
                 <div>
-                  <Label className="block min-h-[2.5rem] leading-5">Global Fee</Label>
+                  <Label className="block min-h-[2.5rem] leading-5">Global Fee %</Label>
                   <Input
                     type="number"
                     step="0.01"
                     min="0"
+                    max="100"
                     placeholder="0"
+                    title="Distributed into every line price (hidden from the customer). Re-applies to all lines when changed."
                     value={headerForm.global_fee_amount}
                     onChange={(e) => { setHeaderForm((f) => ({ ...f, global_fee_amount: e.target.value })); setHeaderDirty(true); }}
+                    onBlur={(e) => { if (!contentReadOnly) applyGlobalFeePct(e.target.value); }}
                     disabled={contentReadOnly}
                   />
                 </div>
@@ -2013,12 +2037,6 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                   <div className="flex justify-between py-1 text-sm">
                     <span className="text-gray-600">Other add-ons</span>
                     <span className="tabular-nums">{formatCurrency(summary.otherAddonsTotal ?? 0, currency)}</span>
-                  </div>
-                )}
-                {(summary.globalFeeAmount ?? 0) > 0 && (
-                  <div className="flex justify-between py-1 text-sm">
-                    <span className="text-gray-600">Global fee</span>
-                    <span className="tabular-nums">{formatCurrency(summary.globalFeeAmount ?? 0, currency)}</span>
                   </div>
                 )}
                 <div

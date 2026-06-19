@@ -40,7 +40,8 @@ function computeLineTotal(
   if (line.line_type === 'custom') {
     const qty = Number(line.qty) || 0;
     const up = Number(line.unit_price) || 0;
-    return qty * up;
+    const adjPct = line.line_adjustment_pct ?? 0;
+    return Math.round(qty * up * (1 + adjPct / 100) * 100) / 100;
   }
   if (line.line_type === 'from_quote') {
     let base: number;

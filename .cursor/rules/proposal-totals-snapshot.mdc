@@ -40,10 +40,12 @@ From then on every surface (detail Summary, list, PDF) reads these columns for t
 `totals` (ProposalDetail), `proposal_list_totals` (RPC, used by the list) and ProposalPrint's live
 compute all implement the SAME formula:
 - `from_quote` line = `base_line_msrp` (snapshot) or live QuoteLine MSRP fallback, `× (1 + line_adjustment_pct/100)`.
-- `custom` line = `qty × unit_price`.
+- `custom` line = `qty × unit_price × (1 + line_adjustment_pct/100)`.
 - Global discount applies to `subtotal_before_discount` (product + installation net + other add-ons).
 - Installation net = `installation_total × (1 - labor_disc%) × (1 + labor_fee%)`.
-- Tax from `CostSettings.tax_pct` (exempt_tax aware); global fee added after tax.
+- Tax from `CostSettings.tax_pct` (exempt_tax aware). **Global Fee is NOT a post-tax lump** — it is a %
+  distributed into each line's `line_adjustment_pct`, so it is already inside the taxable base.
+  See the `proposal-pricing` rule for the full discount/fee model.
 
 If you change this formula, change it in **all three** places or the list/detail/PDF will disagree.
 
