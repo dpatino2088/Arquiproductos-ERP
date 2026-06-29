@@ -1281,6 +1281,10 @@ export default function QuoteNew() {
     () => getDealerTierDiscountPct(dealerInfo?.dealer_tier_id ?? null, dealerTiers),
     [dealerInfo?.dealer_tier_id, dealerTiers]
   );
+  const dealerTierLabel = useMemo(
+    () => dealerTiers.find((t) => t.id === dealerInfo?.dealer_tier_id)?.name ?? null,
+    [dealerInfo?.dealer_tier_id, dealerTiers]
+  );
   const useDealerPrice = !!dealerInfo;
 
   // Tax % from CostSettings (DB); default 7% if not set
@@ -1292,9 +1296,19 @@ export default function QuoteNew() {
     // Lines currently being edited inline (existing service lines) live in
     // draftServiceLines with their real id; skip them here to avoid double count.
     const editingIds = new Set(draftServiceLines.map((d) => d.id).filter((id) => !id.startsWith('temp-')));
+    // Weighted-average effective dealer discount off MSRP: blends per-line tier
+    // discounts AND any per-category caps (e.g. Motorized floored at 60%).
+    // Only catalog/configured lines with a real MSRP base are counted.
+    let msrpBase = 0;
+    let dealerBase = 0;
     const subtotal = quoteLines.reduce((sum, line: any) => {
       if (editingIds.has(line.id)) return sum;
-      const { lineTotal } = getEffectiveLinePrices(line, useDealerPrice, dealerDiscountPctForDisplay);
+      const { qty, unitMsrp, lineTotal } = getEffectiveLinePrices(line, useDealerPrice, dealerDiscountPctForDisplay);
+      if (useDealerPrice && unitMsrp > 0) {
+        const { baseLine } = getCommercialBasePricing(line, dealerDiscountPctForDisplay);
+        msrpBase += unitMsrp * qty;
+        dealerBase += baseLine;
+      }
       return sum + lineTotal;
     }, 0);
     const draftSubtotal = draftServiceLines.reduce((sum, d) => {
@@ -1305,8 +1319,13 @@ export default function QuoteNew() {
     const combined = subtotal + draftSubtotal;
     const taxAmount = exemptTax ? 0 : Math.round(combined * taxPct * 100) / 100;
     const total = exemptTax ? combined : combined + taxAmount;
+    const effectiveDiscountPct =
+      msrpBase > 0 ? Math.round((1 - dealerBase / msrpBase) * 1000) / 10 : null;
+    const isBlendedDiscount =
+      effectiveDiscountPct != null &&
+      Math.abs(effectiveDiscountPct - dealerDiscountPctForDisplay) > 0.05;
 
-    return { subtotal: combined, tax: taxAmount, total };
+    return { subtotal: combined, tax: taxAmount, total, effectiveDiscountPct, isBlendedDiscount };
   }, [quoteLines, draftServiceLines, useDealerPrice, dealerDiscountPctForDisplay, taxPct, exemptTax]);
 
   // Handle product configuration completion
@@ -4553,12 +4572,20 @@ export default function QuoteNew() {
 
       const formLines: MeasurementFormLine[] = quoteLines.map((line: any) => {
         const snap = line.config_snapshot;
+        const isCatalogLine = String(line.product_type ?? '').trim().toLowerCase() === 'catalog';
+        const catalogColor = isCatalogLine ? (line.catalog_color ?? null) : null;
+        // Catalog (and any line without collection/variant) shows its item name so the row isn't blank.
+        const description =
+          isCatalogLine && line.name
+            ? (catalogColor ? `${line.name} — ${catalogColor}` : line.name)
+            : (!line.collection_name && !line.variant_name ? (line.name ?? undefined) : undefined);
         return {
           area: line.area,
           position: line.position,
           product_type: line.ProductType?.name ?? line.product_type ?? '—',
           collection_name: line.collection_name,
           variant_name: line.variant_name,
+          description,
           qty: Number(line.quantity) || 1,
           width_m: line.width_m,
           height_m: line.height_m,
@@ -5172,6 +5199,27 @@ export default function QuoteNew() {
                 <span>Total</span>
                 <span className="tabular-nums">{formatCurrency(totals.total, watch('currency'))}</span>
               </div>
+              {useDealerPrice && totals.effectiveDiscountPct != null && (
+                <div
+                  className="flex justify-between items-start py-1 mt-1 text-xs"
+                  title={`Promedio ponderado del descuento real sobre MSRP en todas las líneas.${dealerTierLabel ? ` Tier del dealer: ${dealerTierLabel} (${dealerDiscountPctForDisplay}%).` : ` Tier: ${dealerDiscountPctForDisplay}%.`}${totals.isBlendedDiscount ? ' Difiere del tier porque algunas categorías topan más bajo (ej. Motorized 60%).' : ''}`}
+                >
+                  <span className="text-gray-500">
+                    Effective discount
+                    {totals.isBlendedDiscount && (
+                      <span className="ml-1 text-amber-600">(blended)</span>
+                    )}
+                  </span>
+                  <span className="text-right">
+                    <span className="tabular-nums font-medium text-gray-700">{totals.effectiveDiscountPct}%</span>
+                    {totals.isBlendedDiscount && (
+                      <span className="block text-[10px] text-gray-400 tabular-nums">
+                        {dealerTierLabel ? `${dealerTierLabel} ` : ''}tier {dealerDiscountPctForDisplay}%
+                      </span>
+                    )}
+                  </span>
+                </div>
+              )}
               {quoteLines.length > 0 && (quoteLines[0] as { quote_created_by?: string })?.quote_created_by && (
                 <div className="text-xs text-gray-500 pt-1 border-t border-gray-100">
                   Created by: {(quoteLines[0] as { quote_created_by?: string }).quote_created_by}
@@ -5462,12 +5510,25 @@ export default function QuoteNew() {
                         <td className="py-4 pl-2 pr-2 text-right text-gray-900 text-sm font-medium tabular-nums whitespace-nowrap" style={{ width: '92px' }}>
                           {(() => {
                             const effective = getEffectiveLinePrices(line, useDealerPrice, dealerDiscountPctForDisplay);
-                            const rollMsrp = line.roll_msrp_snapshot || 0;
-                            const bomMsrp = line.bom_msrp_snapshot || 0;
-                            const hasDetails = rollMsrp > 0 || bomMsrp > 0;
+                            const { baseUnit } = getCommercialBasePricing(line, dealerDiscountPctForDisplay);
+                            const lineDiscountPct =
+                              useDealerPrice && effective.unitMsrp > 0
+                                ? Math.round((1 - baseUnit / effective.unitMsrp) * 1000) / 10
+                                : null;
+                            const isCapped =
+                              lineDiscountPct != null &&
+                              lineDiscountPct < dealerDiscountPctForDisplay - 0.05;
                             return (
                               <div className="whitespace-nowrap text-right">
                                 <span>{formatCurrency(effective.unitPrice, watch('currency'))}</span>
+                                {lineDiscountPct != null && (
+                                  <span
+                                    className={`block text-[10px] tabular-nums ${isCapped ? 'text-amber-600' : 'text-gray-400'}`}
+                                    title={isCapped ? `Descuento topado por categoría (tier ${dealerDiscountPctForDisplay}%)` : `Descuento del tier`}
+                                  >
+                                    -{lineDiscountPct}%
+                                  </span>
+                                )}
                               </div>
                             );
                           })()}

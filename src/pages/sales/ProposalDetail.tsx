@@ -10,16 +10,17 @@ import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } fro
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
 import { getSupabaseErrorMessage, isRLSError } from '../../lib/supabase-error-utils';
-import { useProposalDetail } from '../../hooks/useProposals';
+import { useProposalDetail, createProposalVersion } from '../../hooks/useProposals';
 import type { Proposal, ProposalLine, ProposalCustomCategory, ProposalLineAddOn, ProposalLineAddOnPricingMode } from '../../types/proposals';
 import { generateProposalPDF, type ProposalPDFLine } from '../../lib/pdf/generateProposalPDF';
+import { generateMeasurementFormPDF, type MeasurementFormLine } from '../../lib/pdf/generateMeasurementFormPDF';
 import { formatDimensionsForProposalPDF } from '../../lib/formatDimensions';
 import { getLogoPathFromUrl } from '../../lib/dealerLogo';
 import { useResolvedStorageUrl } from '../../hooks/useResolvedStorageUrl';
 import Input from '../../components/ui/Input';
 import Label from '../../components/ui/Label';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
-import { ChevronDown, ChevronRight, GripVertical, Plus, AlertTriangle, Printer, Eye, ArrowLeft, Download, Trash2, ExternalLink, Lock } from 'lucide-react';
+import { ChevronDown, ChevronRight, GripVertical, Plus, AlertTriangle, Printer, Eye, ArrowLeft, Download, Trash2, ExternalLink, Lock, Ruler } from 'lucide-react';
 import DetailPageLayout from '../../components/shared/DetailPageLayout';
 import StatusBadge from '../../components/shared/StatusBadge';
 import TimelineView from '../../components/shared/TimelineView';
@@ -294,6 +295,30 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
   useEffect(() => {
     refetchTimeline();
   }, [refetchTimeline]);
+
+  // Downstream guard: an accepted proposal may have generated a Sales Order
+  // (linked by proposal_id, or by the source quote_id via create_sales_order_from_quote).
+  // If one exists, reverting to draft is blocked to avoid orphaning production data.
+  const [hasDownstreamSO, setHasDownstreamSO] = useState(false);
+  useEffect(() => {
+    if (!proposalId) { setHasDownstreamSO(false); return; }
+    let cancelled = false;
+    (async () => {
+      const orFilter = proposal?.quote_id
+        ? `proposal_id.eq.${proposalId},quote_id.eq.${proposal.quote_id}`
+        : `proposal_id.eq.${proposalId}`;
+      const { data } = await supabase
+        .from('SalesOrders')
+        .select('id')
+        .eq('deleted', false)
+        .or(orFilter)
+        .limit(1);
+      if (!cancelled) setHasDownstreamSO((data ?? []).length > 0);
+    })();
+    return () => { cancelled = true; };
+  }, [proposalId, proposal?.quote_id]);
+
+  const [creatingVersion, setCreatingVersion] = useState(false);
   const [headerForm, setHeaderForm] = useState<{
     proposal_no: string;
     status: Proposal['status'];
@@ -781,6 +806,29 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
       fallback: '/sales/proposals',
     });
   }, [handleSave]);
+
+  const handleCreateVersion = useCallback(async () => {
+    if (!proposal || creatingVersion) return;
+    const confirmMsg =
+      'Esto creará una NUEVA VERSIÓN a partir de esta propuesta (copia sus líneas, ajustes y add-ons) en borrador. La propuesta actual quedará archivada como histórico. ¿Continuar?';
+    if (!window.confirm(confirmMsg)) return;
+    setCreatingVersion(true);
+    try {
+      const res = await createProposalVersion(proposal.id);
+      if ('error' in res) {
+        useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: res.error });
+        return;
+      }
+      useUIStore.getState().addNotification({
+        type: 'success',
+        title: 'Nueva versión creada',
+        message: res.proposalNo ? `Versión ${res.proposalNo} en borrador.` : 'Versión creada en borrador.',
+      });
+      router.navigate(`/sales/proposals/${res.proposalId}`);
+    } finally {
+      setCreatingVersion(false);
+    }
+  }, [proposal, creatingVersion]);
 
   const listPath = '/sales/proposals';
   const queryReturnTo = getReturnToFromCurrentQuery();
@@ -1575,6 +1623,214 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     [buildProposalPDFDoc]
   );
 
+  /**
+   * Measurement Verification Form (field worksheet) generated from the PROPOSAL.
+   * Source of truth for dimensions is the frozen proposal-line snapshot
+   * (what the client actually received), falling back to the live QuoteLine /
+   * ConfiguredProduct snapshot. Custom lines (no QuoteLine, no measurements) are
+   * included with blank dimensions so they can be filled in by hand.
+   */
+  const handleMeasurementForm = useCallback(async () => {
+    if (!proposal || !proposalId) {
+      useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: 'Open a proposal first.' });
+      return;
+    }
+    try {
+      let logoPngBase64: string | undefined;
+      let logoWidthPx = 100;
+      let logoHeightPx = 100;
+      let dealerName: string | undefined;
+
+      let logoUrlForPdf = dealerLogoUrl;
+      if (proposal.dealer_id) {
+        const { data: dealerData } = await supabase
+          .from('Dealers')
+          .select('logo_url, dealer_name')
+          .eq('id', proposal.dealer_id)
+          .maybeSingle();
+        dealerName = (dealerData as { dealer_name?: string } | null)?.dealer_name ?? undefined;
+        if (!logoUrlForPdf) logoUrlForPdf = (dealerData as { logo_url?: string } | null)?.logo_url ?? null;
+      }
+      const logoPath = getLogoPathFromUrl(logoUrlForPdf);
+      const cleanPath = logoPath ? logoPath.replace(/^\/+/, '') : null;
+      const logoUrlToLoad = cleanPath
+        ? supabase.storage.from('catalog-images').getPublicUrl(cleanPath).data.publicUrl
+        : /^https?:\/\//i.test(logoUrlForPdf ?? '') ? logoUrlForPdf! : null;
+
+      if (logoUrlToLoad) {
+        try {
+          let dataUrl: string | null = null;
+          const res = await fetch(logoUrlToLoad, { mode: 'cors', credentials: 'omit' });
+          if (res.ok) {
+            const blob = await res.blob();
+            if (blob.type.startsWith('image/')) {
+              dataUrl = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result as string);
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+              });
+            }
+          }
+          if (!dataUrl) {
+            dataUrl = await new Promise<string | null>((resolve) => {
+              const img = new Image();
+              img.crossOrigin = 'anonymous';
+              img.onload = () => {
+                try {
+                  const c = document.createElement('canvas');
+                  c.width = img.naturalWidth; c.height = img.naturalHeight;
+                  const ctx = c.getContext('2d');
+                  if (ctx) { ctx.drawImage(img, 0, 0); resolve(c.toDataURL('image/png')); }
+                  else resolve(null);
+                } catch { resolve(null); }
+              };
+              img.onerror = () => resolve(null);
+              img.src = logoUrlToLoad;
+            });
+          }
+          if (dataUrl) {
+            logoPngBase64 = dataUrl;
+            const dims = await new Promise<{ w: number; h: number } | null>((resolve) => {
+              const img2 = new Image();
+              img2.onload = () => resolve({ w: img2.naturalWidth, h: img2.naturalHeight });
+              img2.onerror = () => resolve(null);
+              img2.src = dataUrl!;
+            });
+            if (dims) { logoWidthPx = dims.w; logoHeightPx = dims.h; }
+          }
+        } catch { /* logo unavailable — PDF will render without it */ }
+      }
+
+      const formLines: MeasurementFormLine[] = displayLines.map((line) => {
+        if (line.line_type === 'custom') {
+          return {
+            area: line.area ?? null,
+            position: line.position ?? null,
+            product_type: line.custom_category ?? 'Custom',
+            collection_name: null,
+            variant_name: null,
+            description: line.description ?? null,
+            qty: Number(line.qty) || 1,
+            width_m: null,
+            height_m: null,
+            dimensions_source: null,
+            drive_type: null,
+            drive_side: null,
+            opening_direction: null,
+            installation_type: null,
+            installation_location: null,
+          };
+        }
+        const snapFrozen = line.quote_line_snapshot as
+          | (Record<string, unknown> & { measurements?: unknown; panels?: unknown[]; width_m?: number | null; height_m?: number | null })
+          | null
+          | undefined;
+        const qlInfo = line.quote_line_id ? quoteLinesMap.get(line.quote_line_id) : undefined;
+        const cpSnap = qlInfo?.configured_product_id
+          ? (configuredProductsMap ?? {})[qlInfo.configured_product_id]?.config_snapshot
+          : undefined;
+        const liveSnap = (qlInfo?.config_snapshot ?? cpSnap) as
+          | (Record<string, unknown> & { measurements?: unknown; panels?: unknown[] })
+          | undefined;
+
+        const dimensionsSource =
+          snapFrozen && (snapFrozen.width_m != null || snapFrozen.height_m != null || (typeof snapFrozen.measurements === 'object' && snapFrozen.measurements))
+            ? {
+                measurements: (typeof snapFrozen.measurements === 'object' && snapFrozen.measurements) ? snapFrozen.measurements : undefined,
+                panels: Array.isArray(snapFrozen.panels) ? snapFrozen.panels : undefined,
+                width_m: snapFrozen.width_m ?? null,
+                height_m: snapFrozen.height_m ?? null,
+              }
+            : liveSnap
+              ? {
+                  measurements: (typeof liveSnap.measurements === 'object' && liveSnap.measurements) ? liveSnap.measurements : undefined,
+                  panels: Array.isArray(liveSnap.panels) ? liveSnap.panels : undefined,
+                  width_m: qlInfo?.width_m ?? null,
+                  height_m: qlInfo?.height_m ?? null,
+                }
+              : qlInfo
+                ? { width_m: qlInfo.width_m ?? null, height_m: qlInfo.height_m ?? null }
+                : null;
+
+        const productTypeRaw = (snapFrozen?.product_type as string | undefined) ?? qlInfo?.product_type ?? null;
+        const productTypeName =
+          (qlInfo?.product_type_id && productTypeNameByCodeOrId.byId.get(qlInfo.product_type_id)) ??
+          (productTypeRaw && productTypeNameByCodeOrId.byCode.get(productTypeRaw.trim().toLowerCase())) ??
+          productTypeRaw;
+
+        const pickStr = (...vals: unknown[]): string | null => {
+          for (const v of vals) {
+            if (typeof v === 'string' && v.trim()) return v;
+          }
+          return null;
+        };
+
+        const collectionName = (snapFrozen?.collection_name as string | undefined) ?? qlInfo?.collection_name ?? null;
+        const variantName = (snapFrozen?.variant_name as string | undefined) ?? qlInfo?.variant_name ?? null;
+        const isCatalogLine = String(productTypeRaw ?? '').trim().toLowerCase() === 'catalog';
+        const baseName = pickStr(snapFrozen?.name, snapFrozen?.sku, qlInfo?.name, qlInfo?.sku);
+        const catalogColor = isCatalogLine ? pickStr((qlInfo as { catalog_color?: unknown } | undefined)?.catalog_color) : null;
+        // Catalog (and any line without collection/variant) shows its item name so the row isn't blank.
+        const description =
+          isCatalogLine && baseName
+            ? (catalogColor ? `${baseName} — ${catalogColor}` : baseName)
+            : (!collectionName && !variantName ? baseName ?? undefined : undefined);
+
+        return {
+          area: (snapFrozen?.area as string | undefined) ?? qlInfo?.area ?? null,
+          position: (snapFrozen?.position as string | undefined) ?? qlInfo?.position ?? null,
+          product_type: productTypeName ?? '—',
+          collection_name: collectionName,
+          variant_name: variantName,
+          description,
+          qty: Number((snapFrozen?.qty as number | undefined) ?? qlInfo?.quantity ?? line.qty ?? 1) || 1,
+          width_m: (dimensionsSource?.width_m as number | null | undefined) ?? null,
+          height_m: (dimensionsSource?.height_m as number | null | undefined) ?? null,
+          dimensions_source: dimensionsSource as MeasurementFormLine['dimensions_source'],
+          drive_type: pickStr(snapFrozen?.drive_type, qlInfo?.drive_type, liveSnap?.drive_type),
+          drive_side: pickStr(liveSnap?.drive_side, (liveSnap as { driveSide?: unknown } | undefined)?.driveSide),
+          opening_direction: pickStr(
+            snapFrozen?.opening_direction,
+            (liveSnap as { opening_direction?: unknown } | undefined)?.opening_direction,
+            (liveSnap as { openingDirection?: unknown } | undefined)?.openingDirection
+          ),
+          installation_type: pickStr(
+            qlInfo?.installation_type,
+            (liveSnap as { installationType?: unknown } | undefined)?.installationType,
+            (liveSnap as { installation_type?: unknown } | undefined)?.installation_type
+          ),
+          installation_location: pickStr(
+            qlInfo?.installation_location,
+            (liveSnap as { installationLocation?: unknown } | undefined)?.installationLocation,
+            (liveSnap as { installation_location?: unknown } | undefined)?.installation_location
+          ),
+        };
+      });
+
+      const doc = generateMeasurementFormPDF(formLines, {
+        quote_no: proposal.proposal_no || proposal.id.slice(0, 8),
+        customer_name: customer?.customer_name ?? null,
+        contact_name: contact?.contact_name ?? contact?.contact_email ?? null,
+        address: normalizeAddressText(customer?.address ?? null) || null,
+        project_description: proposal.description ?? null,
+        created_at: proposal.created_at || new Date().toISOString(),
+        logoPngBase64,
+        logoWidthPx,
+        logoHeightPx,
+        dealerName,
+      });
+
+      const blob = doc.output('blob');
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (err: any) {
+      console.error('Error generating measurement form:', err);
+      useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: err?.message || 'Failed to generate measurement form' });
+    }
+  }, [proposal, proposalId, displayLines, quoteLinesMap, configuredProductsMap, customer, contact, dealerLogoUrl, productTypeNameByCodeOrId]);
+
   if (!proposalId) {
     return (
       <div className="p-6">
@@ -1607,7 +1863,10 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
 
   const readOnly = !canWrite;
   const isAccepted = proposal?.status === 'accepted';
-  const canRevertStatus = isAccepted && userType === 'portal' && portalRole === 'dealer_manager';
+  // Who can reopen an accepted proposal: portal Dealer Manager (Admin Dealer) or
+  // any internal user with write access. Blocked if a Sales Order already exists.
+  const isAdminDealer = userType === 'portal' && portalRole === 'dealer_manager';
+  const canRevertStatus = isAccepted && (isAdminDealer || userType === 'internal') && !hasDownstreamSO;
   const contentReadOnly = readOnly || !!isAccepted;
   const statusDropdownDisabled = contentReadOnly && !canRevertStatus;
 
@@ -1683,6 +1942,19 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
               <Download className="w-4 h-4 shrink-0 text-gray-500" />
               Without Measurements
             </button>
+            <div className="px-3 py-1.5 text-xs font-medium text-gray-500 border-t border-b border-gray-100 mt-1">Worksheet</div>
+            <button
+              type="button"
+              role="menuitem"
+              className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+              onClick={() => {
+                handleMeasurementForm();
+                setPrintDropdownOpen(false);
+              }}
+            >
+              <Ruler className="w-4 h-4 shrink-0 text-gray-500" />
+              Measurement Form
+            </button>
           </div>
         )}
       </div>
@@ -1714,10 +1986,22 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           Back
         </button>
       )}
+      {(proposal?.status === 'accepted' || proposal?.status === 'sent') && (
+        <button
+          type="button"
+          onClick={handleCreateVersion}
+          disabled={creatingVersion}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          title="Crear una nueva versión (revisión) de esta propuesta"
+        >
+          <Plus className="w-4 h-4" />
+          {creatingVersion ? 'Creando...' : 'New version'}
+        </button>
+      )}
       <button
         type="button"
         onClick={handleSave}
-        disabled={saving || contentReadOnly}
+        disabled={saving || (contentReadOnly && !canRevertStatus)}
         className="btn-save px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
         title="Save"
       >
@@ -1726,7 +2010,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
       <button
         type="button"
         onClick={handleSaveAndClose}
-        disabled={saving || contentReadOnly}
+        disabled={saving || (contentReadOnly && !canRevertStatus)}
         className="btn-save-close px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {saving ? 'Saving...' : 'Save and Close'}
@@ -1890,7 +2174,18 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                       <Label>Status</Label>
                       <SelectShadcn
                         value={headerForm.status}
-                        onValueChange={(v) => { setHeaderForm((f) => ({ ...f, status: v as Proposal['status'] })); setHeaderDirty(true); }}
+                        onValueChange={(v) => {
+                          const next = v as Proposal['status'];
+                          // Reopening an accepted proposal is an exceptional correction: confirm.
+                          if (proposal?.status === 'accepted' && next !== 'accepted') {
+                            const ok = window.confirm(
+                              'Vas a reabrir una propuesta ACEPTADA y regresarla a edición. Úsalo solo para corregir un error. Para cambios de color/medidas, mejor crea una nueva versión. ¿Continuar?'
+                            );
+                            if (!ok) return;
+                          }
+                          setHeaderForm((f) => ({ ...f, status: next }));
+                          setHeaderDirty(true);
+                        }}
                         disabled={statusDropdownDisabled}
                       >
                         <SelectTrigger>
@@ -1902,6 +2197,11 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                           ))}
                         </SelectContent>
                       </SelectShadcn>
+                      {isAccepted && hasDownstreamSO && (
+                        <p className="text-[11px] text-amber-600 mt-1">
+                          No se puede reabrir: ya existe una orden de venta generada. Crea una nueva versión si necesitas cambios.
+                        </p>
+                      )}
                     </div>
                     <div>
                       <Label>Valid until</Label>

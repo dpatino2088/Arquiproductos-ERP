@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { router } from '../../lib/router';
 import { withReturnTo } from '../../lib/navigation/returnTo';
 
-import { useProposalsList, fetchProposalDetailData, createStandaloneProposal } from '../../hooks/useProposals';
+import { useProposalsList, fetchProposalDetailData, createStandaloneProposal, createProposalVersion } from '../../hooks/useProposals';
 import { useUIStore } from '../../stores/ui-store';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useActiveDealer } from '../../hooks/useActiveDealer';
@@ -25,6 +25,9 @@ import {
   Trash2,
   Archive,
   RotateCcw,
+  Copy,
+  ChevronRight,
+  ChevronDown,
 } from 'lucide-react';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
@@ -106,6 +109,49 @@ export default function Proposals() {
 
   const nonArchivedList = useMemo(() => list.filter((p) => !p.archived), [list]);
   const archivedCount = useMemo(() => list.filter((p) => p.archived).length, [list]);
+
+  const proposalVersionNo = useCallback((p: { proposal_no?: string | null; version_no?: number | null }) => {
+    const fromCol = Number(p.version_no);
+    if (Number.isFinite(fromCol) && fromCol > 0) return fromCol;
+    const m = (p.proposal_no || '').match(/_V(\d+)$/i);
+    return m ? Number(m[1]) : 1;
+  }, []);
+  const proposalBaseNo = useCallback(
+    (p: { proposal_no?: string | null; id: string }) => (p.proposal_no || '').replace(/_V\d+$/i, '') || p.id,
+    []
+  );
+
+  // Older versions per proposal id (whole PR family, includes archived), to show under a chevron.
+  const olderVersionsByRowId = useMemo(() => {
+    type Row = (typeof list)[number];
+    const byBase = new Map<string, Row[]>();
+    list.forEach((p) => {
+      const base = proposalBaseNo(p);
+      const arr = byBase.get(base) ?? [];
+      arr.push(p);
+      byBase.set(base, arr);
+    });
+    const map = new Map<string, Row[]>();
+    list.forEach((p) => {
+      const base = proposalBaseNo(p);
+      const v = proposalVersionNo(p);
+      const older = (byBase.get(base) ?? [])
+        .filter((x) => x.id !== p.id && proposalVersionNo(x) < v)
+        .sort((a, b) => proposalVersionNo(b) - proposalVersionNo(a));
+      if (older.length > 0) map.set(p.id, older);
+    });
+    return map;
+  }, [list, proposalBaseNo, proposalVersionNo]);
+
+  const [expandedFamilies, setExpandedFamilies] = useState<Set<string>>(new Set());
+  const toggleFamily = useCallback((rowId: string) => {
+    setExpandedFamilies((prev) => {
+      const next = new Set(prev);
+      if (next.has(rowId)) next.delete(rowId);
+      else next.add(rowId);
+      return next;
+    });
+  }, []);
 
   const proposalStatusCounts = useMemo(() => {
     const c: Record<string, number> = { all: nonArchivedList.length };
@@ -315,6 +361,94 @@ export default function Proposals() {
       }
     },
     [showConfirm, setDialogLoading, refetch, addNotification]
+  );
+
+  const renderOlderProposalRow = useCallback((o: (typeof list)[number]) => (
+    <tr key={o.id} className="bg-gray-50/60 text-gray-400">
+      <td className="py-3 px-4 text-center"><span className="inline-block w-4" /></td>
+      <td className="py-3 px-4 text-sm font-medium text-center">
+        <span className="inline-flex items-center justify-center gap-1.5 max-w-full pl-5">
+          <span className="text-gray-300 text-xs select-none">└</span>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); router.navigate(withReturnTo(`/sales/proposals/${o.id}`)); }}
+            className="text-gray-500 hover:text-gray-700 hover:underline truncate"
+          >
+            {o.proposal_no || `Proposal ${o.id.slice(0, 8)}`}
+          </button>
+          {proposalVersionNo(o) > 1 && (
+            <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-100 text-gray-500 border border-gray-200">
+              v{proposalVersionNo(o)}
+            </span>
+          )}
+        </span>
+      </td>
+      <td className="py-3 px-4 text-center"><span className="opacity-70"><StatusBadge status={o.status} type="proposal" size="sm" /></span></td>
+      <td className="py-3 px-4 text-sm text-left text-gray-400" title={o.customer_name ?? ''}><span className="block truncate">{o.customer_name ?? '—'}</span></td>
+      <td className="py-3 px-4 text-sm text-left text-gray-400"><span className="block truncate">{o.proposal_created_by ?? '—'}</span></td>
+      <td className="py-3 px-4 text-sm text-left text-gray-400"><span className="block truncate">{o.quote_created_by ?? '—'}</span></td>
+      <td className="py-3 px-4 text-sm text-center text-gray-400">{formatDate(o.updated_at)}</td>
+      <td className="py-3 px-4 text-sm text-right text-gray-400 whitespace-nowrap">{formatCurrency(o.quote_total_amount)}</td>
+      <td className="py-3 px-4 text-sm text-right text-gray-400 whitespace-nowrap">{formatCurrency(o.total_amount)}</td>
+      <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-1 justify-end flex-nowrap">
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); router.navigate(withReturnTo(`/sales/proposals/${o.id}`)); }}
+            className="p-1.5 hover:bg-gray-100 rounded text-gray-500 transition-colors"
+            title="Open"
+          >
+            <Edit style={{ width: 14, height: 14 }} />
+          </button>
+          {o.archived && (
+            <button
+              type="button"
+              onClick={(e) => handleRestore(o, e)}
+              className="p-1.5 hover:bg-gray-100 rounded text-gray-500 transition-colors"
+              title="Restore"
+            >
+              <RotateCcw style={{ width: 14, height: 14 }} />
+            </button>
+          )}
+        </div>
+      </td>
+    </tr>
+  ), [router, proposalVersionNo, handleRestore]);
+
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
+  const handleDuplicate = useCallback(
+    async (p: (typeof list)[0], e: React.MouseEvent) => {
+      e.stopPropagation();
+      const label = p.proposal_no || p.id.slice(0, 8);
+      const confirmed = await showConfirm({
+        title: 'Crear nueva versión',
+        message: `Se creará una nueva versión en borrador a partir de ${label} (copia sus líneas, ajustes y add-ons). La actual quedará archivada como histórico. ¿Continuar?`,
+        variant: 'info',
+        confirmText: 'Crear versión',
+        cancelText: 'Cancelar',
+      });
+      if (!confirmed) return;
+      try {
+        setDialogLoading(true);
+        setDuplicatingId(p.id);
+        const res = await createProposalVersion(p.id);
+        if ('error' in res) {
+          addNotification({ type: 'error', title: 'Error', message: res.error });
+          return;
+        }
+        addNotification({
+          type: 'success',
+          title: 'Nueva versión creada',
+          message: res.proposalNo ? `Versión ${res.proposalNo} en borrador.` : 'Versión creada en borrador.',
+        });
+        await refetch();
+        router.navigate(withReturnTo(`/sales/proposals/${res.proposalId}`));
+      } finally {
+        setDialogLoading(false);
+        setDuplicatingId(null);
+      }
+    },
+    [showConfirm, setDialogLoading, addNotification, refetch]
   );
 
   const handleDeleteSelected = useCallback(async () => {
@@ -539,7 +673,11 @@ export default function Proposals() {
                   </td>
                 </tr>
               ) : (
-                paginatedList.map((p) => (
+                paginatedList.flatMap((p) => {
+                  const olderRows = statusTab !== 'archived' && expandedFamilies.has(p.id)
+                    ? (olderVersionsByRowId.get(p.id) ?? [])
+                    : [];
+                  return [
                   <tr
                     key={p.id}
                     ref={rowRefForViewport(p.id)}
@@ -554,7 +692,24 @@ export default function Proposals() {
                       />
                     </td>
                     <td className="py-4 px-4 text-gray-900 text-sm font-medium text-center">
-                      <span className="block truncate">{p.proposal_no || `Proposal ${p.id.slice(0, 8)}`}</span>
+                      <span className="inline-flex items-center justify-center gap-1.5 max-w-full">
+                        {statusTab !== 'archived' && olderVersionsByRowId.has(p.id) && (
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); toggleFamily(p.id); }}
+                            className="p-0.5 hover:bg-gray-200 rounded text-gray-500 shrink-0"
+                            title={expandedFamilies.has(p.id) ? 'Ocultar versiones anteriores' : 'Mostrar versiones anteriores'}
+                          >
+                            {expandedFamilies.has(p.id) ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                          </button>
+                        )}
+                        <span className="block truncate">{p.proposal_no || `Proposal ${p.id.slice(0, 8)}`}</span>
+                        {Number(p.version_no ?? 1) > 1 && (
+                          <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                            v{Number(p.version_no)}
+                          </span>
+                        )}
+                      </span>
                       {p.quote_no && (
                         <span className="text-xs text-gray-500 font-normal block truncate">Quote: {p.quote_no}</span>
                       )}
@@ -622,6 +777,17 @@ export default function Proposals() {
                             >
                               <Edit style={{ width: 14, height: 14 }} />
                             </button>
+                            {canCreateProp && (
+                              <button
+                                type="button"
+                                onClick={(e) => handleDuplicate(p, e)}
+                                disabled={duplicatingId === p.id}
+                                className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Nueva versión / Duplicar"
+                              >
+                                <Copy style={{ width: 14, height: 14 }} />
+                              </button>
+                            )}
                             {canArchiveProp && (
                               <button
                                 type="button"
@@ -646,8 +812,10 @@ export default function Proposals() {
                         )}
                       </div>
                     </td>
-                  </tr>
-                ))
+                  </tr>,
+                  ...olderRows.map((o) => renderOlderProposalRow(o)),
+                  ];
+                })
               )}
             </tbody>
           </table>

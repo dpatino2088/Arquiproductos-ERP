@@ -16,6 +16,8 @@ export interface MeasurementFormLine {
   collection_name?: string | null;
   variant_name?: string | null;
   qty: number;
+  /** Explicit description override (e.g. catalog item name). Falls back to collection - variant. */
+  description?: string | null;
   width_m?: number | null;
   height_m?: number | null;
   dimensions_source?: DimensionsSource | null;
@@ -97,23 +99,59 @@ export function generateMeasurementFormPDF(
     doc.text(value, x + doc.getTextWidth(label) + 1.5, fieldY);
   };
 
+  // Label + value with hanging indent that wraps within maxW (so long values
+  // like a full address don't run into the next column). Returns rows used.
+  const drawWrappedField = (label: string, value: string, x: number, startRow: number, maxW: number): number => {
+    doc.setFont('helvetica', 'bold');
+    doc.text(label, x, infoY + startRow * lineH);
+    const labelW = doc.getTextWidth(label) + 1.5;
+    doc.setFont('helvetica', 'normal');
+    const words = String(value).split(/\s+/).filter(Boolean);
+    let row = startRow;
+    let line = '';
+    let curX = x + labelW;
+    let curMaxW = Math.max(20, maxW - labelW);
+    for (const w of words) {
+      const test = line ? `${line} ${w}` : w;
+      if (line && doc.getTextWidth(test) > curMaxW) {
+        doc.text(line, curX, infoY + row * lineH);
+        row += 1;
+        line = w;
+        curX = x;
+        curMaxW = maxW;
+      } else {
+        line = test;
+      }
+    }
+    if (line) doc.text(line, curX, infoY + row * lineH);
+    return row - startRow + 1;
+  };
+
+  // Left column
   drawField('Customer: ', options.customer_name ?? '—', col1X, 0);
   drawField('Contact: ', options.contact_name ?? '—', col1X, 1);
+  let leftRows = 2;
   if (options.project_description) {
     drawField('Project: ', options.project_description, col1X, 2);
+    leftRows = 3;
   }
 
+  // Right column (short values): Date + Dealer
+  drawField('Date: ', fmtDate(options.created_at) || '___/___/______', col3X, 0);
+  let rightRows = 1;
+  if (options.dealerName) {
+    drawField('Dealer: ', options.dealerName, col3X, 1);
+    rightRows = 2;
+  }
+
+  // Middle column: address wrapped so it never collides with the Date column
+  let midRows = 0;
   if (options.address) {
     const addrOneLine = options.address.replace(/\n/g, ', ');
-    drawField('Project Address: ', addrOneLine, col2X, 0);
-  }
-  if (options.dealerName) {
-    drawField('Dealer: ', options.dealerName, col2X, 1);
+    midRows = drawWrappedField('Project Address: ', addrOneLine, col2X, 0, col3X - col2X - 4);
   }
 
-  drawField('Date: ', fmtDate(options.created_at) || '___/___/______', col3X, 0);
-
-  const infoRows = options.project_description ? 3 : 2;
+  const infoRows = Math.max(leftRows, rightRows, midRows);
   y = infoY + infoRows * lineH + 4;
 
   // ── Separator ──
@@ -133,7 +171,10 @@ export function generateMeasurementFormPDF(
         ? `${Math.round(line.width_m * 1000)} x ${Math.round(line.height_m * 1000)}`
         : '—';
 
-    const desc = [line.collection_name, line.variant_name].filter(Boolean).join(' - ') || '—';
+    const desc =
+      (line.description && line.description.trim())
+      || [line.collection_name, line.variant_name].filter(Boolean).join(' - ')
+      || '—';
 
     const driveLabel = line.drive_type === 'motor' ? 'Motorized' : line.drive_type === 'manual' ? 'Manual' : cap(line.drive_type);
     const driveSideLabel = cap(line.drive_side);

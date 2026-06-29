@@ -64,6 +64,7 @@ async function fetchQuoteDealerSubtotalMap(
 export interface ProposalListItem {
   id: string;
   proposal_no: string | null;
+  version_no?: number | null;
   status: Proposal['status'];
   /** Null for standalone proposals (one-off cotizaciones with no parent Quote). */
   quote_id: string | null;
@@ -322,6 +323,10 @@ export interface QuoteLineInfoForPDF {
   catalog_item_id?: string | null;
   /** Catalog item color, only set for catalog product_type lines */
   catalog_color?: string | null;
+  /** Installation type (measurement form / PDF). */
+  installation_type?: string | null;
+  /** Installation location (measurement form / PDF). */
+  installation_location?: string | null;
 }
 
 export interface ProposalDetailCustomer {
@@ -834,6 +839,13 @@ export function useProposalDetail(proposalId: string | null) {
 export interface CreateProposalFromQuoteOptions {
   /** When internal user is "acting as dealer", pass the selected dealer id so the proposal has a dealer even if the quote has none. */
   actingDealerId?: string | null;
+  /**
+   * Force the proposal number/version to continue an existing proposal family
+   * (used when revising an accepted proposal: the new proposal is built from a
+   * cloned quote version but must keep the original PR-xxxx family as _V<n>).
+   * When provided, the per-quote auto numbering and PR sequence consumption are skipped.
+   */
+  versionOf?: { baseProposalNo: string; versionNo: number } | null;
 }
 
 function getProposalBaseNo(proposalNo: string | null | undefined): string | null {
@@ -941,18 +953,30 @@ export async function createProposalFromQuote(
     if (!suffix) return max;
     return Math.max(max, suffix);
   }, 0);
-  const newVersion = Math.max(maxVersionNoFromColumn, maxVersionNoFromSuffix, 0) + 1;
 
-  let baseProposalNo: string | null = null;
-  const firstProposalWithNo = proposalsForQuote.find((p) => getProposalBaseNo(p.proposal_no));
-  if (firstProposalWithNo) {
-    baseProposalNo = getProposalBaseNo(firstProposalWithNo.proposal_no);
+  let newVersion: number;
+  let proposalNo: string;
+  if (options?.versionOf) {
+    // Revision flow: keep the original PR-xxxx family, skip sequence consumption.
+    newVersion = options.versionOf.versionNo;
+    proposalNo =
+      newVersion <= 1
+        ? options.versionOf.baseProposalNo
+        : `${options.versionOf.baseProposalNo}_V${newVersion}`;
+  } else {
+    newVersion = Math.max(maxVersionNoFromColumn, maxVersionNoFromSuffix, 0) + 1;
+
+    let baseProposalNo: string | null = null;
+    const firstProposalWithNo = proposalsForQuote.find((p) => getProposalBaseNo(p.proposal_no));
+    if (firstProposalWithNo) {
+      baseProposalNo = getProposalBaseNo(firstProposalWithNo.proposal_no);
+    }
+    if (!baseProposalNo) {
+      // First proposal for this quote: consume next global PR sequence.
+      baseProposalNo = await generateNextProposalNumber(orgId, dealerId);
+    }
+    proposalNo = newVersion <= 1 ? baseProposalNo : `${baseProposalNo}_V${newVersion}`;
   }
-  if (!baseProposalNo) {
-    // First proposal for this quote: consume next global PR sequence.
-    baseProposalNo = await generateNextProposalNumber(orgId, dealerId);
-  }
-  const proposalNo = newVersion <= 1 ? baseProposalNo : `${baseProposalNo}_V${newVersion}`;
 
   // created_by_user_id: auth user id (org or portal). Fallback to quote's creator if needed.
   let finalCreatedByUser: string | null = createdByUserId ?? userId;
@@ -1053,6 +1077,181 @@ export async function createProposalFromQuote(
   }
 
   return { proposalId };
+}
+
+export interface CreateProposalVersionResult {
+  proposalId: string;
+  quoteId: string | null;
+  proposalNo: string | null;
+}
+
+/**
+ * Create a new version (revision) of an existing proposal **from the proposal itself**.
+ *
+ * Clones the whole proposal — header, ALL lines (from_quote + custom, with their
+ * adjustments and frozen snapshots) and add-ons — into a new draft. The link to the
+ * original Quote (`quote_id`) is preserved; **no new Quote is created**. Numbering
+ * continues the original PR-xxxx family as `_V<n>`.
+ *
+ * The source proposal is archived (`archived = true`) so it stays an immutable
+ * historical record. To instead start a brand-new proposal from the Quote lines,
+ * use `createProposalFromQuote` (that is the "from scratch" flow).
+ */
+export async function createProposalVersion(
+  proposalId: string,
+  _options?: { actingDealerId?: string | null }
+): Promise<CreateProposalVersionResult | { error: string }> {
+  const { data: src, error: srcErr } = await supabase
+    .from('Proposals')
+    .select('id, organization_id, dealer_id, quote_id, proposal_no, currency, customer_id, contact_id')
+    .eq('id', proposalId)
+    .eq('deleted', false)
+    .single();
+  if (srcErr || !src) return { error: srcErr?.message || 'Proposal not found' };
+
+  const baseProposalNo = getProposalBaseNo(src.proposal_no) ?? src.proposal_no ?? null;
+
+  // Next version across the whole PR family (base + _V suffixes), archived included.
+  let nextVersion = 2;
+  if (baseProposalNo) {
+    const { data: family } = await supabase
+      .from('Proposals')
+      .select('proposal_no, version_no')
+      .eq('organization_id', src.organization_id)
+      .ilike('proposal_no', `${baseProposalNo}%`)
+      .eq('deleted', false);
+    const maxV = (family ?? []).reduce((m: number, p: any) => {
+      const col = Number(p.version_no);
+      const suf = getProposalVersionFromNo(p.proposal_no) ?? 0;
+      return Math.max(m, Number.isFinite(col) ? col : 0, suf);
+    }, 1);
+    nextVersion = maxV + 1;
+  }
+
+  const cloned = await cloneProposalAsVersion(src, baseProposalNo, nextVersion);
+  if ('error' in cloned) return cloned;
+
+  // Archive the source proposal (immutable historical record).
+  const { error: archiveErr } = await supabase
+    .from('Proposals')
+    .update({ archived: true })
+    .eq('id', proposalId);
+  if (archiveErr && import.meta.env.DEV) {
+    console.warn('[createProposalVersion] failed to archive source proposal', archiveErr);
+  }
+
+  return {
+    proposalId: cloned.proposalId,
+    quoteId: null,
+    proposalNo: baseProposalNo
+      ? (nextVersion <= 1 ? baseProposalNo : `${baseProposalNo}_V${nextVersion}`)
+      : null,
+  };
+}
+
+/**
+ * Clone a proposal as a new draft version: header + ALL lines (from_quote + custom,
+ * with their adjustments and snapshots) + add-ons. The original `quote_id` is preserved.
+ */
+async function cloneProposalAsVersion(
+  src: {
+    id: string;
+    organization_id: string;
+    dealer_id: string;
+    quote_id: string | null;
+    currency: string | null;
+    customer_id: string | null;
+    contact_id: string | null;
+  },
+  baseProposalNo: string | null,
+  nextVersion: number
+): Promise<{ proposalId: string } | { error: string }> {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const userId = sessionData?.session?.user?.id ?? null;
+
+  const { data: full, error: fullErr } = await supabase
+    .from('Proposals')
+    .select(
+      'global_discount_pct, global_fee_amount, global_installation_discount_pct, global_installation_fee_pct, exempt_tax, description, notes, terms_title, terms_content, terms_source_template_id, valid_until'
+    )
+    .eq('id', src.id)
+    .single();
+  if (fullErr || !full) return { error: fullErr?.message || 'Failed to load proposal header' };
+
+  const proposalNo = baseProposalNo
+    ? (nextVersion <= 1 ? baseProposalNo : `${baseProposalNo}_V${nextVersion}`)
+    : null;
+
+  const { data: created, error: insErr } = await supabase
+    .from('Proposals')
+    .insert({
+      ...full,
+      organization_id: src.organization_id,
+      dealer_id: src.dealer_id,
+      quote_id: src.quote_id ?? null,
+      customer_id: src.customer_id ?? null,
+      contact_id: src.contact_id ?? null,
+      status: 'draft',
+      archived: false,
+      proposal_no: proposalNo,
+      version_no: nextVersion,
+      currency: src.currency ?? 'USD',
+      created_by_user_id: userId,
+    })
+    .select('id')
+    .single();
+  if (insErr || !created) return { error: insErr?.message || 'Error creating proposal version' };
+  const newId = created.id;
+
+  const { data: srcLines, error: linesErr } = await supabase
+    .from('ProposalLines')
+    .select(
+      'id, line_type, quote_line_id, override_mode, discount_pct, markup_pct, fixed_unit_price, fixed_line_total, custom_category, area, position, description, qty, uom, unit_price, unit_cost, line_total, line_adjustment_pct, sort_order, quote_line_snapshot'
+    )
+    .eq('proposal_id', src.id)
+    .eq('deleted', false);
+  if (linesErr) return { error: linesErr.message };
+
+  const idMap = new Map<string, string>();
+  for (const ln of srcLines ?? []) {
+    const { id: oldId, ...rest } = ln as any;
+    const { data: newLine, error: e } = await supabase
+      .from('ProposalLines')
+      .insert({
+        ...rest,
+        organization_id: src.organization_id,
+        dealer_id: src.dealer_id,
+        proposal_id: newId,
+        deleted: false,
+      })
+      .select('id')
+      .single();
+    if (e || !newLine) return { error: e?.message || 'Failed to copy proposal line' };
+    idMap.set(oldId, newLine.id);
+  }
+
+  if (idMap.size > 0) {
+    const { data: srcAddons } = await supabase
+      .from('ProposalLineAddOns')
+      .select('proposal_line_id, addon_type, cost_amount, pricing_mode, markup_pct, sale_amount, taxable, sort_order')
+      .in('proposal_line_id', Array.from(idMap.keys()))
+      .eq('deleted', false);
+    for (const ad of srcAddons ?? []) {
+      const newLineId = idMap.get((ad as any).proposal_line_id);
+      if (!newLineId) continue;
+      const { proposal_line_id: _omitLineId, ...rest } = ad as any;
+      await supabase.from('ProposalLineAddOns').insert({
+        ...rest,
+        organization_id: src.organization_id,
+        dealer_id: src.dealer_id,
+        proposal_id: newId,
+        proposal_line_id: newLineId,
+        deleted: false,
+      });
+    }
+  }
+
+  return { proposalId: newId };
 }
 
 export interface CreateStandaloneProposalOptions {
