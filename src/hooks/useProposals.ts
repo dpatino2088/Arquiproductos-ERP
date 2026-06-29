@@ -76,6 +76,8 @@ export interface ProposalListItem {
   subtotal_amount?: number | null;
   discount_amount?: number | null;
   tax_amount?: number | null;
+  /** Auth user id of the proposal creator (used for member ownership checks). */
+  created_by_user_id?: string | null;
   customer_name?: string;
   quote_no?: string;
   /** coalesce(AppUsers.display_name, 'Legacy / Imported') for proposal creator */
@@ -188,9 +190,13 @@ export function useProposalsList() {
       const quoteDealerTotalMap = await fetchQuoteDealerSubtotalMap(quoteIds, signal);
       if (signal?.aborted) return;
 
-      // Live totals only for DRAFT proposals (sent/accepted keep their frozen snapshot).
-      const draftIds = rows.filter((r) => r.status === 'draft').map((r) => r.id);
-      const proposalTotalsMap = await fetchProposalTotalsMap(draftIds, signal);
+      // Live totals for DRAFT proposals (sent/accepted keep their frozen snapshot) AND for
+      // any proposal whose frozen snapshot was never computed (total_amount null) so the list
+      // never shows $0 when a real amount exists.
+      const liveTotalIds = rows
+        .filter((r) => r.status === 'draft' || r.total_amount == null)
+        .map((r) => r.id);
+      const proposalTotalsMap = await fetchProposalTotalsMap(liveTotalIds, signal);
       if (signal?.aborted) return;
 
       const customerIds = new Set<string>();
@@ -240,7 +246,9 @@ export function useProposalsList() {
         r.quote_total_amount = r.quote_id ? (quoteDealerTotalMap.get(r.quote_id) ?? null) : null;
         // Draft → live total (matches the detail's live Summary). Sent/accepted → keep the frozen
         // snapshot (Proposals.total_amount), the value committed when the proposal was sent.
-        if (r.status === 'draft') {
+        // Fallback: if a non-draft proposal has no frozen snapshot (null), use the live total so
+        // the list never shows $0 for a proposal that actually has lines.
+        if (r.status === 'draft' || r.total_amount == null) {
           const live = proposalTotalsMap.get(r.id);
           if (live != null) r.total_amount = live;
         }
@@ -1131,13 +1139,19 @@ export async function createProposalVersion(
   const cloned = await cloneProposalAsVersion(src, baseProposalNo, nextVersion);
   if ('error' in cloned) return cloned;
 
-  // Archive the source proposal (immutable historical record).
-  const { error: archiveErr } = await supabase
-    .from('Proposals')
-    .update({ archived: true })
-    .eq('id', proposalId);
-  if (archiveErr && import.meta.env.DEV) {
-    console.warn('[createProposalVersion] failed to archive source proposal', archiveErr);
+  // Archive the source proposal (immutable historical record). Uses a SECURITY DEFINER RPC so
+  // a Dealer Member can supersede a proposal created by another dealer user (plain RLS would
+  // silently skip the update and leave two active versions).
+  const { error: archiveErr } = await supabase.rpc('archive_proposal_for_version', {
+    p_proposal_id: proposalId,
+  });
+  if (archiveErr) {
+    // Non-fatal: the new version was created. Fall back to a direct update (works for owner)
+    // and warn so the predecessor can be archived manually if needed.
+    await supabase.from('Proposals').update({ archived: true }).eq('id', proposalId);
+    if (import.meta.env.DEV) {
+      console.warn('[createProposalVersion] archive RPC failed', archiveErr);
+    }
   }
 
   return {

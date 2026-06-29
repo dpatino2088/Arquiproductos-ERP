@@ -561,6 +561,16 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
 
   const cpDirect = config as any;
 
+  // ── Window film: the ConfiguredProduct stores generic catalog totals, NOT the per-area film
+  // price. The authoritative price/cost live in the QuoteLine snapshot. Use them so the breakdown
+  // matches the saved price instead of the stale CP totals. (Display only — no recalculation.)
+  const productTypeForPricing = String((config as any).productType || (config as any).product_type || '').toLowerCase();
+  const isWindowFilmLine = productTypeForPricing === 'window-film' || productTypeForPricing === 'window_film';
+  const snapshotUnitMsrpRaw = (config as any).unit_msrp_total_snapshot != null ? Number((config as any).unit_msrp_total_snapshot) : null;
+  const snapshotUnitCostRaw = (config as any).unit_cost_total_snapshot != null ? Number((config as any).unit_cost_total_snapshot) : null;
+  const filmUnitMsrp = isWindowFilmLine && snapshotUnitMsrpRaw != null && snapshotUnitMsrpRaw > 0 ? snapshotUnitMsrpRaw : null;
+  const filmUnitCost = isWindowFilmLine && snapshotUnitCostRaw != null && snapshotUnitCostRaw > 0 ? snapshotUnitCostRaw : null;
+
   const effectiveTotals: TotalsShape = useMemo(() => {
     const t = totals as Record<string, number> | null;
     const rollMsrp = (selectedSnapshotTotals?.rollMsrp != null ? Number(selectedSnapshotTotals.rollMsrp) : null) ?? (t?.roll_msrp_total != null ? Number(t.roll_msrp_total) : null) ?? (cpDirect.roll_msrp_total != null ? Number(cpDirect.roll_msrp_total) : null) ?? 0;
@@ -599,13 +609,15 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
 
   // TOTAL PRODUCT MSRP (unit) — from totals/CP first; fallback: sum breakdown lines (preview without saved totals)
   const totalProductMsrpUnit = useMemo(() => {
+    // Window film: trust the QuoteLine MSRP snapshot (CP totals are generic catalog, not per-area).
+    if (filmUnitMsrp != null) return filmUnitMsrp;
     if (effectiveTotals.total_msrp > 0) return effectiveTotals.total_msrp;
     // Fallback: sum all breakdown lines visible in the table
     if (breakdownLines.length > 0) {
       return breakdownLines.reduce((sum, line) => sum + (Number(line.totalPrice) || 0), 0);
     }
     return 0;
-  }, [effectiveTotals.total_msrp, breakdownLines]);
+  }, [filmUnitMsrp, effectiveTotals.total_msrp, breakdownLines]);
 
   // Line quantity (multiplicador): used when adding multiple same units to quote
   const lineQuantity = Math.max(1, Number((config as any).quantity) || 1);
@@ -697,6 +709,18 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
 
   // DISPLAY ONLY: 1) bom_preview_snapshot.totals 2) CP columns. No calculations.
   const effectiveCosts = useMemo(() => {
+    // Window film: cost lives in the QuoteLine snapshot, not the generic CP totals.
+    if (filmUnitCost != null) {
+      return {
+        roll_cost: 0,
+        bom_cost: 0,
+        accessories_cost: 0,
+        unit_product_cost: filmUnitCost,
+        unit_labor_cost: 0,
+        labor_pct: 0,
+        total_cost: filmUnitCost,
+      };
+    }
     const t = totals as Record<string, number> | null;
     const rollCostFromData = (selectedSnapshotTotals?.rollCost != null ? Number(selectedSnapshotTotals.rollCost) : null) ?? (t?.roll_total_cost != null ? Number(t.roll_total_cost) : null) ?? (cpDirect.roll_total_cost != null ? Number(cpDirect.roll_total_cost) : null) ?? null;
     const bomCostFromData = (selectedSnapshotTotals?.bomCost != null ? Number(selectedSnapshotTotals.bomCost) : null) ?? (t?.bom_total_cost != null ? Number(t.bom_total_cost) : null) ?? (cpDirect.bom_total_cost != null ? Number(cpDirect.bom_total_cost) : null) ?? null;
@@ -737,7 +761,26 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
       labor_pct: laborCostPct,
       total_cost: totalCost,
     };
-  }, [cpDirect, totals, breakdownLines, costSettings, selectedSnapshotTotals]);
+  }, [filmUnitCost, cpDirect, totals, breakdownLines, costSettings, selectedSnapshotTotals]);
+
+  // Window film is a single area-priced catalog line; its ConfiguredProduct snapshot stores it at
+  // qty 1 (per-unit), not the measured area. Scale that single line so the breakdown body matches
+  // the authoritative MSRP/cost snapshot (qty = area = msrp ÷ unit_price/m²). Display only.
+  const displayBreakdownLines = useMemo(() => {
+    if (!isWindowFilmLine || filmUnitMsrp == null || breakdownLines.length !== 1) return breakdownLines;
+    return breakdownLines.map((line) => {
+      const unit = Number(line.unitPrice) || 0;
+      const qty = unit > 0 ? filmUnitMsrp / unit : (Number(line.qty) || 1);
+      return {
+        ...line,
+        qty,
+        uom: 'm²',
+        totalPrice: filmUnitMsrp,
+        totalCost: filmUnitCost != null ? filmUnitCost : line.totalCost,
+        unitCost: filmUnitCost != null && qty > 0 ? filmUnitCost / qty : line.unitCost,
+      };
+    });
+  }, [isWindowFilmLine, filmUnitMsrp, filmUnitCost, breakdownLines]);
 
   const unitDealerPriceFromDataRaw =
     (t?.unit_dealer_price != null ? Number(t.unit_dealer_price) : null) ??
@@ -750,6 +793,7 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
       ? Number(unitDealerPriceFromDataRaw)
       : null;
   const unitMsrpFromData =
+    (filmUnitMsrp != null ? filmUnitMsrp : null) ??
     (t?.unit_msrp != null ? Number(t.unit_msrp) : null) ??
     (t?.total_msrp != null ? Number(t.total_msrp) : null) ??
     (t?.unit_msrp_total != null ? Number(t.unit_msrp_total) : null) ??
@@ -1380,7 +1424,7 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {breakdownLines.map((line, idx) => (
+                      {displayBreakdownLines.map((line, idx) => (
                         <React.Fragment key={idx}>
                         <tr 
                           className={

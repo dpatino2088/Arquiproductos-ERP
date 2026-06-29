@@ -5510,25 +5510,9 @@ export default function QuoteNew() {
                         <td className="py-4 pl-2 pr-2 text-right text-gray-900 text-sm font-medium tabular-nums whitespace-nowrap" style={{ width: '92px' }}>
                           {(() => {
                             const effective = getEffectiveLinePrices(line, useDealerPrice, dealerDiscountPctForDisplay);
-                            const { baseUnit } = getCommercialBasePricing(line, dealerDiscountPctForDisplay);
-                            const lineDiscountPct =
-                              useDealerPrice && effective.unitMsrp > 0
-                                ? Math.round((1 - baseUnit / effective.unitMsrp) * 1000) / 10
-                                : null;
-                            const isCapped =
-                              lineDiscountPct != null &&
-                              lineDiscountPct < dealerDiscountPctForDisplay - 0.05;
                             return (
                               <div className="whitespace-nowrap text-right">
                                 <span>{formatCurrency(effective.unitPrice, watch('currency'))}</span>
-                                {lineDiscountPct != null && (
-                                  <span
-                                    className={`block text-[10px] tabular-nums ${isCapped ? 'text-amber-600' : 'text-gray-400'}`}
-                                    title={isCapped ? `Descuento topado por categoría (tier ${dealerDiscountPctForDisplay}%)` : `Descuento del tier`}
-                                  >
-                                    -{lineDiscountPct}%
-                                  </span>
-                                )}
                               </div>
                             );
                           })()}

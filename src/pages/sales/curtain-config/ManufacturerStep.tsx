@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Building2 } from 'lucide-react';
 import { supabase } from '../../../lib/supabase/client';
 import { useOrganizationContext } from '../../../context/OrganizationContext';
+import { useConfiguratorPolicy } from '../../../context/ConfiguratorPolicyContext';
 import { prefetchImageUrls } from '../../../lib/imagePrefetch';
 
 interface Manufacturer {
@@ -41,6 +42,7 @@ function isSupportedImageAsset(url: string): boolean {
 
 export default function ManufacturerStep({ config, onUpdate }: ManufacturerStepProps) {
   const { activeOrganizationId } = useOrganizationContext();
+  const { policy } = useConfiguratorPolicy();
   const [manufacturers, setManufacturers] = useState<Manufacturer[]>([]);
   const [loading, setLoading] = useState(true);
   const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
@@ -86,7 +88,12 @@ export default function ManufacturerStep({ config, onUpdate }: ManufacturerStepP
       });
       setTemplatesByMfr(mfrToIds);
 
-      const uniqueNames = Array.from(mfrToIds.keys()).sort();
+      // Per-dealer restriction: only show allowed manufacturers (empty list = no restriction).
+      const allowedNames = Array.isArray(policy?.allowed_manufacturer_names) ? policy!.allowed_manufacturer_names : [];
+      const allowedSet = new Set(allowedNames.map((n) => String(n).trim().toLowerCase()).filter(Boolean));
+      const uniqueNames = Array.from(mfrToIds.keys())
+        .filter((name) => allowedSet.size === 0 || allowedSet.has(String(name).trim().toLowerCase()))
+        .sort();
 
       const { data: mfrData } = await supabase
         .from('Manufacturers')
@@ -119,7 +126,7 @@ export default function ManufacturerStep({ config, onUpdate }: ManufacturerStepP
     })();
 
     return () => { cancelled = true; };
-  }, [activeOrganizationId, productTypeId]);
+  }, [activeOrganizationId, productTypeId, (policy?.allowed_manufacturer_names || []).join('|')]);
 
   const getImageSrc = (mfr: Manufacturer) => {
     const fallback = `/images/${mfr.name}.png`;

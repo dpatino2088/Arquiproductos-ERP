@@ -97,6 +97,8 @@ export default function DealerProfileForm({ basePath = '/settings/dealer-profile
     allow_hardware: boolean;
     allow_operating_system: boolean;
     allow_custom_only_proposals: boolean;
+    allow_dealer_supply_fabric: boolean;
+    allowed_manufacturer_names: string[];
   } | null>(null);
 
   // Editable form state for Configurator Permissions (synced from policy or defaults when no policy)
@@ -107,6 +109,8 @@ export default function DealerProfileForm({ basePath = '/settings/dealer-profile
     allow_hardware: boolean;
     allow_operating_system: boolean;
     allow_custom_only_proposals: boolean;
+    allow_dealer_supply_fabric: boolean;
+    allowed_manufacturer_names: string[];
   }>({
     allowed_product_type_codes: [],
     allow_variants_catalog: true,
@@ -114,7 +118,12 @@ export default function DealerProfileForm({ basePath = '/settings/dealer-profile
     allow_hardware: true,
     allow_operating_system: true,
     allow_custom_only_proposals: false,
+    allow_dealer_supply_fabric: false,
+    allowed_manufacturer_names: [],
   });
+
+  // Manufacturers available in the org (for the "Allowed manufacturers" multi-select)
+  const [orgManufacturers, setOrgManufacturers] = useState<string[]>([]);
 
   // Dealer users from AppUsers (source of truth); only when editing a dealer
   const { users: dealerUsers, isLoading: loadingDealerUsers, refetch: refetchDealerUsers } = useAppUsersByDealer(dealerId || null, { onlyWhenDealerId: true });
@@ -200,7 +209,7 @@ export default function DealerProfileForm({ basePath = '/settings/dealer-profile
     (async () => {
       const { data, error } = await supabase
         .from('DealerConfiguratorPolicies')
-        .select('allowed_product_type_codes, allow_variants_catalog, allow_accessories_only, allow_hardware, allow_operating_system, allow_custom_only_proposals')
+        .select('allowed_product_type_codes, allow_variants_catalog, allow_accessories_only, allow_hardware, allow_operating_system, allow_custom_only_proposals, allow_dealer_supply_fabric, allowed_manufacturer_names')
         .eq('organization_id', activeOrganizationId)
         .eq('dealer_id', dealerId)
         .maybeSingle();
@@ -213,6 +222,7 @@ export default function DealerProfileForm({ basePath = '/settings/dealer-profile
       }
       if (data) {
         const codes = Array.isArray(data.allowed_product_type_codes) ? data.allowed_product_type_codes : [];
+        const mfrs = Array.isArray((data as any).allowed_manufacturer_names) ? (data as any).allowed_manufacturer_names : [];
         const policy = {
           allowed_product_type_codes: codes.map((c: string) => String(c).trim().toLowerCase()).filter(Boolean),
           allow_variants_catalog: data.allow_variants_catalog ?? true,
@@ -220,6 +230,8 @@ export default function DealerProfileForm({ basePath = '/settings/dealer-profile
           allow_hardware: data.allow_hardware ?? true,
           allow_operating_system: data.allow_operating_system ?? true,
           allow_custom_only_proposals: data.allow_custom_only_proposals ?? false,
+          allow_dealer_supply_fabric: (data as any).allow_dealer_supply_fabric ?? false,
+          allowed_manufacturer_names: mfrs.map((m: string) => String(m).trim()).filter(Boolean),
         };
         setConfiguratorPolicy(policy);
         setConfiguratorForm(policy);
@@ -234,11 +246,40 @@ export default function DealerProfileForm({ basePath = '/settings/dealer-profile
           allow_hardware: true,
           allow_operating_system: true,
           allow_custom_only_proposals: false,
+          allow_dealer_supply_fabric: false,
+          allowed_manufacturer_names: [],
         }));
       }
     })();
     return () => { mounted = false; };
   }, [dealerId, activeOrganizationId]);
+
+  // Load org manufacturers for the "Allowed manufacturers" multi-select
+  useEffect(() => {
+    if (!activeOrganizationId) {
+      setOrgManufacturers([]);
+      return;
+    }
+    let mounted = true;
+    (async () => {
+      const { data, error } = await supabase
+        .from('Manufacturers')
+        .select('name')
+        .eq('organization_id', activeOrganizationId)
+        .eq('deleted', false)
+        .order('name', { ascending: true });
+      if (!mounted) return;
+      if (error) {
+        setOrgManufacturers([]);
+        return;
+      }
+      const names = Array.from(
+        new Set((data || []).map((m: { name: string }) => String(m.name || '').trim()).filter(Boolean))
+      );
+      setOrgManufacturers(names);
+    })();
+    return () => { mounted = false; };
+  }, [activeOrganizationId]);
 
   // When no policy and productTypes load, default form to "all product types" (all codes)
   useEffect(() => {
@@ -455,6 +496,8 @@ export default function DealerProfileForm({ basePath = '/settings/dealer-profile
           p_allow_hardware: configuratorForm.allow_hardware,
           p_allow_operating_system: configuratorForm.allow_operating_system,
           p_allow_custom_only_proposals: configuratorForm.allow_custom_only_proposals,
+          p_allow_dealer_supply_fabric: configuratorForm.allow_dealer_supply_fabric,
+          p_allowed_manufacturer_names: configuratorForm.allowed_manufacturer_names,
         });
         if (rpcError) {
           console.error('[DealerProfileForm] Configurator policy save failed', rpcError);
@@ -997,7 +1040,53 @@ export default function DealerProfileForm({ basePath = '/settings/dealer-profile
                         />
                         <span className="text-sm text-gray-800">Allow Catalog Variants</span>
                       </label>
+                      <label className="flex items-start gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={configuratorForm.allow_dealer_supply_fabric}
+                          onChange={(e) => setConfiguratorForm(prev => ({ ...prev, allow_dealer_supply_fabric: e.target.checked }))}
+                          className="h-4 w-4 rounded border-gray-300 mt-0.5"
+                          disabled={isReadOnly}
+                        />
+                        <span className="text-sm text-gray-800">
+                          Allow quoting without fabric (dealer-supplied)
+                          <span className="block text-xs text-gray-500">Shows the “Dealer Supply Fabric” switch so the dealer can quote the cut list with no fabric cost.</span>
+                        </span>
+                      </label>
                     </div>
+                  </div>
+
+                  <div>
+                    <Label className="text-xs font-medium text-gray-700 mb-2 block">Allowed Manufacturers</Label>
+                    <p className="text-xs text-gray-500 mb-3">Select which manufacturers this dealer can use. Leave all unchecked to allow every manufacturer.</p>
+                    {orgManufacturers.length === 0 ? (
+                      <p className="text-xs text-gray-500">No manufacturers in this organization.</p>
+                    ) : (
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {orgManufacturers.map((name) => {
+                          const checked = configuratorForm.allowed_manufacturer_names.includes(name);
+                          return (
+                            <label key={name} className="flex items-center gap-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => {
+                                  setConfiguratorForm(prev => ({
+                                    ...prev,
+                                    allowed_manufacturer_names: checked
+                                      ? prev.allowed_manufacturer_names.filter(n => n !== name)
+                                      : [...prev.allowed_manufacturer_names, name],
+                                  }));
+                                }}
+                                className="h-4 w-4 rounded border-gray-300"
+                                disabled={isReadOnly}
+                              />
+                              <span className="text-sm text-gray-800">{name}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                   <div>
                     <Label className="text-xs font-medium text-gray-700 mb-2 block">Steps Control</Label>

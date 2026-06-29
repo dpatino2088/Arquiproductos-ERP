@@ -39,6 +39,9 @@ export default function VariantsStep({ config, onUpdate, policy: policyProp }: V
   const trackOnly = !!(config as any).track_only;
   // Dealer/client supplies the fabric ("ghost fabric"): keep the cut list, drop fabric cost.
   const dealerSupplyFabric = !!(config as any).dealer_supply_fabric;
+  // Per-dealer permission. No policy (internal context) = allowed. Also keep the toggle visible
+  // when the current line already has it enabled, so it can be turned off.
+  const allowDealerSupplyFabric = !policy || policy.allow_dealer_supply_fabric === true || dealerSupplyFabric;
 
   // Get productTypeId from config (set by ProductStep)
   const productTypeId = (config as any).productTypeId || (config as any).product_type_id;
@@ -886,7 +889,7 @@ export default function VariantsStep({ config, onUpdate, policy: policyProp }: V
           </div>
         )}
 
-        {!isDrapery && !trackOnly && (
+        {!isDrapery && !trackOnly && allowDealerSupplyFabric && (
           <div className="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg">
             <div>
               <p className="text-sm font-medium text-gray-900">Dealer Supply Fabric</p>

@@ -13,6 +13,10 @@ export interface DealerConfiguratorPolicy {
   allow_hardware: boolean;
   allow_operating_system: boolean;
   allow_custom_only_proposals: boolean;
+  /** When true, the dealer may quote configured products without a catalog fabric (dealer-supplied). */
+  allow_dealer_supply_fabric: boolean;
+  /** Allowed manufacturer names. Empty array = no restriction (all allowed). */
+  allowed_manufacturer_names: string[];
   created_at?: string;
   updated_at?: string;
 }
@@ -60,10 +64,14 @@ export function useDealerConfiguratorPolicy(overrideDealerId?: string | null): U
       if (!error && data) {
         const raw = Array.isArray(data.allowed_product_type_codes) ? data.allowed_product_type_codes : [];
         const normalized = raw.map((x: unknown) => String(x).trim().toLowerCase()).filter(Boolean);
+        const rawMfrs = Array.isArray((data as any).allowed_manufacturer_names) ? (data as any).allowed_manufacturer_names : [];
+        const normalizedMfrs = rawMfrs.map((x: unknown) => String(x).trim()).filter(Boolean);
         setPolicy({
           ...data,
           allowed_product_type_codes: normalized,
           allow_custom_only_proposals: data.allow_custom_only_proposals ?? false,
+          allow_dealer_supply_fabric: (data as any).allow_dealer_supply_fabric ?? false,
+          allowed_manufacturer_names: normalizedMfrs,
         } as DealerConfiguratorPolicy);
       } else {
         setPolicy(null);

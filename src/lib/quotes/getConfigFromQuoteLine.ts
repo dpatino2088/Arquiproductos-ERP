@@ -475,6 +475,12 @@ export async function getConfigFromQuoteLine(
     if (line.dealer_discount_pct != null) config.dealer_discount_pct = line.dealer_discount_pct;
     if (line.unit_dealer_price_snapshot != null) config.unit_dealer_price_snapshot = line.unit_dealer_price_snapshot;
     if (line.dealer_price_total != null) config.dealer_price_total = line.dealer_price_total;
+    // Authoritative MSRP / cost snapshots from the QuoteLine. For product types whose
+    // ConfiguredProduct does not store the real per-area price (e.g. window film), the
+    // breakdown must read these to stay consistent with the saved price (not the generic CP totals).
+    if ((line as any).unit_msrp_total_snapshot != null) (config as any).unit_msrp_total_snapshot = (line as any).unit_msrp_total_snapshot;
+    if ((line as any).unit_cost_total_snapshot != null) (config as any).unit_cost_total_snapshot = (line as any).unit_cost_total_snapshot;
+    if ((line as any).product_type != null && (config as any).product_type == null) (config as any).product_type = (line as any).product_type;
     if ((config as any).unit_labor_cost == null && (line as any).labor_cost_snapshot != null)
       (config as any).unit_labor_cost = (line as any).labor_cost_snapshot;
     if ((config as any).labor_amount == null && (line as any).labor_msrp_snapshot != null)
