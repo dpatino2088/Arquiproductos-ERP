@@ -739,6 +739,9 @@ export default function QuoteNew() {
   const { createQuote, isCreating } = useCreateQuote();
   const { updateQuote, isUpdating } = useUpdateQuote();
   const [quoteId, setQuoteId] = useState<string | null>(null);
+  // Synchronous mirror of quoteId so on-demand creation (e.g. quoting only a Custom Line)
+  // never double-creates a quote when state hasn't flushed yet within the same handler.
+  const liveQuoteIdRef = useRef<string | null>(null);
   const [quoteData, setQuoteData] = useState<any>(null);
   const { customers: directoryCustomers } = useDirectoryCustomers({ organizationId: activeOrganizationId });
   const [unassignedCustomers, setUnassignedCustomers] = useState<Customer[]>([]);
@@ -998,6 +1001,11 @@ export default function QuoteNew() {
       }
     }
   }, []);
+
+  // Keep the synchronous quoteId mirror in sync with state.
+  useEffect(() => {
+    liveQuoteIdRef.current = quoteId;
+  }, [quoteId]);
 
   // ✅ Persist configurator visibility across tab switches
   useEffect(() => {
@@ -3556,8 +3564,94 @@ export default function QuoteNew() {
   };
 
   // ── Custom / service line handlers ──
+  // Create the quote on demand so a Custom Line can be the FIRST line of a quote
+  // (no Configured Product required). Returns the quote id, or null if creation is blocked.
+  const ensureQuoteExists = async (): Promise<string | null> => {
+    if (quoteId) return quoteId;
+    if (liveQuoteIdRef.current) return liveQuoteIdRef.current;
+    if (!activeOrganizationId) {
+      useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: 'No organization selected' });
+      return null;
+    }
+    const effectiveDealerId = dealerInfo?.id ?? selectedCustomerDealerId ?? quoteData?.dealer_id ?? filterDealerId ?? null;
+    if (requiresActingDealerSelection && !effectiveDealerId) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Dealer required',
+        message: 'Select a Dealer in Acting As before creating a Quote.',
+      });
+      return null;
+    }
+
+    const data = getValues();
+    const nextStatus = data.status || 'draft';
+    const buildPayload = (quoteNo: string): any => ({
+      quote_no: quoteNo,
+      customer_id: data.customer_id || null,
+      contact_id: selectedContactId || null,
+      status: nextStatus,
+      tracking_status: nextStatus === 'approved' ? 'pending_confirmation' : null,
+      organization_id: activeOrganizationId,
+      dealer_id: effectiveDealerId,
+      currency: data.currency || 'USD',
+      description: data.description?.trim() || null,
+      project_address: data.project_address?.trim() || null,
+      notes: data.notes?.trim() || null,
+      po_number: data.po_number?.trim() || null,
+      exempt_tax: data.exempt_tax ?? false,
+    });
+
+    let quoteNo = data.quote_no;
+    if (!quoteNo) {
+      const { generateNextQuoteNumber } = await import('../../lib/sequential-numbers');
+      quoteNo = await generateNextQuoteNumber(activeOrganizationId, effectiveDealerId);
+      setValue('quote_no', quoteNo, { shouldValidate: true });
+    }
+
+    let created: any = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        created = await createQuote(buildPayload(quoteNo));
+        break;
+      } catch (e: any) {
+        const msg = String(e?.message ?? '').toLowerCase();
+        const isQuoteNoDuplicate = msg.includes('quote number') && msg.includes('already exists');
+        if (!isQuoteNoDuplicate) throw e;
+        const { generateNextQuoteNumber } = await import('../../lib/sequential-numbers');
+        quoteNo = await generateNextQuoteNumber(activeOrganizationId, effectiveDealerId);
+        setValue('quote_no', quoteNo, { shouldValidate: true });
+      }
+    }
+    if (!created?.id) {
+      useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: 'Could not create the quote. Please try again.' });
+      return null;
+    }
+
+    liveQuoteIdRef.current = created.id;
+    setQuoteId(created.id);
+    setQuoteData(created);
+    if (created.dealer_id && !dealerInfo) {
+      const { data: dealer } = await supabase
+        .from('Dealers')
+        .select('id, dealer_name, dealer_no, dealer_tier_id')
+        .eq('id', created.dealer_id)
+        .eq('organization_id', activeOrganizationId)
+        .eq('deleted', false)
+        .maybeSingle();
+      if (dealer) {
+        setDealerInfo({
+          id: dealer.id,
+          name: dealer.dealer_name || 'Unknown Dealer',
+          number: dealer.dealer_no || null,
+          dealer_tier_id: dealer.dealer_tier_id ?? null,
+        });
+      }
+    }
+    window.history.replaceState(null, '', `/sales/quotes/${created.id}/edit`);
+    return created.id;
+  };
+
   const addCustomLine = () => {
-    if (!quoteId) return;
     setDraftServiceLines((prev) => [
       ...prev,
       { id: `temp-${Date.now()}`, name: '', qty: '1', unit_cost: '', markup_pct: '', unit_price: '', category: 'service', area: '', position: '' },
@@ -3594,8 +3688,9 @@ export default function QuoteNew() {
 
   // Persist a single custom/service draft line (insert if new, then price via RPC).
   // Returns the resolved QuoteLine id, or null if skipped/failed.
-  const persistCustomLineDraft = async (d: ServiceLineDraft): Promise<string | null> => {
-    if (!quoteId || !activeOrganizationId || !d.name.trim()) return null;
+  const persistCustomLineDraft = async (d: ServiceLineDraft, quoteIdOverride?: string): Promise<string | null> => {
+    const targetQuoteId = quoteIdOverride ?? quoteId ?? liveQuoteIdRef.current;
+    if (!targetQuoteId || !activeOrganizationId || !d.name.trim()) return null;
     const { data: servicePT } = await supabase
       .from('ProductTypes')
       .select('id')
@@ -3620,7 +3715,7 @@ export default function QuoteNew() {
         .from('QuoteLines')
         .insert({
           organization_id: activeOrganizationId,
-          quote_id: quoteId,
+          quote_id: targetQuoteId,
           dealer_id: quoteRow?.dealer_id ?? null,
           product_type: 'service',
           product_type_id: servicePTId,
@@ -3663,7 +3758,11 @@ export default function QuoteNew() {
     }
     setSavingServiceLines(true);
     try {
-      await persistCustomLineDraft(draft);
+      // Create the quote on demand if this Custom Line is the first line of the quote.
+      const qid = await ensureQuoteExists();
+      if (!qid) return; // creation blocked (e.g. missing dealer) → keep the draft, nothing is deleted
+      const savedId = await persistCustomLineDraft(draft, qid);
+      if (!savedId) return; // persist failed → keep the draft so the user doesn't lose their work
       setDraftServiceLines((prev) => prev.filter((d) => d.id !== id));
       await refetchLines();
     } finally {
@@ -3672,12 +3771,15 @@ export default function QuoteNew() {
   };
 
   const saveCustomLines = async (): Promise<void> => {
-    if (!quoteId || !activeOrganizationId || draftServiceLines.length === 0) return;
+    if (!activeOrganizationId || draftServiceLines.length === 0) return;
     setSavingServiceLines(true);
     try {
+      // Create the quote on demand if these Custom Lines are the first lines of the quote.
+      const qid = await ensureQuoteExists();
+      if (!qid) return; // creation blocked → keep drafts, nothing is deleted
       for (const d of draftServiceLines) {
         if (!d.name.trim()) continue;
-        await persistCustomLineDraft(d);
+        await persistCustomLineDraft(d, qid);
       }
       setDraftServiceLines([]);
       refetchLines();
@@ -4712,6 +4814,7 @@ export default function QuoteNew() {
         const created = await createWithUniqueQuoteNo();
         if (created?.id) {
           // Update quoteId state so form knows it's now in edit mode
+          liveQuoteIdRef.current = created.id;
           setQuoteId(created.id);
           setQuoteData(created);
           
@@ -5230,8 +5333,9 @@ export default function QuoteNew() {
         </div>
       </div>
 
-      {/* Quote Lines Section */}
-      {quoteId && (
+      {/* Quote Lines Section — visible without a saved quote so a Custom Line (or CP) can be
+          the FIRST line; the quote is created on demand when the line is committed. */}
+      {(quoteId || (!isOrdered && canManageOrgQuoteTools)) && (
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4 min-w-0">
           <div className="py-4 px-6 border-b border-gray-200">
             <div className="flex items-center justify-between">
@@ -5263,7 +5367,10 @@ export default function QuoteNew() {
                 )}
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={async () => {
+                    // Create the quote on demand so a Configured Product can be the first line too.
+                    const qid = await ensureQuoteExists();
+                    if (!qid) return;
                     setEditingLineId(null);
                     setInitialLineConfig(undefined);
                     setShowConfigurator(true);
@@ -5289,7 +5396,7 @@ export default function QuoteNew() {
                 Retry
               </button>
             </div>
-          ) : quoteLines.length === 0 ? (
+          ) : quoteLines.length === 0 && draftServiceLines.length === 0 ? (
             <div className="p-6 text-center text-gray-500">No lines added yet. Click "Add Line" to get started.</div>
           ) : (
             <div className="table-fit-wrapper quote-lines-table-wrapper overflow-x-auto">
