@@ -273,8 +273,9 @@ export default function DealerProfileForm({ basePath = '/settings/dealer-profile
         setOrgManufacturers([]);
         return;
       }
-      const names = Array.from(
-        new Set((data || []).map((m: { name: string }) => String(m.name || '').trim()).filter(Boolean))
+      const rows = (data || []) as Array<{ name: string | null }>;
+      const names: string[] = Array.from(
+        new Set(rows.map((m) => String(m?.name ?? '').trim()).filter((s): s is string => s.length > 0))
       );
       setOrgManufacturers(names);
     })();
