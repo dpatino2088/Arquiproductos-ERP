@@ -397,6 +397,13 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
         const heightMm = Number((config as any).height_mm) || 0;
         const widthM = widthMm / 1000;
         const heightM = heightMm / 1000;
+        const panelCount = Math.max(
+          1,
+          Number((config as any).panel_count)
+            || (Array.isArray((config as any).config_snapshot?.panels)
+              ? (config as any).config_snapshot.panels.length
+              : 1)
+        );
 
         // 7. Build breakdown lines - process parents first, then children
         const lines: BOMBreakdownLine[] = [];
@@ -421,17 +428,46 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
             qty = Math.max(0, (heightMm + deltaMm) / 1000);
           } else if (qtyType === 'per_m2' || qtyType === 'area') {
             qty = Math.max(0, widthM * heightM);
+          } else if (qtyType === 'per_spacing') {
+            // Mirror the SQL BOM engine: CEIL((width + delta) / spacing) * qty_value, floored by qty_min.
+            const spacing = Math.max(1, Number(comp.qty_spacing_mm) || 500);
+            const base = Math.max(0, widthMm + deltaMm);
+            qty = Math.ceil(base / spacing) * (Number(comp.qty_value) || 1);
+            const qtyMin = Number(comp.qty_min);
+            if (comp.qty_min != null && !Number.isNaN(qtyMin) && qty < qtyMin) qty = qtyMin;
+          } else if (qtyType === 'per_joint') {
+            // N panels produce N-1 joints (intermediates).
+            qty = Math.max(0, panelCount - 1) * (Number(comp.qty_value) || 1);
           }
           return qty;
         };
 
         // Process parent components
+        // User-selectable roles (headbox, channels, bottom bar) may have several
+        // ALTERNATIVE parent rows in the template (one per option). Only ONE resolves
+        // to the user's selection, so we must emit a single row per optional role —
+        // otherwise the preview shows the same headbox twice (once per alternative).
+        const emittedOptionalRoles = new Set<string>();
         parentComponents.forEach((comp: any) => {
           const role = (comp.component_role || '').toLowerCase();
           const selectedId = selectedItems[role];
           const isOptionalRole = OPTIONAL_HARDWARE_ROLES.has(role);
           const isOptionalAndNotSelected = isOptionalRole && comp.is_required === false && !selectedId;
           if (isOptionalAndNotSelected) return;
+
+          if (isOptionalRole) {
+            if (emittedOptionalRoles.has(role)) return; // already emitted the resolved alternative
+            // If this row is a non-selected alternative but another row matches the
+            // selection, skip it so we emit the selected variant (and ITS children).
+            if (selectedId && comp.component_item_id && comp.component_item_id !== selectedId) {
+              const hasSelectedRow = parentComponents.some((p: any) =>
+                (p.component_role || '').toLowerCase() === role
+                && p.component_item_id === selectedId);
+              if (hasSelectedRow) return;
+            }
+            emittedOptionalRoles.add(role);
+          }
+
           const itemId = selectedId || comp.component_item_id;
 
           if (!itemId) return; // Skip if no item
