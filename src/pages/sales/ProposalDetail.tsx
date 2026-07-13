@@ -197,6 +197,25 @@ function getDraperyTrackDescription(params: {
   return styleLabel ? `Drapery Track | ${styleLabel}` : 'Drapery Track';
 }
 
+/** A config item id counts as "selected" when it is a real UUID (not empty / 'NONE'). */
+function isMeaningfulConfigId(v: unknown): boolean {
+  return typeof v === 'string' && v.trim().length > 10 && v.trim().toUpperCase() !== 'NONE';
+}
+
+/**
+ * Detects a headbox / cassette selection from a frozen snapshot or a live config_snapshot.
+ * A headbox is present when cassette = true, a real headbox_item_id exists, or a headbox_sku is set.
+ */
+function detectHeadbox(src: unknown): boolean {
+  if (!src || typeof src !== 'object') return false;
+  const o = src as Record<string, unknown>;
+  if (o.cassette === true || o.cassette === 'true') return true;
+  if (isMeaningfulConfigId(o.headbox_item_id)) return true;
+  const sku = o.headbox_sku;
+  if (typeof sku === 'string' && sku.trim().length > 0) return true;
+  return false;
+}
+
 function getProposalIdFromPath(): string | null {
   const path = window.location.pathname;
   const m = path.match(/\/sales\/proposals\/([^/]+)/);
@@ -1447,6 +1466,11 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           trackOnly,
           styleCode,
         });
+        const isDraperyLine = /drapery/i.test(String(productTypeName ?? productTypeRaw ?? ''));
+        // Fold style for full drapery curtains (track-only already carries it in the name).
+        const draperyStyleLabel =
+          isDraperyLine && !draperyTrackDescription && styleCode ? normalizeStyleLabel(styleCode) : null;
+        const hasHeadbox = detectHeadbox(snapFrozen) || detectHeadbox(qlInfo?.config_snapshot);
         const isCatalogLine = String(productTypeRaw ?? '').trim().toLowerCase() === 'catalog';
         const isServiceLine = String(productTypeRaw ?? '').trim().toLowerCase() === 'service';
         const catalogColor = isCatalogLine ? (qlInfo?.catalog_color ?? null) : null;
@@ -1473,6 +1497,8 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
             null,
           has_side_channel: hasSideChannel,
           has_bottom_channel: hasBottomChannel,
+          has_headbox: hasHeadbox,
+          style_label: draperyStyleLabel,
           install_included: isInstallIncluded,
           accessories: formatAccessoriesForPDF(
             (snapFrozen as { accessories?: unknown } | null)?.accessories ??
@@ -2581,6 +2607,12 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                     && String((qlInfo?.config_snapshot as { bottom_channel_item_id?: string }).bottom_channel_item_id).trim().length > 10
                     && String((qlInfo?.config_snapshot as { bottom_channel_item_id?: string }).bottom_channel_item_id).toUpperCase() !== 'NONE');
                 const isDrapery = /drapery/i.test(ptNameForOpening ?? '');
+                const hasHeadbox = detectHeadbox(snap) || detectHeadbox(qlInfo?.config_snapshot);
+                // Fold style for full drapery curtains (track-only already carries it in the name).
+                const draperyStyleLabel =
+                  isDrapery && !draperyTrackDescription && styleCodeForDrapery
+                    ? normalizeStyleLabel(styleCodeForDrapery)
+                    : null;
                 const openingRaw =
                   snap?.opening_direction ??
                   snap?.openingDirection ??
@@ -2670,8 +2702,10 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                                   <span className="text-xs text-gray-500">{driveLabel}</span>
                                 ) : null;
                               })()}
+                              {draperyStyleLabel ? <span className="text-xs text-gray-500">Style: {draperyStyleLabel}</span> : null}
                               {hasSideChannel ? <span className="text-xs text-gray-500">Side Channel: Yes</span> : null}
                               {hasBottomChannel ? <span className="text-xs text-gray-500">Bottom Channel: Yes</span> : null}
+                              {hasHeadbox ? <span className="text-xs text-gray-500">Headbox: Yes</span> : null}
                               {openingLabel ? <span className="text-xs text-gray-500">{openingLabel}</span> : null}
                               {dimsMm && dimsMm !== '—' && <span className="text-xs text-gray-500 whitespace-pre-line">{dimsMm}</span>}
                               {isInstallIncluded ? (

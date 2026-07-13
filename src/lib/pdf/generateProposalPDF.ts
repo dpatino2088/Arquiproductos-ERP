@@ -36,6 +36,10 @@ export interface ProposalPDFLine {
   has_side_channel?: boolean;
   /** Whether bottom channel is included in the line config */
   has_bottom_channel?: boolean;
+  /** Whether a headbox / cassette is included in the line config */
+  has_headbox?: boolean;
+  /** Drapery fold style label (e.g. "Wave 2.8", "Ripple Fold", "Pinch Pleat") for non-track drapery */
+  style_label?: string | null;
   /** Internal only: accessories string */
   accessories?: string | null;
   qty: number;
@@ -303,8 +307,10 @@ export function generateProposalPDF(
           ? (line.panel_count === 1 ? '1 Paño' : `${line.panel_count} Paños`)
           : '');
     const drivePart = driveLabel ? `\n${driveLabel}` : '';
+    const stylePart = line.style_label && String(line.style_label).trim() ? `\nStyle: ${String(line.style_label).trim()}` : '';
     const sideChannelPart = line.has_side_channel === true ? '\nSide Channel: Yes' : '';
     const bottomChannelPart = line.has_bottom_channel === true ? '\nBottom Channel: Yes' : '';
+    const headboxPart = line.has_headbox === true ? '\nHeadbox: Yes' : '';
     const installPart = line.install_included ? '\nInstall Included' : '';
     let dimsPart = '';
     if (includeMeasurements && line.dimensions && line.dimensions.trim() && line.dimensions !== '—') {
@@ -313,7 +319,7 @@ export function generateProposalPDF(
     } else if (!includeMeasurements && panelLabel) {
       dimsPart = `\n${panelLabel}`;
     }
-    return `${name}${skuPart}${drivePart}${sideChannelPart}${bottomChannelPart}${installPart}${dimsPart}`.trim();
+    return `${name}${skuPart}${drivePart}${stylePart}${sideChannelPart}${bottomChannelPart}${headboxPart}${installPart}${dimsPart}`.trim();
   };
 
   const tableData = lines.map((line, index) => [
