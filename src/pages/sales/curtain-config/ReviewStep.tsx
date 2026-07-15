@@ -799,24 +799,40 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
     };
   }, [filmUnitCost, cpDirect, totals, breakdownLines, costSettings, selectedSnapshotTotals]);
 
-  // Window film is a single area-priced catalog line; its ConfiguredProduct snapshot stores it at
-  // qty 1 (per-unit), not the measured area. Scale that single line so the breakdown body matches
-  // the authoritative MSRP/cost snapshot (qty = area = msrp ÷ unit_price/m²). Display only.
+  // Window film is sold by LINEAR METER of the roll. Its ConfiguredProduct snapshot stores a single
+  // generic catalog line (qty 1) whose unit price can be stale; the authoritative MSRP/cost live in
+  // the QuoteLine snapshot. Show the breakdown row using the REAL linear meters (qty) at the derived
+  // per-linear-meter rate (msrp ÷ length) so it reflects the actual selling concept — not a
+  // back-calculated m² figure. For Full Roll mode we use the roll length. (Display only — no recalc.)
   const displayBreakdownLines = useMemo(() => {
     if (!isWindowFilmLine || filmUnitMsrp == null || breakdownLines.length !== 1) return breakdownLines;
+    const c = config as any;
+    const sellMode = String(c.sell_mode || 'roll').toLowerCase();
+    const rawLinear = Number(c.linear_length_m) || 0;
+    const linearLen = rawLinear > 100 ? rawLinear / 1000 : rawLinear; // legacy mm → m
+    const rollWidthM = Number(c.roll_width_m) || 0;
+    const rollLen = Number(c.roll_length_m) || 0;
+    const rollArea = Number(c.roll_area_m2) || 0;
+    const rollLength = rollLen > 0 ? rollLen : rollWidthM > 0 && rollArea > 0 ? rollArea / rollWidthM : 0;
+    const unitLengthM = sellMode === 'linear' ? linearLen : rollLength;
     return breakdownLines.map((line) => {
-      const unit = Number(line.unitPrice) || 0;
-      const qty = unit > 0 ? filmUnitMsrp / unit : (Number(line.qty) || 1);
+      const legacyUnit = Number(line.unitPrice) || 0;
+      const useLinear = unitLengthM > 0;
+      // Prefer the real linear meters; fall back to the legacy ratio only if length is missing.
+      const qty = useLinear ? unitLengthM : legacyUnit > 0 ? filmUnitMsrp / legacyUnit : Number(line.qty) || 1;
+      const uom = useLinear ? 'm' : 'm²';
+      const unitPrice = qty > 0 ? filmUnitMsrp / qty : legacyUnit;
       return {
         ...line,
         qty,
-        uom: 'm²',
+        uom,
+        unitPrice,
         totalPrice: filmUnitMsrp,
         totalCost: filmUnitCost != null ? filmUnitCost : line.totalCost,
         unitCost: filmUnitCost != null && qty > 0 ? filmUnitCost / qty : line.unitCost,
       };
     });
-  }, [isWindowFilmLine, filmUnitMsrp, filmUnitCost, breakdownLines]);
+  }, [isWindowFilmLine, filmUnitMsrp, filmUnitCost, breakdownLines, config]);
 
   const unitDealerPriceFromDataRaw =
     (t?.unit_dealer_price != null ? Number(t.unit_dealer_price) : null) ??
