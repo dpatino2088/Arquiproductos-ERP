@@ -432,6 +432,100 @@ async function resolveBomTemplateIdFrontendStrict(args: {
 }
 
 /**
+ * Detector de inconsistencias template ↔ selección (solo detecta, NO corrige datos).
+ *
+ * Verifica que el template RESUELTO contenga realmente cada ítem de hardware que el
+ * usuario seleccionó (headbox, side_channel, bottom_channel, bracket, bottom_bar, tube,
+ * motor/drive). Si el template resuelto NO contiene una selección, significa que la
+ * resolución derivó a otro template y la línea quedará con un precio/BOM incorrecto
+ * (p.ej. se pierde el cassette). Se registra un aviso estructurado para monitoreo
+ * "de aquí en adelante"; no lanza ni modifica nada.
+ *
+ * @returns lista de inconsistencias detectadas (vacía si todo consistente)
+ */
+export async function detectTemplateSelectionInconsistencies(args: {
+  organization_id: string;
+  bom_template_id: string | null | undefined;
+  config_snapshot: any;
+}): Promise<Array<{ role: string; selected_item_id: string; reason: string }>> {
+  const { organization_id, bom_template_id, config_snapshot } = args;
+  if (!bom_template_id) return [];
+
+  const pick = (v: any): string | null => {
+    if (v == null) return null;
+    const s = String(v).trim();
+    if (!s || s === 'NONE') return null;
+    return s;
+  };
+
+  // Roles opcionales/parientes que discriminan entre templates hermanos.
+  const selections: Array<{ role: string; itemId: string }> = [];
+  const addSel = (role: string, raw: any) => {
+    const id = pick(raw);
+    if (id) selections.push({ role, itemId: id });
+  };
+  addSel('headbox', config_snapshot?.headbox_item_id);
+  addSel('side_channel', config_snapshot?.side_channel_item_id);
+  addSel('bottom_channel', config_snapshot?.bottom_channel_item_id);
+  addSel('bracket', config_snapshot?.bracket_item_id);
+  addSel('bottom_bar', config_snapshot?.bottom_bar_item_id);
+  addSel('tube', config_snapshot?.tube_item_id);
+  addSel('motor', config_snapshot?.motor_item_id);
+  addSel('drive', config_snapshot?.drive_item_id);
+
+  if (selections.length === 0) return [];
+
+  const { data: comps, error } = await supabase
+    .from('BOMComponents')
+    .select('component_role, component_item_id')
+    .or(`organization_id.eq.${organization_id},organization_id.is.null`)
+    .eq('bom_template_id', bom_template_id)
+    .eq('deleted', false)
+    .eq('archived', false)
+    .is('parent_component_id', null);
+
+  if (error) {
+    // El detector nunca debe romper el guardado.
+    console.warn('[BOM-INCONSISTENCY] detector query failed (skipping):', error.message);
+    return [];
+  }
+
+  const byRole = new Map<string, Set<string>>();
+  (comps || []).forEach((c: any) => {
+    const role = String(c.component_role || '').toLowerCase().trim();
+    const itemId = c.component_item_id ? String(c.component_item_id).trim() : '';
+    if (!role || !itemId) return;
+    if (!byRole.has(role)) byRole.set(role, new Set());
+    byRole.get(role)!.add(itemId);
+  });
+
+  const inconsistencies: Array<{ role: string; selected_item_id: string; reason: string }> = [];
+  for (const { role, itemId } of selections) {
+    const inTemplate = byRole.get(role);
+    if (!inTemplate || !inTemplate.has(itemId)) {
+      inconsistencies.push({
+        role,
+        selected_item_id: itemId,
+        reason: inTemplate
+          ? `El template resuelto tiene rol '${role}' pero no contiene el ítem seleccionado.`
+          : `El template resuelto no tiene rol '${role}', pero se seleccionó un ítem para ese rol.`,
+      });
+    }
+  }
+
+  if (inconsistencies.length > 0) {
+    console.error('[BOM-INCONSISTENCY] Template resuelto no coincide con las selecciones', {
+      organization_id,
+      bom_template_id,
+      quote_id: config_snapshot?.quote_id ?? null,
+      inconsistencies,
+    });
+  }
+
+  return inconsistencies;
+}
+
+/**
  * Create ConfiguredProduct with BOM preview
  * 
  * This function:
@@ -491,6 +585,19 @@ export async function createConfiguredProductPreview(
       bom_template_id: preResolvedTemplateId,
       has_template: !!preResolvedTemplateId,
     });
+  }
+
+  // ── Detector (solo detecta, no corrige) ────────────────────────────
+  // Avisa si el template resuelto no contiene alguna selección de hardware.
+  // Nunca debe romper el guardado.
+  try {
+    await detectTemplateSelectionInconsistencies({
+      organization_id,
+      bom_template_id: preResolvedTemplateId,
+      config_snapshot,
+    });
+  } catch (detectErr: any) {
+    console.warn('[BOM-INCONSISTENCY] detector threw (ignored):', detectErr?.message || detectErr);
   }
 
   // Call RPC function

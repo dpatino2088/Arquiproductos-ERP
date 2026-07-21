@@ -40,6 +40,8 @@ interface DealerBilling {
   billing_state: string | null;
   billing_zip_code: string | null;
   billing_country: string | null;
+  is_tax_retention_agent: boolean | null;
+  tax_retention_rate: number | null;
 }
 
 interface InvoiceHeader {
@@ -85,6 +87,7 @@ interface CreditNote {
   reason: string | null;
   status: string;
   created_at: string;
+  kind: string | null;
 }
 
 interface DeliveryGate {
@@ -160,6 +163,7 @@ export default function InvoiceDetail() {
   const [creditAmount, setCreditAmount] = useState('');
   const [creditReason, setCreditReason] = useState('');
   const [creatingCredit, setCreatingCredit] = useState(false);
+  const [creatingRetention, setCreatingRetention] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [voidCreditTarget, setVoidCreditTarget] = useState<CreditNote | null>(null);
   const [voidCreditReason, setVoidCreditReason] = useState('');
@@ -234,7 +238,7 @@ export default function InvoiceDetail() {
           .order('created_at', { ascending: false }),
         supabase
           .from('DealerCreditNotes')
-          .select('id, credit_note_number, issue_date, amount, reason, status, created_at')
+          .select('id, credit_note_number, issue_date, amount, reason, status, created_at, kind')
           .eq('invoice_id', invoiceId)
           .eq('deleted', false)
           .order('created_at', { ascending: false }),
@@ -245,7 +249,7 @@ export default function InvoiceDetail() {
 
       const [dealerRes, soRes] = await Promise.all([
         inv.dealer_id
-          ? supabase.from('Dealers').select('dealer_name, dealer_no, dealer_email, dealer_phone, identification_number, billing_same_as_location, street_address_line_1, street_address_line_2, city, state, zip_code, country, billing_street_address_line_1, billing_street_address_line_2, billing_city, billing_state, billing_zip_code, billing_country').eq('id', inv.dealer_id).maybeSingle()
+          ? supabase.from('Dealers').select('dealer_name, dealer_no, dealer_email, dealer_phone, identification_number, billing_same_as_location, street_address_line_1, street_address_line_2, city, state, zip_code, country, billing_street_address_line_1, billing_street_address_line_2, billing_city, billing_state, billing_zip_code, billing_country, is_tax_retention_agent, tax_retention_rate').eq('id', inv.dealer_id).maybeSingle()
           : { data: null },
         inv.sales_order_id
           ? supabase.from('SalesOrders').select('id, sales_order_no').eq('id', inv.sales_order_id).maybeSingle()
@@ -514,6 +518,34 @@ export default function InvoiceDetail() {
     }
   };
 
+  const createRetentionNote = async () => {
+    if (!invoiceId) return;
+    setCreatingRetention(true);
+    try {
+      const { data, error } = await supabase.rpc('create_tax_retention_note', {
+        p_invoice_id: invoiceId,
+      });
+      if (error) throw error;
+      const res = data as { ok?: boolean; reason?: string; amount?: number; credit_note_number?: string; already_exists?: boolean } | null;
+      if (res?.ok) {
+        addNotification({
+          type: 'success',
+          title: 'Retención registrada',
+          message: res.already_exists
+            ? 'La factura ya tenía una Nota de Retención de Impuesto.'
+            : `${res.credit_note_number ?? 'Retención'} por ${fmt(Number(res.amount ?? 0), currency)} generada.`,
+        });
+      } else {
+        addNotification({ type: 'error', title: 'Retención', message: `No se pudo registrar la retención (${res?.reason ?? 'desconocido'}).` });
+      }
+      await refetch();
+    } catch (e: unknown) {
+      addNotification({ type: 'error', title: 'Error', message: getSupabaseErrorMessageDetailed(e) });
+    } finally {
+      setCreatingRetention(false);
+    }
+  };
+
   const handleVoidCreditNote = async () => {
     if (!voidCreditTarget || !invoiceId || !activeOrganizationId) return;
     if (voidCreditReason.trim().length < 3) {
@@ -746,6 +778,14 @@ export default function InvoiceDetail() {
 
   const buildInvoicePDFDoc = useCallback(async () => {
     if (!invoice) return null;
+    const paidTotal = applications.reduce((s, a) => s + Number(a.applied_amount), 0);
+    const activeCredits = creditNotes.filter((row) => row.status !== 'void');
+    const retentionTotal = activeCredits
+      .filter((row) => row.kind === 'tax_retention')
+      .reduce((s, row) => s + Number(row.amount), 0);
+    const creditedTotal = activeCredits
+      .filter((row) => row.kind !== 'tax_retention')
+      .reduce((s, row) => s + Number(row.amount), 0);
     const pdfData: InvoicePDFData = {
       invoice_number: invoice.invoice_number,
       status: invoice.status,
@@ -755,8 +795,10 @@ export default function InvoiceDetail() {
       subtotal: invoice.subtotal,
       tax_total: invoice.tax_total,
       total: invoice.total,
-      total_paid: applications.reduce((s, a) => s + Number(a.applied_amount), 0),
-      balance_due: Math.max(invoice.total - applications.reduce((s, a) => s + Number(a.applied_amount), 0), 0),
+      total_paid: paidTotal,
+      credited_total: creditedTotal,
+      tax_retention_total: retentionTotal,
+      balance_due: Math.max(invoice.total - paidTotal - creditedTotal - retentionTotal, 0),
       notes: invoice.notes,
       sales_order_no: invoice.SalesOrders?.sales_order_no ?? null,
     };
@@ -777,7 +819,7 @@ export default function InvoiceDetail() {
 
     const logoOptions = await loadOrganizationLogoOptions();
     return generateInvoicePDF(pdfData, pdfDealer, pdfLines, logoOptions);
-  }, [invoice, applications, lines, loadOrganizationLogoOptions]);
+  }, [invoice, applications, lines, creditNotes, loadOrganizationLogoOptions]);
 
   const handlePreviewPDF = async () => {
     const doc = await buildInvoicePDFDoc();
@@ -833,10 +875,15 @@ export default function InvoiceDetail() {
 
   const currency = invoice.currency_code || 'USD';
   const totalApplied = applications.reduce((s, a) => s + Number(a.applied_amount), 0);
-  const totalCredited = creditNotes
-    .filter((row) => row.status !== 'void')
+  const activeCreditNotes = creditNotes.filter((row) => row.status !== 'void');
+  const totalCredited = activeCreditNotes.reduce((s, row) => s + Number(row.amount), 0);
+  const totalRetention = activeCreditNotes
+    .filter((row) => row.kind === 'tax_retention')
     .reduce((s, row) => s + Number(row.amount), 0);
+  const totalManualCredited = totalCredited - totalRetention;
   const balanceDue = Math.max(invoice.total - totalApplied - totalCredited, 0);
+  const dealerIsRetentionAgent = Boolean(invoice.Dealers?.is_tax_retention_agent);
+  const hasActiveRetention = totalRetention > 0.005;
   const gateBalanceDue = Number(deliveryGate?.balance_due ?? 0);
   const gatePaymentComplete = deliveryGate?.payment_complete ?? gateBalanceDue <= 0;
   const status = invoice.status;
@@ -858,6 +905,12 @@ export default function InvoiceDetail() {
     if (totalApplied <= 0.005 && totalCredited <= 0.005 && canDeleteFin) {
       actionItems.push({ label: 'Delete Draft', onClick: () => setDeleteConfirmOpen(true), danger: true });
     }
+  }
+  if (isInternal && status !== 'void' && dealerIsRetentionAgent && !hasActiveRetention && Number(invoice.tax_total) > 0) {
+    actionItems.push({
+      label: creatingRetention ? 'Registrando retención...' : 'Registrar retención de impuesto',
+      onClick: () => { if (!creatingRetention) createRetentionNote(); },
+    });
   }
   if (isInternal && (status === 'issued' || status === 'partial' || status === 'paid')) {
     if (canVoidFin) actionItems.push({ label: 'Void Invoice', onClick: () => setVoidDialogOpen(true), danger: true });
@@ -1152,10 +1205,16 @@ export default function InvoiceDetail() {
                     <dt className="text-gray-500">Paid</dt>
                     <dd className="font-mono text-green-600">−{fmt(totalApplied, currency)}</dd>
                   </div>
-                  {totalCredited > 0 && (
+                  {totalManualCredited > 0.005 && (
                     <div className="flex justify-between">
                       <dt className="text-gray-500">Credited</dt>
-                      <dd className="font-mono text-amber-600">−{fmt(totalCredited, currency)}</dd>
+                      <dd className="font-mono text-amber-600">−{fmt(totalManualCredited, currency)}</dd>
+                    </div>
+                  )}
+                  {totalRetention > 0.005 && (
+                    <div className="flex justify-between">
+                      <dt className="text-amber-700">Retención ITBMS</dt>
+                      <dd className="font-mono text-amber-700">−{fmt(totalRetention, currency)}</dd>
                     </div>
                   )}
                 </>
@@ -1303,10 +1362,16 @@ export default function InvoiceDetail() {
                       <dt className="text-gray-500">Paid</dt>
                       <dd className="font-mono text-green-600">−{fmt(totalApplied, currency)}</dd>
                     </div>
-                    {totalCredited > 0 && (
+                    {totalManualCredited > 0.005 && (
                       <div className="flex justify-between">
                         <dt className="text-gray-500">Credited</dt>
-                        <dd className="font-mono text-amber-600">−{fmt(totalCredited, currency)}</dd>
+                        <dd className="font-mono text-amber-600">−{fmt(totalManualCredited, currency)}</dd>
+                      </div>
+                    )}
+                    {totalRetention > 0.005 && (
+                      <div className="flex justify-between">
+                        <dt className="text-amber-700">Retención ITBMS</dt>
+                        <dd className="font-mono text-amber-700">−{fmt(totalRetention, currency)}</dd>
                       </div>
                     )}
                   </>
@@ -1342,7 +1407,14 @@ export default function InvoiceDetail() {
               ) : (
                 creditNotes.map((cn) => (
                   <tr key={cn.id} className={`border-t hover:bg-gray-50 ${cn.status === 'void' ? 'opacity-60' : ''}`}>
-                    <td className={`px-4 py-4 font-medium text-primary ${cn.status === 'void' ? 'line-through' : ''}`}>{cn.credit_note_number}</td>
+                    <td className={`px-4 py-4 font-medium text-primary ${cn.status === 'void' ? 'line-through' : ''}`}>
+                      {cn.credit_note_number}
+                      {cn.kind === 'tax_retention' && (
+                        <span className="ml-2 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800 align-middle">
+                          Retención
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-4">{formatDate(cn.issue_date)}</td>
                     <td className="px-4 py-4 text-gray-600">{cn.reason ?? '—'}</td>
                     <td className="px-4 py-4 text-center">

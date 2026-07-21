@@ -32,6 +32,8 @@ interface DealerOption {
   billing_state: string | null;
   billing_zip_code: string | null;
   billing_country: string | null;
+  is_tax_retention_agent: boolean | null;
+  tax_retention_rate: number | null;
 }
 
 interface InvoiceLine {
@@ -151,7 +153,7 @@ export default function InvoiceNew() {
     if (!activeOrganizationId) return;
     supabase
       .from('Dealers')
-      .select('id, dealer_name, dealer_no, dealer_email, dealer_phone, identification_number, billing_same_as_location, street_address_line_1, street_address_line_2, city, state, zip_code, country, billing_street_address_line_1, billing_street_address_line_2, billing_city, billing_state, billing_zip_code, billing_country')
+      .select('id, dealer_name, dealer_no, dealer_email, dealer_phone, identification_number, billing_same_as_location, street_address_line_1, street_address_line_2, city, state, zip_code, country, billing_street_address_line_1, billing_street_address_line_2, billing_city, billing_state, billing_zip_code, billing_country, is_tax_retention_agent, tax_retention_rate')
       .eq('organization_id', activeOrganizationId)
       .eq('deleted', false)
       .eq('status', 'active')
@@ -387,6 +389,14 @@ export default function InvoiceNew() {
     return { subtotal: sub, taxTotal: tax, total: sub + tax };
   }, [lines, appliedTaxPct]);
 
+  const retentionPreview = useMemo(() => {
+    if (!selectedDealer?.is_tax_retention_agent || taxTotal <= 0) return null;
+    const rate = selectedDealer.tax_retention_rate ?? 0.5;
+    const amount = Number((taxTotal * rate).toFixed(2));
+    if (amount <= 0) return null;
+    return { amount, rate, net: Number((total - amount).toFixed(2)) };
+  }, [selectedDealer, taxTotal, total]);
+
   const fmt = (v: number) =>
     new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(v);
 
@@ -533,6 +543,29 @@ export default function InvoiceNew() {
       if (createErr) throw createErr;
       if (!createdInvoiceId || typeof createdInvoiceId !== 'string') {
         throw new Error('Failed to create invoice');
+      }
+
+      // Panama ITBMS retention: if the dealer is a withholding agent and the
+      // invoice has tax, record the retained portion as a retention note so the
+      // withheld amount is not treated as an outstanding balance.
+      if (selectedDealer?.is_tax_retention_agent && finalTax > 0) {
+        try {
+          const { data: retResult, error: retErr } = await supabase.rpc('create_tax_retention_note', {
+            p_invoice_id: createdInvoiceId,
+          });
+          if (retErr) throw retErr;
+          const res = retResult as { ok?: boolean; amount?: number } | null;
+          if (res?.ok && res.amount) {
+            addNotification({
+              type: 'success',
+              title: 'Retención registrada',
+              message: `Nota de Retención de Impuesto por ${fmt(Number(res.amount))} generada.`,
+            });
+          }
+        } catch (retErr: unknown) {
+          const rMsg = retErr instanceof Error ? retErr.message : 'No se pudo registrar la retención';
+          addNotification({ type: 'error', title: 'Retención', message: rMsg });
+        }
       }
 
       addNotification({ type: 'success', title: 'Invoice Created', message: `Invoice ${invoiceNumber} saved as draft.` });
@@ -926,6 +959,21 @@ export default function InvoiceNew() {
                   <dt className="text-sm font-semibold text-gray-700">Total</dt>
                   <dd className="font-mono font-bold text-gray-900">{fmt(total)}</dd>
                 </div>
+                {retentionPreview && (
+                  <>
+                    <div className="flex justify-between text-amber-700">
+                      <dt>Retención ITBMS ({Math.round(retentionPreview.rate * 100)}%)</dt>
+                      <dd className="font-mono">−{fmt(retentionPreview.amount)}</dd>
+                    </div>
+                    <div className="flex justify-between border-t pt-2">
+                      <dt className="text-sm font-semibold text-gray-700">Saldo a cobrar (neto)</dt>
+                      <dd className="font-mono font-bold text-gray-900">{fmt(retentionPreview.net)}</dd>
+                    </div>
+                    <p className="text-xs text-gray-500 pt-1">
+                      Se generará automáticamente una Nota de Retención de Impuesto. El saldo retenido no se cobrará.
+                    </p>
+                  </>
+                )}
               </dl>
             </div>
             </div>

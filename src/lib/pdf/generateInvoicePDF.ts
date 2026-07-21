@@ -32,6 +32,10 @@ export interface InvoicePDFData {
   balance_due: number;
   notes: string | null;
   sales_order_no: string | null;
+  /** Manual credit notes applied (excludes tax retention). */
+  credited_total?: number;
+  /** ITBMS retention withheld by the dealer (recorded as a retention note). */
+  tax_retention_total?: number;
 }
 
 export interface InvoicePDFDealer {
@@ -261,10 +265,18 @@ export function generateInvoicePDF(
   // Summary table (right-aligned)
   const summaryX = pageWidth - marginX - 56;
   const summaryValueX = pageWidth - marginX - 3;
+  const creditedTotal = Number(invoice.credited_total ?? 0);
+  const retentionTotal = Number(invoice.tax_retention_total ?? 0);
   const summaryItems = [
     { label: 'Subtotal', value: fmtCurrency(invoice.subtotal, cur), bold: false },
     { label: 'Tax', value: fmtCurrency(invoice.tax_total, cur), bold: false },
     { label: 'Total', value: fmtCurrency(invoice.total, cur), bold: true },
+    ...(retentionTotal > 0.005
+      ? [{ label: 'Retencion ITBMS', value: `-${fmtCurrency(retentionTotal, cur)}`, bold: false }]
+      : []),
+    ...(creditedTotal > 0.005
+      ? [{ label: 'Credited', value: `-${fmtCurrency(creditedTotal, cur)}`, bold: false }]
+      : []),
     { label: 'Paid', value: fmtCurrency(invoice.total_paid, cur), bold: false },
     { label: 'Balance Due', value: fmtCurrency(invoice.balance_due, cur), bold: true },
   ];

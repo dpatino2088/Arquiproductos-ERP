@@ -434,6 +434,31 @@ export async function getConfigFromQuoteLine(
     }
   }
 
+  // ── 6c. Anclar la resolución de template al template de ORIGEN ──────
+  // Al duplicar/editar, OperatingSystemStep cae a la base amplia de fabricante
+  // (_manufacturer_filtered_templates) porque la línea ya trae operación seleccionada.
+  // Esa base incluye templates hermanos (p.ej. con y sin headbox) y auto-selecciona
+  // hardware "de la otra variante" (p.ej. un bracket que solo existe en el template
+  // sin cassette), lo que hace que la resolución derive a otro template y se pierda
+  // el cassette silenciosamente. Sembramos la base de templates con el template de
+  // origen para que duplicar/editar conserve EXACTAMENTE el mismo template salvo que
+  // el usuario cambie el hardware (al re-entrar a Hardware/Operating System, esos
+  // pasos limpian estas claves y todo se recalcula desde cero).
+  if (
+    bomTemplateId &&
+    productTypeUI !== 'catalog' &&
+    productTypeUI !== 'window-film'
+  ) {
+    if (!Array.isArray((config as any)._hardware_filtered_templates) ||
+        ((config as any)._hardware_filtered_templates || []).length === 0) {
+      (config as any)._hardware_filtered_templates = [bomTemplateId];
+    }
+    if (!Array.isArray((config as any)._operating_system_base_templates) ||
+        ((config as any)._operating_system_base_templates || []).length === 0) {
+      (config as any)._operating_system_base_templates = [bomTemplateId];
+    }
+  }
+
   const needsDraperyRecovery = isDrapery && bomTemplateId && (
     (!config.productLine && !config.product_line) ||
     (!config.systemSize && !config.system_size) ||

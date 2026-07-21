@@ -67,6 +67,7 @@ const dealerSchema = z.object({
   status: z.enum(['active', 'disabled']).optional(),
   dealer_tier_id: z.string().uuid().optional().or(z.literal('')),
   logo_url: z.string().optional().or(z.literal('')),
+  is_tax_retention_agent: z.boolean().optional(),
 });
 
 type DealerFormValues = z.infer<typeof dealerSchema>;
@@ -167,6 +168,7 @@ export default function DealerProfileForm({ basePath = '/settings/dealer-profile
       primary_contact_app_user_id: '',
       dealer_tier_id: '',
       logo_url: '',
+      is_tax_retention_agent: false,
     },
   });
 
@@ -349,6 +351,7 @@ export default function DealerProfileForm({ basePath = '/settings/dealer-profile
           setValue('notes', data.notes || '');
           setValue('status', (data.status || 'active') as 'active' | 'disabled');
           setValue('logo_url', data.logo_url || '');
+          setValue('is_tax_retention_agent', Boolean(data.is_tax_retention_agent));
         }
       } catch (err) {
         console.error('Error loading dealer data:', err);
@@ -483,6 +486,7 @@ export default function DealerProfileForm({ basePath = '/settings/dealer-profile
         status: values.status || 'active',
         dealer_tier_id: (values.dealer_tier_id && values.dealer_tier_id.trim() !== '') ? values.dealer_tier_id.trim() : null,
         logo_url: values.logo_url?.trim() || null,
+        is_tax_retention_agent: Boolean(values.is_tax_retention_agent),
       };
 
       if (dealerId) {
@@ -1199,6 +1203,26 @@ export default function DealerProfileForm({ basePath = '/settings/dealer-profile
                     </SelectContent>
                   </SelectShadcn>
                   <p className="text-xs text-gray-500 mt-0.5">Discount tier for pricing. If not set, Bronze is used.</p>
+                </div>
+                <div className="col-span-12 mt-1">
+                  <div className="flex items-start gap-2 rounded-md border border-gray-200 bg-gray-50 px-3 py-2">
+                    <input
+                      type="checkbox"
+                      id="is_tax_retention_agent"
+                      {...register('is_tax_retention_agent')}
+                      checked={Boolean(watch('is_tax_retention_agent'))}
+                      onChange={(e) => setValue('is_tax_retention_agent', e.target.checked)}
+                      className="h-4 w-4 mt-0.5"
+                      disabled={isReadOnly}
+                    />
+                    <label htmlFor="is_tax_retention_agent" className="text-xs">
+                      <span className="font-medium text-gray-900">Agente de retención de ITBMS (Panamá)</span>
+                      <span className="block text-gray-500 mt-0.5">
+                        Retiene el 50% del ITBMS (3.5% de la base). Al facturar se generará
+                        automáticamente una Nota de Retención de Impuesto y el saldo retenido no se cobrará.
+                      </span>
+                    </label>
+                  </div>
                 </div>
               </div>
 
