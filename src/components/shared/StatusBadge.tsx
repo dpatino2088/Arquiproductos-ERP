@@ -2,7 +2,7 @@ import { cn } from '../../lib/utils';
 
 export interface StatusBadgeProps {
   status: string;
-  type: 'quote' | 'proposal' | 'salesOrder' | 'payment' | 'invoice' | 'manufacturing' | 'moType' | 'moLineStatus' | 'priority' | 'workOrder' | 'bill' | 'vendorPayment' | 'purchaseOrder' | 'claim';
+  type: 'quote' | 'proposal' | 'salesOrder' | 'orderTracking' | 'payment' | 'invoice' | 'manufacturing' | 'moType' | 'moLineStatus' | 'priority' | 'workOrder' | 'bill' | 'vendorPayment' | 'purchaseOrder' | 'claim';
   size?: 'sm' | 'md';
 }
 
@@ -65,6 +65,15 @@ const STATUS_MAPS: Record<StatusBadgeProps['type'], Record<string, string>> = {
     cancelled: 'red',
     in_production: 'indigo',
     ready_for_delivery: 'emerald',
+  },
+  orderTracking: {
+    pending_confirmation: 'gray',
+    confirmed: 'blue',
+    in_production: 'indigo',
+    ready_for_delivery: 'emerald',
+    delivered: 'green',
+    canceled: 'red',
+    cancelled: 'red',
   },
   payment: {
     pending: 'gray',
@@ -194,6 +203,15 @@ const STATUS_LABEL_OVERRIDES: Partial<Record<StatusBadgeProps['type'], Record<st
     in_production: 'In Production',
     ready_for_delivery: 'Ready for Delivery',
     delivered: 'Completed',
+  },
+  orderTracking: {
+    pending_confirmation: 'Pending Confirmation',
+    confirmed: 'Confirmed',
+    in_production: 'In Production',
+    ready_for_delivery: 'Ready for Delivery',
+    delivered: 'Delivered',
+    canceled: 'Canceled',
+    cancelled: 'Canceled',
   },
   manufacturing: {
     confirmed: 'Reviewed',

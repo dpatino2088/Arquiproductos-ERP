@@ -388,7 +388,7 @@ export function useApprovedQuotesWithProgress(dealerId?: string | null) {
           chunkArray(quoteIds, 500).map(async (ids) => {
             const { data } = await supabase
               .from('SalesOrders')
-              .select('id, quote_id, sale_order_no, order_progress_status, status, organization_id')
+              .select('id, quote_id, sales_order_no, status, tracking_status, organization_id')
               .in('quote_id', ids)
               .eq('organization_id', activeOrganizationId)
               .or('deleted.is.false,deleted.is.null');
@@ -414,9 +414,11 @@ export function useApprovedQuotesWithProgress(dealerId?: string | null) {
             totals: { total: t?.dealer_subtotal ?? 0, tax: t?.tax_amount ?? 0, grand_total: t?.total_amount ?? 0 },
             total: t?.dealer_subtotal ?? 0,
             SaleOrders: saleOrders,
-            saleOrderNo: firstSO?.sale_order_no || null,
-            saleOrderStatus: firstSO?.status || null,
-            orderProgressStatus: firstSO?.order_progress_status || null,
+            saleOrderNo: firstSO?.sales_order_no || null,
+            // Dealer-facing status comes from tracking_status (coarse milestones,
+            // no factory detail). Fall back to the internal status if not set yet.
+            saleOrderStatus: firstSO?.tracking_status || firstSO?.status || null,
+            trackingStatus: firstSO?.tracking_status || null,
             saleOrderId: firstSO?.id || null,
           };
         });

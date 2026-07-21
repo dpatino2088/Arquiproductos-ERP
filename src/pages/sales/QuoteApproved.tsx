@@ -19,8 +19,7 @@ import {
   CheckCircle
 } from 'lucide-react';
 import { QuoteStatus } from '../../types/catalog';
-
-type SaleOrderStatus = 'Draft' | 'Confirmed' | 'Scheduled for Production' | 'In Production' | 'Ready for Delivery' | 'Delivered' | 'Cancelled';
+import StatusBadge from '../../components/shared/StatusBadge';
 
 interface QuoteApprovedItem {
   id: string;
@@ -33,36 +32,10 @@ interface QuoteApprovedItem {
   currency: string;
   createdAt: string;
   saleOrderNo: string | null;
-  saleOrderStatus: SaleOrderStatus | null;
+  saleOrderStatus: string | null;
   manufacturingOrderNo: string | null;
   manufacturingStatus: string | null;
 }
-
-// Function to get sale order status badge color and label
-const getSaleOrderStatusBadge = (status: SaleOrderStatus | null) => {
-  if (!status) {
-    return { color: 'bg-gray-50 text-gray-700', label: 'No Sales Order' };
-  }
-  
-  switch (status) {
-    case 'Draft':
-      return { color: 'bg-gray-50 text-gray-700', label: 'Draft' };
-    case 'Confirmed':
-      return { color: 'bg-blue-50 text-blue-700', label: 'Confirmed' };
-    case 'Scheduled for Production':
-      return { color: 'bg-yellow-50 text-yellow-700', label: 'Scheduled for Production' };
-    case 'In Production':
-      return { color: 'bg-orange-50 text-orange-700', label: 'In Production' };
-    case 'Ready for Delivery':
-      return { color: 'bg-purple-50 text-purple-700', label: 'Ready for Delivery' };
-    case 'Delivered':
-      return { color: 'bg-green-50 text-green-700', label: 'Delivered' };
-    case 'Cancelled':
-      return { color: 'bg-red-50 text-red-700', label: 'Cancelled' };
-    default:
-      return { color: 'bg-gray-50 text-gray-700', label: status };
-  }
-};
 
 // Format currency
 const formatCurrency = (amount: number, currency: string = 'USD') => {
@@ -140,8 +113,8 @@ export default function QuoteApproved() {
       }
       
       // Get SaleOrder data - use convenience fields from hook if available, otherwise extract from SaleOrders array
-      const saleOrderNo = (quote as any).saleOrderNo || saleOrder?.sale_order_no || null;
-      const saleOrderStatus: SaleOrderStatus | null = (quote as any).saleOrderStatus || (saleOrder?.status as SaleOrderStatus | null) || null;
+      const saleOrderNo = (quote as any).saleOrderNo || saleOrder?.sales_order_no || null;
+      const saleOrderStatus: string | null = (quote as any).saleOrderStatus || (saleOrder?.tracking_status as string | null) || (saleOrder?.status as string | null) || null;
       
       // ManufacturingOrders will be fetched separately if needed (removed from query to avoid relationship error)
       const manufacturingOrderNo = null;
@@ -190,18 +163,18 @@ export default function QuoteApproved() {
       } else if (sortBy === 'total') {
         return sortOrder === 'asc' ? aValue - bValue : bValue - aValue;
       } else if (sortBy === 'saleOrderStatus') {
-        // Sort by sale order status order
-        const statusOrder: Record<SaleOrderStatus, number> = {
-          'Draft': 1,
-          'Confirmed': 2,
-          'Scheduled for Production': 3,
-          'In Production': 4,
-          'Ready for Delivery': 5,
-          'Delivered': 6,
-          'Cancelled': 7,
+        // Sort by dealer-facing tracking_status milestone order.
+        const statusOrder: Record<string, number> = {
+          pending_confirmation: 1,
+          confirmed: 2,
+          in_production: 3,
+          ready_for_delivery: 4,
+          delivered: 5,
+          canceled: 6,
+          cancelled: 6,
         };
-        const aOrder = aValue ? statusOrder[aValue as SaleOrderStatus] || 0 : 0;
-        const bOrder = bValue ? statusOrder[bValue as SaleOrderStatus] || 0 : 0;
+        const aOrder = aValue ? statusOrder[String(aValue)] || 0 : 0;
+        const bOrder = bValue ? statusOrder[String(bValue)] || 0 : 0;
         return sortOrder === 'asc' ? aOrder - bOrder : bOrder - aOrder;
       } else {
         const strA = String(aValue || '').toLowerCase();
@@ -407,7 +380,6 @@ export default function QuoteApproved() {
                   </tr>
                 ) : (
                   paginatedQuotes.map((quote) => {
-                    const statusBadge = getSaleOrderStatusBadge(quote.saleOrderStatus);
                     return (
                       <tr 
                         key={quote.id} 
@@ -435,9 +407,13 @@ export default function QuoteApproved() {
                         </td>
                         <td className="py-4 px-6">
                           <div className="flex flex-col gap-1">
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusBadge.color}`}>
-                              {statusBadge.label}
-                            </span>
+                            {quote.saleOrderStatus ? (
+                              <StatusBadge status={quote.saleOrderStatus} type="orderTracking" />
+                            ) : (
+                              <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-50 text-gray-700">
+                                No Sales Order
+                              </span>
+                            )}
                             {quote.manufacturingOrderNo && quote.manufacturingStatus && (
                               <span className="text-xs text-gray-500">
                                 MO: {quote.manufacturingOrderNo} ({quote.manufacturingStatus})
