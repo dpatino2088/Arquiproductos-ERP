@@ -29,6 +29,7 @@ export interface FabricRule {
   tube_wrap_mm: number;
   bottom_wrap_mm: number;
   safety_margin_mm: number;
+  fabric_width_clearance_mm: number;
   panel_multiplier: number;
   heatseal_price_per_m: number;
   bottom_bar_wrap_pct: number;

@@ -35,11 +35,11 @@ const FORMULA_LABELS: Record<string, string> = {
 function inferDefaults(ptName: string): Partial<FabricRule> {
   const n = ptName.toLowerCase();
   if (n.includes('dual'))
-    return { fabric_width_source: 'tube_width', formula_code: 'ROLLER_DROPS', pricing_output_uom: 'm', panel_multiplier: 2, tube_wrap_mm: 35, bottom_wrap_mm: 0, safety_margin_mm: 20, waste_pct: 0.15, heatseal_price_per_m: 0, bottom_bar_wrap_pct: 0.08, allow_rotation: false, heatseal_direction: 'none' as const };
+    return { fabric_width_source: 'tube_width', formula_code: 'ROLLER_DROPS', pricing_output_uom: 'm', panel_multiplier: 2, tube_wrap_mm: 35, bottom_wrap_mm: 0, safety_margin_mm: 20, fabric_width_clearance_mm: 2, waste_pct: 0.15, heatseal_price_per_m: 0, bottom_bar_wrap_pct: 0.08, allow_rotation: false, heatseal_direction: 'none' as const };
   if (n.includes('triple'))
-    return { fabric_width_source: 'tube_width', formula_code: 'ROLLER_DROPS', pricing_output_uom: 'm', panel_multiplier: 3, tube_wrap_mm: 35, bottom_wrap_mm: 0, safety_margin_mm: 20, waste_pct: 0.15, heatseal_price_per_m: 0, bottom_bar_wrap_pct: 0.08, allow_rotation: false, heatseal_direction: 'none' as const };
+    return { fabric_width_source: 'tube_width', formula_code: 'ROLLER_DROPS', pricing_output_uom: 'm', panel_multiplier: 3, tube_wrap_mm: 35, bottom_wrap_mm: 0, safety_margin_mm: 20, fabric_width_clearance_mm: 2, waste_pct: 0.15, heatseal_price_per_m: 0, bottom_bar_wrap_pct: 0.08, allow_rotation: false, heatseal_direction: 'none' as const };
   if (n.includes('roller') || n.includes('zip'))
-    return { fabric_width_source: 'tube_width', formula_code: 'ROLLER_DROPS', pricing_output_uom: 'm', panel_multiplier: 1, tube_wrap_mm: 35, bottom_wrap_mm: 50, safety_margin_mm: 20, waste_pct: 0.15, heatseal_price_per_m: 5, bottom_bar_wrap_pct: 0.08, allow_rotation: true, heatseal_direction: 'horizontal' as const };
+    return { fabric_width_source: 'tube_width', formula_code: 'ROLLER_DROPS', pricing_output_uom: 'm', panel_multiplier: 1, tube_wrap_mm: 35, bottom_wrap_mm: 50, safety_margin_mm: 20, fabric_width_clearance_mm: 2, waste_pct: 0.15, heatseal_price_per_m: 5, bottom_bar_wrap_pct: 0.08, allow_rotation: true, heatseal_direction: 'horizontal' as const };
   if (n.includes('drapery') || n.includes('curtain') || n.includes('wave') || n.includes('ripple') || n.includes('pinch'))
     return { fabric_width_source: 'finished_width_x_fullness', formula_code: 'DRAPERY_PANELS', pricing_output_uom: 'm2', fullness_factor: 2.0, waste_pct: 0.10, allow_rotation: true, heatseal_direction: 'vertical' as const, bottom_hem_options: [0, 5, 10, 15] };
   return { fabric_width_source: 'finished_width', formula_code: 'AREA_BASED', pricing_output_uom: 'm2', waste_pct: 0.15, allow_rotation: true, heatseal_direction: 'none' as const };
@@ -71,6 +71,7 @@ function getEmptyRule(productTypeId: string, ptName: string): Partial<FabricRule
     tube_wrap_mm: defaults.tube_wrap_mm ?? 0,
     bottom_wrap_mm: defaults.bottom_wrap_mm ?? 0,
     safety_margin_mm: defaults.safety_margin_mm ?? 0,
+    fabric_width_clearance_mm: defaults.fabric_width_clearance_mm ?? 0,
     panel_multiplier: defaults.panel_multiplier ?? 1,
     heatseal_price_per_m: defaults.heatseal_price_per_m ?? 0,
     bottom_bar_wrap_pct: defaults.bottom_bar_wrap_pct ?? 0,
@@ -309,6 +310,13 @@ export default function FabricRulesSettings() {
                 <Input type="number" step={1} value={draft.safety_margin_mm ?? ''} onChange={e => {
                   setDraft({ ...draft, safety_margin_mm: parseNumberOrUndefined(e.target.value) });
                 }} className="text-xs" />
+              </div>
+              <div>
+                <Label className="text-xs">Width Clearance (mm)</Label>
+                <Input type="number" step={1} min={0} value={draft.fabric_width_clearance_mm ?? ''} onChange={e => {
+                  setDraft({ ...draft, fabric_width_clearance_mm: parseNumberOrUndefined(e.target.value) });
+                }} className="text-xs" />
+                <span className="text-[10px] text-gray-400">Fabric width = source − this (e.g. 2 = tube − 2mm)</span>
               </div>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3 pt-3 border-t border-blue-100">
@@ -565,6 +573,7 @@ export default function FabricRulesSettings() {
                                     <span>Panels: {rule.panel_multiplier}x</span>
                                     <span>Wraps: {rule.tube_wrap_mm}/{rule.bottom_wrap_mm} mm</span>
                                     {rule.safety_margin_mm > 0 && <span>Safety: {rule.safety_margin_mm}mm</span>}
+                                    {(rule.fabric_width_clearance_mm ?? 0) > 0 && <span>Width clearance: −{rule.fabric_width_clearance_mm}mm</span>}
                                     {(rule.heatseal_price_per_m ?? 0) > 0 && (
                                       <span className="text-amber-700 line-through" title="Deprecated — moved to Labor Rules">Heat Seal: ${rule.heatseal_price_per_m}/m</span>
                                     )}
