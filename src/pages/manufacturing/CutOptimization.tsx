@@ -241,16 +241,13 @@ export default function CutOptimization() {
 
       // Only keep tasks eligible to be listed in Cut Optimization:
       // - MO must be in production
-      // - task must have a calendar date (planned_start_at)
-      // - task must have operator assigned
+      // Calendar date and operator are optional and no longer required to list.
       const taskToMo: Record<string, string> = {};
       const taskToSol: Record<string, string | null> = {};
       const taskToLineLabel: Record<string, string | null> = {};
       matchedTasks.forEach((t: any) => {
         const isMoEligible = inProductionMoIds.has(t.manufacturing_order_id);
-        const hasCalendar = Boolean(t.planned_start_at);
-        const hasOperator = Boolean(t.assigned_to_user_id);
-        if (isMoEligible && hasCalendar && hasOperator) {
+        if (isMoEligible) {
           taskToMo[t.id] = t.manufacturing_order_id;
           taskToSol[t.id] = t.sales_order_line_id ?? null;
           const idx = t.sales_order_line_id ? lineIndexByMoSol[`${t.manufacturing_order_id}::${t.sales_order_line_id}`] : null;
@@ -568,7 +565,6 @@ export default function CutOptimization() {
         .in('id', taskIds);
 
       const notStarted = (tasks ?? []).filter((t: any) => t.status === 'pending');
-      const noOperator = (tasks ?? []).filter((t: any) => !t.assigned_to_user_id);
       const moIds = [...new Set((tasks ?? []).map((t: any) => t.manufacturing_order_id).filter(Boolean))];
       let moDraftCount = 0;
       if (moIds.length > 0) {
@@ -579,10 +575,7 @@ export default function CutOptimization() {
         moDraftCount = (mos ?? []).filter((m: any) => m.status !== 'in_production').length;
       }
 
-      if (noOperator.length > 0) {
-        addNotification({ type: 'warning', title: 'Operator Required', message: `Assign an operator to the cut station before marking as cut. Go to MO > Work Orders tab.` });
-        return;
-      }
+      // Operator is optional and no longer blocks marking as cut.
       if (moDraftCount > 0) {
         addNotification({
           type: 'warning',

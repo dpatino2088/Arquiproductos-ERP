@@ -490,11 +490,9 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
     });
   }, []);
   const materialsIncomplete = materialReadiness?.hasShortage === true;
-  const allOperatorsAssigned = useMemo(
-    () => tasks.length > 0 && tasks.every((t) => Boolean(t.assigned_to_user_id)),
-    [tasks],
-  );
-  const canOpenSchedule = !materialsIncomplete && allOperatorsAssigned;
+  // Operator assignment is optional and never blocks scheduling. Only a material
+  // shortage prevents opening the calendar.
+  const canOpenSchedule = !materialsIncomplete;
 
   useEffect(() => {
     if (!moId) return;
@@ -639,6 +637,22 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
     addNotification({ type: 'success', title: 'Assigned', message: `Assigned ${displayName} to workstation.` });
   }, [operators, moId, refetchTasks, addNotification]);
 
+  const handleAssignAll = useCallback(async (userId: string) => {
+    const displayName = operators.find(o => o.user_id === userId)?.display_name ?? null;
+    if (!displayName) return;
+    await supabase
+      .from('WorkOrderTasks')
+      .update({
+        assigned_to_user_id: userId,
+        assigned_to: displayName,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('manufacturing_order_id', moId)
+      .eq('deleted', false);
+    await refetchTasks();
+    addNotification({ type: 'success', title: 'Assigned', message: `Assigned ${displayName} to all workstations.` });
+  }, [operators, moId, refetchTasks, addNotification]);
+
   const handleSaveSchedule = useCallback(async (updates: { id: string; planned_start_at: string }[]) => {
     try {
       if (materialsIncomplete) {
@@ -646,14 +660,6 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
           type: 'warning',
           title: 'Material Ready Required',
           message: 'Complete material readiness before setting calendar dates.',
-        });
-        return;
-      }
-      if (!allOperatorsAssigned) {
-        addNotification({
-          type: 'warning',
-          title: 'Operator Assignment Required',
-          message: 'Assign all workstation operators before setting calendar dates.',
         });
         return;
       }
@@ -673,7 +679,7 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
     } catch {
       addNotification({ type: 'error', title: 'Error', message: 'Could not save schedule.' });
     }
-  }, [refetchTasks, addNotification, materialsIncomplete, allOperatorsAssigned]);
+  }, [refetchTasks, addNotification, materialsIncomplete]);
 
   if (loading) {
     return (
@@ -789,9 +795,7 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
                 addNotification({
                   type: 'warning',
                   title: 'Schedule Locked',
-                  message: materialsIncomplete
-                    ? 'Material Ready is required before setting calendar.'
-                    : 'Assign all operators before setting calendar.',
+                  message: 'Material Ready is required before setting calendar.',
                 });
                 return;
               }
@@ -819,6 +823,24 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
         {operators.length > 0 && workstationAssignments.length > 0 && (
           <div className="px-5 py-2.5 border-t border-gray-50 flex flex-wrap items-center gap-x-4 gap-y-2">
             <span className="text-[10px] text-gray-400 uppercase tracking-wide flex-shrink-0 mr-1">Operators</span>
+            <div className="inline-flex items-center gap-1.5">
+              <span className="text-[11px] text-primary font-semibold">All</span>
+              <select
+                value="__assign_all__"
+                onChange={e => {
+                  if (e.target.value === '__assign_all__') return;
+                  void handleAssignAll(e.target.value);
+                }}
+                title="Assign one operator to every workstation"
+                className="text-[11px] border border-primary/40 rounded px-1.5 py-0.5 bg-primary/5 text-primary focus:ring-1 focus:ring-primary focus:border-primary min-w-[120px]"
+              >
+                <option value="__assign_all__">Assign for all…</option>
+                {operators.map(op => (
+                  <option key={op.user_id} value={op.user_id}>{op.display_name}</option>
+                ))}
+              </select>
+            </div>
+            <span className="text-gray-200">|</span>
             {workstationAssignments.map((ws) => (
               <div key={ws.workCenterId} className="inline-flex items-center gap-1.5">
                 <span className="text-[11px] text-gray-500 font-medium">{ws.name}</span>
@@ -847,14 +869,6 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
             <span className="text-xs text-amber-700">
               Material shortage — only ready lines can be advanced.
               <button type="button" onClick={() => router.navigate(`/inventory/material-demand?mo_id=${moId}`)} className="underline font-medium ml-1">Material Demand</button>
-            </span>
-          </div>
-        )}
-        {!materialsIncomplete && !allOperatorsAssigned && (
-          <div className="px-5 py-2 border-t border-blue-100 bg-blue-50 flex items-center gap-2">
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 flex-shrink-0" />
-            <span className="text-xs text-blue-700">
-              Assign all workstation operators to unlock calendar scheduling.
             </span>
           </div>
         )}
@@ -923,9 +937,7 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
                       addNotification({
                         type: 'warning',
                         title: 'Schedule Locked',
-                        message: materialsIncomplete
-                          ? 'Material Ready is required before setting calendar.'
-                          : 'Assign all operators before setting calendar.',
+                        message: 'Material Ready is required before setting calendar.',
                       });
                       return;
                     }

@@ -119,28 +119,11 @@ export function useWorkOrderTasks(moId: string | null | undefined) {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
+  // Operator assignment is optional and never blocks starting/completing a task.
+  // Kept for call-site compatibility; always allows the action to proceed.
   const ensureTaskAssigned = useCallback(
-    async (taskId: string, actionLabel: string): Promise<boolean> => {
-      let assignedUserId = tasks.find((t) => t.id === taskId)?.assigned_to_user_id ?? null;
-      if (!assignedUserId) {
-        const { data } = await supabase
-          .from('WorkOrderTasks')
-          .select('assigned_to_user_id')
-          .eq('id', taskId)
-          .single();
-        assignedUserId = data?.assigned_to_user_id ?? null;
-      }
-      if (!assignedUserId) {
-        addNotification({
-          type: 'warning',
-          title: 'Operator Required',
-          message: `Assign an operator before ${actionLabel}.`,
-        });
-        return false;
-      }
-      return true;
-    },
-    [tasks, addNotification],
+    async (_taskId: string, _actionLabel: string): Promise<boolean> => true,
+    [],
   );
 
   const patchTask = useCallback((taskId: string, patch: Partial<WorkOrderTask>) => {
@@ -495,20 +478,14 @@ export function useWorkOrderTasks(moId: string | null | undefined) {
       if (!canAdvance) return;
 
       if (status === 'in_progress') {
+        // Schedule is optional: if there is no planned start, it defaults to now()
+        // (also enforced by the DB). Only an explicitly scheduled future date blocks.
         const plannedStart = currentTask?.planned_start_at ? new Date(currentTask.planned_start_at) : null;
-        if (!plannedStart) {
-          addNotification({
-            type: 'warning',
-            title: 'Schedule Required',
-            message: 'Set task schedule before starting this Work Order.',
-          });
-          return;
-        }
-        if (plannedStart.getTime() > Date.now()) {
+        if (plannedStart && plannedStart.getTime() > Date.now()) {
           addNotification({
             type: 'warning',
             title: 'Too Early to Start',
-            message: 'This task can only start on or after its scheduled date/time.',
+            message: 'This task is scheduled for a future date; it can only start on or after that date/time.',
           });
           return;
         }
@@ -528,6 +505,10 @@ export function useWorkOrderTasks(moId: string | null | undefined) {
     if (status === 'in_progress' && !currentTask?.started_at) {
       optimistic.started_at = now;
       dbUpdates.started_at = now;
+    }
+    if (status === 'in_progress' && !currentTask?.planned_start_at) {
+      optimistic.planned_start_at = now;
+      dbUpdates.planned_start_at = now;
     }
     if (status === 'completed') {
       optimistic.completed_at = now;

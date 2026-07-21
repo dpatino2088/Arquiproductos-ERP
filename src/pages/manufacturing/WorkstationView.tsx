@@ -460,28 +460,14 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
   const startTask = async (taskId: string) => {
     const now = new Date().toISOString();
     const task = tasks.find((t) => t.id === taskId);
+    // Schedule and operator are optional and never block. An explicitly
+    // scheduled future date is the only thing that prevents starting early.
     const plannedStart = task?.planned_start_at ? parseIsoDate(task.planned_start_at) : null;
-    if (!plannedStart) {
-      addNotification({
-        type: 'warning',
-        title: 'Schedule Required',
-        message: 'Set the calendar schedule before starting this task.',
-      });
-      return;
-    }
-    if (plannedStart.getTime() > Date.now()) {
+    if (plannedStart && plannedStart.getTime() > Date.now()) {
       addNotification({
         type: 'warning',
         title: 'Too Early to Start',
-        message: 'This task can only start on or after its scheduled date/time.',
-      });
-      return;
-    }
-    if (!task?.assigned_to_user_id) {
-      addNotification({
-        type: 'warning',
-        title: 'Operator Required',
-        message: 'Assign an operator before starting this task.',
+        message: 'This task is scheduled for a future date; it can only start on or after that date/time.',
       });
       return;
     }
@@ -491,6 +477,7 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
       .update({
         status: 'in_progress',
         started_at: now,
+        planned_start_at: task?.planned_start_at ?? now,
         updated_at: now,
       })
       .eq('id', taskId);

@@ -164,6 +164,8 @@ export default function InvoiceDetail() {
   const [creditReason, setCreditReason] = useState('');
   const [creatingCredit, setCreatingCredit] = useState(false);
   const [creatingRetention, setCreatingRetention] = useState(false);
+  const [retentionDialogOpen, setRetentionDialogOpen] = useState(false);
+  const [retentionAmount, setRetentionAmount] = useState('');
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [voidCreditTarget, setVoidCreditTarget] = useState<CreditNote | null>(null);
   const [voidCreditReason, setVoidCreditReason] = useState('');
@@ -518,13 +520,13 @@ export default function InvoiceDetail() {
     }
   };
 
-  const createRetentionNote = async () => {
+  const createRetentionNote = async (amount?: number) => {
     if (!invoiceId) return;
     setCreatingRetention(true);
     try {
-      const { data, error } = await supabase.rpc('create_tax_retention_note', {
-        p_invoice_id: invoiceId,
-      });
+      const rpcArgs: { p_invoice_id: string; p_amount?: number } = { p_invoice_id: invoiceId };
+      if (amount !== undefined && amount > 0) rpcArgs.p_amount = Number(amount.toFixed(2));
+      const { data, error } = await supabase.rpc('create_tax_retention_note', rpcArgs);
       if (error) throw error;
       const res = data as { ok?: boolean; reason?: string; amount?: number; credit_note_number?: string; already_exists?: boolean } | null;
       if (res?.ok) {
@@ -535,6 +537,8 @@ export default function InvoiceDetail() {
             ? 'La factura ya tenía una Nota de Retención de Impuesto.'
             : `${res.credit_note_number ?? 'Retención'} por ${fmt(Number(res.amount ?? 0), currency)} generada.`,
         });
+        setRetentionDialogOpen(false);
+        setRetentionAmount('');
       } else {
         addNotification({ type: 'error', title: 'Retención', message: `No se pudo registrar la retención (${res?.reason ?? 'desconocido'}).` });
       }
@@ -906,10 +910,18 @@ export default function InvoiceDetail() {
       actionItems.push({ label: 'Delete Draft', onClick: () => setDeleteConfirmOpen(true), danger: true });
     }
   }
-  if (isInternal && status !== 'void' && dealerIsRetentionAgent && !hasActiveRetention && Number(invoice.tax_total) > 0) {
+  if (isInternal && status !== 'void' && dealerIsRetentionAgent && !hasActiveRetention && Number(invoice.total) > 0) {
+    const retentionRate = Number(invoice.Dealers?.tax_retention_rate ?? 0.5);
+    const suggestedRetention = Number(invoice.tax_total) > 0
+      ? Number((Number(invoice.tax_total) * retentionRate).toFixed(2))
+      : Number((Number(invoice.total) * retentionRate).toFixed(2));
     actionItems.push({
       label: creatingRetention ? 'Registrando retención...' : 'Registrar retención de impuesto',
-      onClick: () => { if (!creatingRetention) createRetentionNote(); },
+      onClick: () => {
+        if (creatingRetention) return;
+        setRetentionAmount(suggestedRetention > 0 ? String(suggestedRetention) : '');
+        setRetentionDialogOpen(true);
+      },
     });
   }
   if (isInternal && (status === 'issued' || status === 'partial' || status === 'paid')) {
@@ -1475,6 +1487,54 @@ export default function InvoiceDetail() {
                 className="px-3 py-1.5 text-sm text-white bg-red-600 rounded-lg disabled:opacity-50"
               >
                 {updatingStatus ? 'Voiding...' : 'Void Invoice'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {retentionDialogOpen && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg p-4 w-full max-w-md">
+            <h4 className="text-sm font-semibold text-gray-900 mb-2">Registrar Retención de Impuesto (ITBMS)</h4>
+            <p className="text-xs text-gray-600 mb-3">
+              Registra el ITBMS retenido por el dealer como una Nota de Retención auditable.
+              El saldo retenido deja de considerarse deuda pendiente. Sugerido: 50% del ITBMS
+              de la factura. Ajusta el monto si el impuesto se facturó por separado.
+            </p>
+            <div className="space-y-2">
+              <input
+                type="number"
+                min={0.01}
+                step={0.01}
+                value={retentionAmount}
+                onChange={(e) => setRetentionAmount(e.target.value)}
+                placeholder="Monto retenido"
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+              />
+            </div>
+            <div className="flex justify-end gap-2 mt-3">
+              <button
+                type="button"
+                onClick={() => { setRetentionDialogOpen(false); setRetentionAmount(''); }}
+                className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const amt = Number(retentionAmount);
+                  if (!Number.isFinite(amt) || amt <= 0) {
+                    addNotification({ type: 'error', title: 'Retención', message: 'Ingresa un monto de retención válido.' });
+                    return;
+                  }
+                  createRetentionNote(amt);
+                }}
+                disabled={creatingRetention}
+                className="px-3 py-1.5 text-sm text-white bg-primary rounded-lg disabled:opacity-50"
+              >
+                {creatingRetention ? 'Registrando...' : 'Registrar retención'}
               </button>
             </div>
           </div>

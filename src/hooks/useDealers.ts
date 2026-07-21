@@ -48,6 +48,8 @@ export interface CreateDealerInput {
   billing_country?: string;
   notes?: string;
   logo_url?: string | null;
+  is_tax_retention_agent?: boolean;
+  tax_retention_rate?: number;
 }
 
 /**
@@ -79,6 +81,8 @@ export interface UpdateDealerInput {
   billing_country?: string;
   notes?: string;
   logo_url?: string | null;
+  is_tax_retention_agent?: boolean;
+  tax_retention_rate?: number;
 }
 
 /**
@@ -168,6 +172,8 @@ export function useDealers() {
       notes: input.notes?.trim() || null,
     };
     if (input.logo_url !== undefined) payload.logo_url = input.logo_url?.trim() || null;
+    if (input.is_tax_retention_agent !== undefined) payload.is_tax_retention_agent = Boolean(input.is_tax_retention_agent);
+    if (input.tax_retention_rate !== undefined) payload.tax_retention_rate = input.tax_retention_rate;
 
     const { data, error: insertError } = await supabase
       .from('Dealers')
@@ -222,6 +228,8 @@ export function useDealers() {
     if (input.billing_country !== undefined) payload.billing_country = input.billing_country?.trim() || null;
     if (input.notes !== undefined) payload.notes = input.notes?.trim() || null;
     if (input.logo_url !== undefined) payload.logo_url = input.logo_url?.trim() || null;
+    if (input.is_tax_retention_agent !== undefined) payload.is_tax_retention_agent = Boolean(input.is_tax_retention_agent);
+    if (input.tax_retention_rate !== undefined) payload.tax_retention_rate = input.tax_retention_rate;
 
     const { data, error: updateError } = await supabase
       .from('Dealers')
