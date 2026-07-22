@@ -317,6 +317,7 @@ export function getReadPermissionsForPath(pathname: string): string[] {
     '/inventory/material-demand': ['inventory.material_demand.read'],
     '/manufacturing/manufacturing-orders': ['manufacturing.mo.read'],
     '/manufacturing/work-orders': ['manufacturing.wo.read'],
+    '/manufacturing/workstations': ['manufacturing.wo.read'],
     '/manufacturing/calendar': ['manufacturing.calendar.read'],
     '/manufacturing/finished-goods': ['manufacturing.finished_goods.read'],
     '/manufacturing/cut-optimization': ['manufacturing.cutopt.read', 'manufacturing.wo.read'],

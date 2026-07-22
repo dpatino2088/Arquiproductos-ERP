@@ -202,7 +202,7 @@ const STATUS_LABEL_OVERRIDES: Partial<Record<StatusBadgeProps['type'], Record<st
     confirmed: 'Open',
     in_production: 'In Production',
     ready_for_delivery: 'Ready for Delivery',
-    delivered: 'Completed',
+    delivered: 'Delivered',
   },
   orderTracking: {
     pending_confirmation: 'Pending Confirmation',

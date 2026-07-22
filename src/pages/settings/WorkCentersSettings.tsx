@@ -2,17 +2,27 @@ import { useState } from 'react';
 import { useWorkCenters, type WorkCenter, type WorkCenterInput } from '../../hooks/useWorkCenters';
 import { usePermissions } from '../../hooks/usePermissions';
 import Input from '../../components/ui/Input';
-import Label from '../../components/ui/Label';
 import { Plus, Edit2, Trash2, X, Check, Factory } from 'lucide-react';
 
 const ROUTING_PRESETS: Record<string, { label: string; rule: Record<string, unknown> }> = {
-  'cut-profile': { label: 'Profiles', rule: { category_parent_names: ['Profiles'] } },
-  'cut-roll': { label: 'Rolls / Fabric', rule: { category_parent_names: ['Rolls'], part_roles: ['fabric'] } },
-  'assembly': { label: 'Assembly (all)', rule: { is_assembly: true } },
+  'cut-profile': { label: 'Profile Cut (linear profiles)', rule: { measure_basis: 'linear', category_parent_names: ['Profiles'] } },
+  'cut-roll': { label: 'Roll Cut (fabric / rolls)', rule: { part_roles: ['fabric'], category_parent_names: ['Rolls'] } },
+  'pick': { label: 'Pick — Hardware & Parts', rule: { is_pick: true } },
+  'assembly': { label: 'Assembly (all components)', rule: { is_assembly: true } },
+  'custom': { label: 'Custom', rule: {} },
 };
+
+/** Standard shop-floor workstations, created in one click for a new organization. */
+const DEFAULT_WORKSTATIONS: WorkCenterInput[] = [
+  { code: 'CUT-PROFILE', name: 'Profile Cut', description: 'Corte de perfiles: tubos, headbox, side channels, bottom bars', sequence: 10, is_active: true, routing_rule: { measure_basis: 'linear', category_parent_names: ['Profiles'] }, capacity_hours_per_day: 8 },
+  { code: 'CUT-ROLL', name: 'Roll Cut', description: 'Corte de telas y materiales en rollo: fabric, film, vinyl', sequence: 20, is_active: true, routing_rule: { part_roles: ['fabric'], category_parent_names: ['Rolls'] }, capacity_hours_per_day: 8 },
+  { code: 'PICK', name: 'Hardware & Parts', description: 'Pick list: cadenas, belts, accesorios, componentes para ensamblaje', sequence: 30, is_active: true, routing_rule: { is_pick: true }, capacity_hours_per_day: 8 },
+  { code: 'ASSEMBLY', name: 'Assembly', description: 'Ensamblaje final y empaque del producto', sequence: 40, is_active: true, routing_rule: { is_assembly: true }, capacity_hours_per_day: 8 },
+];
 
 function ruleToLabel(rule: Record<string, unknown>): string {
   if ((rule as any).is_assembly) return 'Assembly (all)';
+  if ((rule as any).is_pick) return 'Pick — Hardware & Parts';
   const parts: string[] = [];
   if (Array.isArray(rule.category_parent_names)) {
     parts.push((rule.category_parent_names as string[]).join(', '));
@@ -25,12 +35,28 @@ function ruleToLabel(rule: Record<string, unknown>): string {
 }
 
 export default function WorkCentersSettings() {
-  const { centers, loading, error, upsert, remove } = useWorkCenters();
+  const { centers, loading, error, upsert, insertMany, remove } = useWorkCenters();
   const { can } = usePermissions();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [form, setForm] = useState<WorkCenterInput>({ code: '', name: '', sequence: 0, is_active: true });
   const [saving, setSaving] = useState(false);
+  const [seeding, setSeeding] = useState(false);
+
+  const existingCodes = new Set(centers.map((c) => c.code.toUpperCase()));
+  const missingDefaults = DEFAULT_WORKSTATIONS.filter((d) => !existingCodes.has(d.code.toUpperCase()));
+
+  const handleSeedDefaults = async () => {
+    if (missingDefaults.length === 0) return;
+    setSeeding(true);
+    try {
+      await insertMany(missingDefaults);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Error creating standard workstations');
+    } finally {
+      setSeeding(false);
+    }
+  };
 
   const startEdit = (wc: WorkCenter) => {
     setEditingId(wc.id);
@@ -41,7 +67,7 @@ export default function WorkCentersSettings() {
   const startAdd = () => {
     setEditingId(null);
     setIsAdding(true);
-    setForm({ code: '', name: '', description: '', sequence: (centers.length + 1) * 10, is_active: true, routing_rule: {}, capacity_hours_per_day: 8 });
+    setForm({ code: '', name: '', description: '', sequence: (centers.length + 1) * 10, is_active: true, routing_rule: ROUTING_PRESETS['cut-profile'].rule, capacity_hours_per_day: 8 });
   };
 
   const cancel = () => { setEditingId(null); setIsAdding(false); };
@@ -76,14 +102,23 @@ export default function WorkCentersSettings() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-gray-900">Work Centers</h2>
-          <p className="text-sm text-gray-500 mt-1">Configure manufacturing workstations and routing rules.</p>
+          <h2 className="text-lg font-semibold text-gray-900">Workstations</h2>
+          <p className="text-sm text-gray-500 mt-1">Configure manufacturing workstations and their routing rules. Work Orders are generated per workstation.</p>
         </div>
         {!isAdding && can('settings.write') && (
-          <button type="button" onClick={startAdd} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-primary rounded hover:opacity-90">
-            <Plus className="h-3.5 w-3.5" />
-            Add Work Center
-          </button>
+          <div className="flex items-center gap-2">
+            {missingDefaults.length > 0 && (
+              <button type="button" onClick={handleSeedDefaults} disabled={seeding}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary border border-primary/40 rounded hover:bg-primary/5 disabled:opacity-50">
+                <Factory className="h-3.5 w-3.5" />
+                {seeding ? 'Creating…' : `Create standard workstations${centers.length === 0 ? '' : ` (${missingDefaults.length})`}`}
+              </button>
+            )}
+            <button type="button" onClick={startAdd} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-primary rounded hover:opacity-90">
+              <Plus className="h-3.5 w-3.5" />
+              Add Workstation
+            </button>
+          </div>
         )}
       </div>
 
@@ -182,9 +217,17 @@ export default function WorkCentersSettings() {
 
             {centers.length === 0 && !isAdding && (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={7} className="px-4 py-10 text-center text-gray-400">
                   <Factory className="h-8 w-8 mx-auto mb-2 text-gray-300" />
-                  <p className="text-sm">No work centers configured.</p>
+                  <p className="text-sm mb-1">No workstations configured.</p>
+                  <p className="text-xs text-gray-400 mb-4">Work Orders can't be generated until at least one workstation exists.</p>
+                  {can('settings.write') && (
+                    <button type="button" onClick={handleSeedDefaults} disabled={seeding}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-primary rounded hover:opacity-90 disabled:opacity-50">
+                      <Factory className="h-3.5 w-3.5" />
+                      {seeding ? 'Creating…' : 'Create standard workstations'}
+                    </button>
+                  )}
                 </td>
               </tr>
             )}

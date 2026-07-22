@@ -354,7 +354,7 @@ export default function InvoiceNew() {
       .eq('organization_id', activeOrganizationId)
       .eq('dealer_id', selectedDealerId)
       .eq('deleted', false)
-      .in('status', ['draft', 'confirmed', 'in_production', 'on_hold', 'delivered'])
+      .in('status', ['draft', 'confirmed', 'in_production', 'ready_for_delivery', 'on_hold', 'delivered'])
       .order('created_at', { ascending: false })
       .then(({ data, error }: { data: SalesOrderOption[] | null; error: unknown }) => {
         if (error) {

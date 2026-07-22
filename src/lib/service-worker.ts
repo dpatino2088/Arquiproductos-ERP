@@ -21,10 +21,13 @@ class ServiceWorkerManager {
     }
 
     try {
-      // In development, unregister any existing service workers to prevent conflicts with Vite HMR
+      // In development, unregister any existing service workers AND purge their
+      // Cache Storage. Unregistering alone leaves stale cached bundles behind,
+      // which makes edits appear to "never show up" even after a hard refresh.
       if (import.meta.env.DEV) {
-        logger.debug('Development mode: Unregistering any existing service workers');
+        logger.debug('Development mode: Unregistering service workers and clearing caches');
         await this.unregister();
+        await this.clearCaches();
         return;
       }
 

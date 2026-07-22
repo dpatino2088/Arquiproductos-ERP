@@ -15,6 +15,8 @@ type FinancialInfo = {
   balance_due: number;
   total_paid: number;
   invoice_status: string;
+  fully_invoiced: boolean;
+  delivery_financials_ok: boolean;
   has_delivery_override: boolean;
 };
 
@@ -30,46 +32,44 @@ export default function FinishedGoods() {
   useEffect(() => {
     const soIds = groups.map(g => g.sales_order_id).filter(Boolean) as string[];
     if (soIds.length === 0) { setFinancialBySoId({}); return; }
+    // Single source of truth: the canonical financial view (same computation the
+    // server-side delivery gate reads from). No mixing with a separate SO total.
     Promise.all([
       supabase
         .from('sales_order_financial_summary')
-        .select('sales_order_id, balance_due, total_paid, invoice_status')
+        .select('sales_order_id, ar_balance, total_paid, invoice_status, fully_invoiced, delivery_financials_ok')
         .in('sales_order_id', soIds),
-      supabase
-        .from('SalesOrders')
-        .select('id, total_amount')
-        .in('id', soIds),
       supabase
         .from('SalesOrderDeliveryOverrides')
         .select('sales_order_id')
         .in('sales_order_id', soIds)
         .eq('status', 'active')
         .eq('deleted', false),
-    ]).then(([summaryRes, soTotalsRes, overrideRes]) => {
+    ]).then(([summaryRes, overrideRes]) => {
       const summaryRows = (summaryRes.data ?? []) as {
         sales_order_id: string;
-        balance_due?: number | null;
+        ar_balance?: number | null;
         total_paid?: number | null;
         invoice_status?: string | null;
+        fully_invoiced?: boolean | null;
+        delivery_financials_ok?: boolean | null;
       }[];
-      const soTotalsRows = (soTotalsRes.data ?? []) as { id: string; total_amount?: number | null }[];
       const overrideRows = (overrideRes.data ?? []) as { sales_order_id: string }[];
 
       const summaryMap = new Map(summaryRows.map((r) => [r.sales_order_id, r]));
-      const soTotalMap = new Map(soTotalsRows.map((r) => [r.id, Number(r.total_amount ?? 0)]));
       const overrideSet = new Set(overrideRows.map((r) => r.sales_order_id));
       const next: Record<string, FinancialInfo> = {};
 
       soIds.forEach((soId) => {
         const summary = summaryMap.get(soId);
-        const fallbackTotal = soTotalMap.get(soId) ?? 0;
-        const balanceDue = Number(summary?.balance_due ?? fallbackTotal);
-        const totalPaid = Number(summary?.total_paid ?? 0);
-        const invoiceStatus = summary?.invoice_status ?? (fallbackTotal > 0 ? 'issued' : 'none');
+        // No invoice row yet means nothing is invoiced → not fully invoiced.
         next[soId] = {
-          balance_due: Math.max(balanceDue, 0),
-          total_paid: totalPaid,
-          invoice_status: invoiceStatus,
+          // Collectable outstanding on issued invoices (immune to un-invoiced rounding penny).
+          balance_due: Math.max(Number(summary?.ar_balance ?? 0), 0),
+          total_paid: Number(summary?.total_paid ?? 0),
+          invoice_status: summary?.invoice_status ?? 'none',
+          fully_invoiced: Boolean(summary?.fully_invoiced),
+          delivery_financials_ok: Boolean(summary?.delivery_financials_ok),
           has_delivery_override: overrideSet.has(soId),
         };
       });
@@ -210,11 +210,16 @@ function FinishedGoodsSOCard({
   financial?: FinancialInfo;
 }) {
   const balanceDue = Number(financial?.balance_due ?? 0);
+  const fullyInvoiced = Boolean(financial?.fully_invoiced);
+  const deliveryFinancialsOk = Boolean(financial?.delivery_financials_ok);
   const paymentComplete = balanceDue <= 0;
   const hasDeliveryOverride = Boolean(financial?.has_delivery_override);
   const deliveryBlocked = group.hasServiceMOOnly
     ? false
-    : !!financial && balanceDue > 0 && !hasDeliveryOverride;
+    : !!financial && !deliveryFinancialsOk && !hasDeliveryOverride;
+  const deliveryBlockedTitle = !fullyInvoiced
+    ? 'Delivery blocked: the sales order is not fully invoiced.'
+    : `Delivery blocked: balance due is $${balanceDue.toFixed(2)}. The sales order must be fully paid or issue an override.`;
   const paymentLabel = financial
     ? paymentComplete ? 'Paid'
     : financial.total_paid > 0 ? 'Partial Payment'
@@ -283,7 +288,7 @@ function FinishedGoodsSOCard({
                 if (deliveryBlocked) return;
                 router.navigate(withReturnTo(`/manufacturing/delivery-notes/new?so_id=${group.sales_order_id}`));
               }}
-              title={deliveryBlocked ? `Delivery blocked: balance due is $${balanceDue.toFixed(2)}. Financials must settle to 0.00 or issue an override.` : undefined}
+              title={deliveryBlocked ? deliveryBlockedTitle : undefined}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg ${
                 deliveryBlocked
                   ? 'bg-gray-200 text-gray-500 cursor-not-allowed'

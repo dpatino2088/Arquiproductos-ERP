@@ -3,6 +3,7 @@ import { supabase, initSessionContext } from '../../lib/supabase/client';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useUIStore } from '../../stores/ui-store';
 import { useAccessContext } from '../../hooks/useAccessContext';
+import { useGranularAccess } from '../../hooks/usePermissions';
 import DetailPageLayout from '../../components/shared/DetailPageLayout';
 import StatusBadge from '../../components/shared/StatusBadge';
 import TimelineView from '../../components/shared/TimelineView';
@@ -13,7 +14,7 @@ import { createProposalFromQuote } from '../../hooks/useProposals';
 import { useSOActions } from '../../hooks/useSOActions';
 import { useAuth } from '../../hooks/useAuth';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { FileText, ShoppingBag, Edit, ArrowLeft, ShieldCheck, Unlock, Copy } from 'lucide-react';
+import { FileText, ShoppingBag, Edit, ArrowLeft, ShieldCheck, Unlock, Copy, RotateCcw } from 'lucide-react';
 import { duplicateQuote } from '../../hooks/useQuotes';
 import DuplicateQuoteModal, { type DuplicateQuoteMode } from '../../components/sales/DuplicateQuoteModal';
 import { getAppUsersDisplayNames } from '../../lib/appUsersDisplayNames';
@@ -146,6 +147,7 @@ interface SalesOrder {
 
 interface SalesOrderFinancialSummary {
   total_paid: number | null;
+  invoice_count: number | null;
 }
 
 interface ManufacturingOrder {
@@ -190,6 +192,9 @@ export default function QuoteDetail() {
   const { activeOrganizationId, loading: orgLoading } = useOrganizationContext();
   const { user } = useAuth();
   const { isPortal, isInternal } = useAccessContext();
+  // "Revert to Draft" is allowed for org users with the quotes edit permission
+  // (superadmin/admin have it, plus any internal user granted the permission).
+  const { canEdit: canEditQuotesPerm } = useGranularAccess('quotes');
   const addNotification = useUIStore((s) => s.addNotification);
   const { registerSubmodules } = useSubmoduleNav();
 
@@ -336,7 +341,7 @@ export default function QuoteDetail() {
               .order('created_at', { ascending: false }),
             supabase
               .from('sales_order_financial_summary')
-              .select('total_paid')
+              .select('total_paid, invoice_count')
               .eq('sales_order_id', soData.id)
               .maybeSingle(),
           ]);
@@ -493,6 +498,37 @@ export default function QuoteDetail() {
     }
   }, [quoteId, user, acting, addNotification, refetch]);
 
+  const [showRevertDialog, setShowRevertDialog] = useState(false);
+
+  const handleRevertToDraft = useCallback(async () => {
+    if (!quoteId || acting) return;
+    setActing(true);
+    try {
+      const { data, error } = await supabase.rpc('revert_quote_to_draft', {
+        p_quote_id: quoteId,
+        p_user_id: user?.id ?? null,
+        p_user_name: user?.name ?? null,
+      });
+      if (error) throw error;
+      const result = data as { ok?: boolean; message?: string } | null;
+      if (result && result.ok === false) {
+        throw new Error(result.message || 'Cannot revert this quote to draft.');
+      }
+      addNotification({
+        type: 'success',
+        title: 'Reverted to Draft',
+        message: 'The quote is back in Draft and its sales order was removed.',
+      });
+      setShowRevertDialog(false);
+      refetch();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to revert quote to draft';
+      addNotification({ type: 'error', title: 'Error', message: msg });
+    } finally {
+      setActing(false);
+    }
+  }, [quoteId, user, acting, addNotification, refetch]);
+
   const handleDuplicateConfirm = useCallback(async (mode: DuplicateQuoteMode, recalculate: boolean) => {
     if (!quote) return;
     setDuplicatingLoading(true);
@@ -557,6 +593,18 @@ export default function QuoteDetail() {
   const canCreateSO = status === 'approved' && measuresConfirmed && !salesOrder;
   const canEditQuote = !measuresConfirmed && status !== 'converted';
   const canDuplicate = !!quote;
+  // Undo a mistaken approval: internal user with quotes permission, approved quote,
+  // and nothing downstream (no invoice, no payment, no MO). The RPC re-checks all.
+  const hasInvoice = (salesOrderFinancial?.invoice_count ?? 0) > 0;
+  const hasPayment = (salesOrderFinancial?.total_paid ?? 0) > 0;
+  const hasMO = mos.length > 0;
+  const canRevertToDraft =
+    isInternal &&
+    canEditQuotesPerm &&
+    status === 'approved' &&
+    !hasInvoice &&
+    !hasPayment &&
+    !hasMO;
   const currentMfgStepIndex = useMemo(() => {
     if (mos.length === 0) {
       return -1;
@@ -640,6 +688,21 @@ export default function QuoteDetail() {
           </button>
         );
       }
+      if (canRevertToDraft) {
+        btns.push(
+          <button
+            key="revert-draft"
+            type="button"
+            onClick={() => setShowRevertDialog(true)}
+            disabled={acting}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-amber-700 bg-white border border-amber-300 rounded-lg hover:bg-amber-50 disabled:opacity-50"
+            title="Revert this quote to Draft (only if approved by mistake and nothing is invoiced)"
+          >
+            <RotateCcw className="w-4 h-4" />
+            Revert to Draft
+          </button>
+        );
+      }
     }
     if (canEditQuote) {
       btns.push(
@@ -673,7 +736,7 @@ export default function QuoteDetail() {
     }
     if (btns.length === 0) return null;
     return <div className="flex items-center gap-2">{btns}</div>;
-  }, [hasRedirectBack, isPortal, quoteId, canCreateProposal, canCreateSO, canConfirmMeasures, canReopenMeasures, canEditQuote, canDuplicate, acting, handleCreateProposal, handleCreateSalesOrder, handleReopenMeasures, onBackContextual]);
+  }, [hasRedirectBack, isPortal, quoteId, canCreateProposal, canCreateSO, canConfirmMeasures, canReopenMeasures, canEditQuote, canDuplicate, canRevertToDraft, acting, handleCreateProposal, handleCreateSalesOrder, handleReopenMeasures, onBackContextual]);
 
   if (!quoteId) {
     return (
@@ -1274,6 +1337,46 @@ export default function QuoteDetail() {
                 className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50"
               >
                 {acting ? 'Confirming...' : 'Confirm for Production'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showRevertDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowRevertDialog(false)} />
+          <div className="relative bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-amber-100">
+                <RotateCcw className="w-5 h-5 text-amber-600" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900">Revert to Draft</h3>
+            </div>
+            <p className="text-sm text-gray-600 mb-2">
+              Use this only if the quote was approved by mistake. It will be moved back to
+              <strong> Draft</strong> so it can be edited again.
+            </p>
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-5">
+              <ul className="text-sm text-amber-700 space-y-1 list-disc list-inside">
+                <li>The auto-created <strong>Sales Order will be removed</strong></li>
+                <li>Only allowed when there are <strong>no invoices, payments, or manufacturing orders</strong></li>
+              </ul>
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowRevertDialog(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleRevertToDraft}
+                disabled={acting}
+                className="px-4 py-2 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50"
+              >
+                {acting ? 'Reverting...' : 'Revert to Draft'}
               </button>
             </div>
           </div>

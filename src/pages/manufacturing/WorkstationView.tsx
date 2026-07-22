@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase/client';
 import { useWorkCenters, type WorkCenter } from '../../hooks/useWorkCenters';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAuth } from '../../hooks/useAuth';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
+import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
+import { useFilteredMfgSubmodules } from './manufacturingSubmodules';
 import { useUIStore } from '../../stores/ui-store';
 import StatusBadge from '../../components/shared/StatusBadge';
 import PanelCutDetail from '../../components/manufacturing/PanelCutDetail';
@@ -20,7 +23,6 @@ import {
   Scissors,
   Box,
   User,
-  AlertTriangle,
 } from 'lucide-react';
 
 interface FabricRuleInfo {
@@ -73,6 +75,10 @@ interface TaskWithMO {
   customer_name: string;
   product_name: string;
   due_date: string | null;
+  sol_id: string | null;
+  line_label: string;
+  line_area: string | null;
+  line_position: string | null;
   lines: TaskLine[];
   siblingStatuses?: { code: string; status: string }[];
 }
@@ -91,13 +97,38 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
   const { user } = useAuth();
   const { role } = useCurrentOrgRole();
   const isOperator = role === 'operator' || role === 'operator_member';
+  const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
+  const filteredSubmodules = useFilteredMfgSubmodules();
   const [selectedCenter, setSelectedCenter] = useState<string | null>(workCenterId ?? null);
-  const [tasks, setTasks] = useState<TaskWithMO[]>([]);
-  const [loadingTasks, setLoadingTasks] = useState(false);
-  const [expandedTask, setExpandedTask] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  // Cut Optimization reads the same WorkOrderTaskLines; drop its cache so it
+  // reflects completions/starts made here (refetchOnMount is disabled globally).
+  const syncCutCache = useCallback(() => {
+    queryClient.removeQueries({ queryKey: ['cut-pending'] });
+  }, [queryClient]);
+
+  const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
+  const toggleTask = useCallback((taskId: string) => {
+    setExpandedTasks((prev) => {
+      const next = new Set(prev);
+      if (next.has(taskId)) next.delete(taskId); else next.add(taskId);
+      return next;
+    });
+  }, []);
+  const [expandedMOs, setExpandedMOs] = useState<Set<string>>(new Set());
   const [fabricRules, setFabricRules] = useState<FabricRuleInfo[]>([]);
   const [selectedFabricLineId, setSelectedFabricLineId] = useState<string | null>(null);
+  const [startingMO, setStartingMO] = useState<string | null>(null);
   const addNotification = useUIStore((s) => s.addNotification);
+
+  useEffect(() => {
+    const currentPath = window.location.pathname;
+    if (currentPath.startsWith('/manufacturing')) registerSubmodules('Manufacturing', filteredSubmodules);
+    return () => {
+      const path = window.location.pathname;
+      if (!path.startsWith('/manufacturing')) clearSubmoduleNav();
+    };
+  }, [registerSubmodules, clearSubmoduleNav, filteredSubmodules]);
 
   useEffect(() => {
     if (workCenterId) setSelectedCenter(workCenterId);
@@ -109,21 +140,21 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
     }
   }, [centers, selectedCenter]);
 
-  const fetchTasks = useCallback(async () => {
-    if (!selectedCenter || !activeOrganizationId) return;
-    setLoadingTasks(true);
-    try {
-      const { data: taskData, error: tErr } = await supabase
-        .from('WorkOrderTasks')
-        .select('id, manufacturing_order_id, sequence, status, assigned_to, assigned_to_user_id, started_at, completed_at, planned_start_at, planned_end_at')
-        .eq('work_center_id', selectedCenter)
-        .eq('organization_id', activeOrganizationId)
-        .eq('deleted', false)
-        .in('status', ['pending', 'in_progress'])
-        .order('sequence');
+  const fetchTasks = useCallback(async (): Promise<TaskWithMO[]> => {
+    if (!selectedCenter || !activeOrganizationId) return [];
+    const { data: taskData, error: tErr } = await supabase
+      .from('WorkOrderTasks')
+      .select('id, manufacturing_order_id, sales_order_line_id, sequence, status, assigned_to, assigned_to_user_id, started_at, completed_at, planned_start_at, planned_end_at')
+      .eq('work_center_id', selectedCenter)
+      .eq('organization_id', activeOrganizationId)
+      .eq('deleted', false)
+      .in('status', ['pending', 'in_progress'])
+      .order('sequence');
 
-      if (tErr) throw new Error(tErr.message);
-      if (!taskData || taskData.length === 0) { setTasks([]); setLoadingTasks(false); return; }
+    if (tErr) throw new Error(tErr.message);
+    if (!taskData || taskData.length === 0) return [];
+
+    {
 
       const moIds = [...new Set(taskData.map((t: any) => t.manufacturing_order_id))];
       const { data: moData } = await supabase
@@ -154,6 +185,20 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
           for (const so of (soData ?? [])) {
             if (so.customer_id) customerMap[so.id] = custLookup[so.customer_id] ?? 'N/A';
           }
+        }
+      }
+
+      // Resolve which sales-order line each task belongs to (area / position / variant)
+      const taskSolIds = [...new Set(taskData.map((t: any) => t.sales_order_line_id).filter(Boolean))] as string[];
+      const solInfoMap: Record<string, { label: string; area: string | null; position: string | null }> = {};
+      if (taskSolIds.length > 0) {
+        const { data: solInfoRows } = await supabase
+          .from('SaleOrderLines')
+          .select('id, description, variant_name, collection_name, product_type, area, position')
+          .in('id', taskSolIds);
+        for (const s of (solInfoRows ?? []) as any[]) {
+          const label = s.variant_name || s.description || s.collection_name || s.product_type || 'Line';
+          solInfoMap[s.id] = { label, area: s.area ?? null, position: s.position ?? null };
         }
       }
 
@@ -240,6 +285,7 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
       const result: TaskWithMO[] = taskData.map((t: any) => {
         const mo = moMap[t.manufacturing_order_id];
         const soId = mo?.sales_order_id;
+        const solInfo = t.sales_order_line_id ? solInfoMap[t.sales_order_line_id] : null;
         return {
           id: t.id,
           manufacturing_order_id: t.manufacturing_order_id,
@@ -253,8 +299,12 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
           planned_end_at: t.planned_end_at ?? null,
           mo_number: mo?.manufacturing_order_no ?? '—',
           customer_name: soId ? (customerMap[soId] ?? 'N/A') : 'N/A',
-          product_name: mo?.product_name ?? '—',
+          product_name: solInfo?.label ?? mo?.product_name ?? '—',
           due_date: soId ? (dueDateMap[soId] ?? null) : null,
+          sol_id: t.sales_order_line_id ?? null,
+          line_label: solInfo?.label ?? (mo?.product_name ?? '—'),
+          line_area: solInfo?.area ?? null,
+          line_position: solInfo?.position ?? null,
           lines: linesByTask[t.id] ?? [],
         };
       });
@@ -283,15 +333,52 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
         }
       }
 
-      setTasks(result);
-    } catch {
-      setTasks([]);
-    } finally {
-      setLoadingTasks(false);
+      return result;
     }
-  }, [selectedCenter, activeOrganizationId]);
+  }, [selectedCenter, activeOrganizationId, centers]);
 
-  useEffect(() => { fetchTasks(); }, [fetchTasks]);
+  const tasksQueryKey = useMemo(
+    () => ['workstation-tasks', activeOrganizationId, selectedCenter] as const,
+    [activeOrganizationId, selectedCenter],
+  );
+
+  const {
+    data: tasks = [],
+    isLoading: loadingTasks,
+    refetch: refetchTasksQuery,
+  } = useQuery({
+    queryKey: tasksQueryKey,
+    queryFn: fetchTasks,
+    enabled: !!selectedCenter && !!activeOrganizationId,
+  });
+
+  const refetchTasks = useCallback(async () => {
+    await refetchTasksQuery();
+  }, [refetchTasksQuery]);
+
+  // Optimistically flip line/task state in the cache so the UI responds
+  // instantly; the DB write happens in the background and reverts on error.
+  const patchLineInCache = useCallback((taskId: string, lineId: string, completed: boolean) => {
+    queryClient.setQueryData<TaskWithMO[]>(tasksQueryKey, (old) =>
+      old?.map((t) => t.id === taskId
+        ? { ...t, lines: t.lines.map((l) => (l.id === lineId ? { ...l, completed } : l)) }
+        : t),
+    );
+  }, [queryClient, tasksQueryKey]);
+
+  const patchAllLinesInCache = useCallback((taskId: string, completed: boolean) => {
+    queryClient.setQueryData<TaskWithMO[]>(tasksQueryKey, (old) =>
+      old?.map((t) => t.id === taskId
+        ? { ...t, lines: t.lines.map((l) => ({ ...l, completed })) }
+        : t),
+    );
+  }, [queryClient, tasksQueryKey]);
+
+  const patchTaskStatusInCache = useCallback((taskId: string, status: TaskWithMO['status']) => {
+    queryClient.setQueryData<TaskWithMO[]>(tasksQueryKey, (old) =>
+      old?.map((t) => (t.id === taskId ? { ...t, status } : t)),
+    );
+  }, [queryClient, tasksQueryKey]);
 
   useEffect(() => {
     if (!activeOrganizationId) return;
@@ -384,77 +471,71 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
   }, [addNotification]);
 
   const toggleLine = async (lineId: string, completed: boolean) => {
+    // Resolve the task/line from local cache — no extra round-trips for guards.
+    const task = tasks.find((t) => t.lines.some((l) => l.id === lineId));
+    if (!task) return;
+
+    if (completed && task.status !== 'in_progress') {
+      addNotification({
+        type: 'warning',
+        title: 'Task Not Started',
+        message: 'Press Play to start this task before checking lines.',
+      });
+      return;
+    }
+
+    // Instant UI feedback.
+    patchLineInCache(task.id, lineId, completed);
+
     if (completed) {
-      const { data: lineRowForGuard } = await supabase
-        .from('WorkOrderTaskLines')
-        .select('task_id')
-        .eq('id', lineId)
-        .single();
-      if (lineRowForGuard?.task_id) {
-        const { data: taskGuard } = await supabase
-          .from('WorkOrderTasks')
-          .select('status')
-          .eq('id', lineRowForGuard.task_id)
-          .single();
-        if (taskGuard?.status !== 'in_progress') {
-          addNotification({
-            type: 'warning',
-            title: 'Task Not Started',
-            message: 'Press Play to start this task before checking lines.',
-          });
-          return;
-        }
-        const lineTask = tasks.find((t) => t.id === lineRowForGuard.task_id);
-        if (!lineTask?.assigned_to_user_id) {
-          addNotification({
-            type: 'warning',
-            title: 'Operator Required',
-            message: 'Assign an operator before completing line items.',
-          });
-          return;
-        }
-        const lineReady = await ensureLineMaterialsReady(lineId);
-        if (!lineReady) return;
+      const lineReady = await ensureLineMaterialsReady(lineId);
+      if (!lineReady) {
+        patchLineInCache(task.id, lineId, false);
+        return;
       }
     }
+
     const now = new Date().toISOString();
-    await supabase
+    const { error } = await supabase
       .from('WorkOrderTaskLines')
       .update({ completed, completed_at: completed ? now : null })
       .eq('id', lineId);
-
-    if (completed) {
-      const { data: lineRow } = await supabase
-        .from('WorkOrderTaskLines')
-        .select('task_id')
-        .eq('id', lineId)
-        .single();
-
-      if (lineRow) {
-        const { data: siblings } = await supabase
-          .from('WorkOrderTaskLines')
-          .select('id, completed')
-          .eq('task_id', lineRow.task_id);
-
-        const allDone = siblings?.every((l: { id: string; completed: boolean }) =>
-          l.id === lineId ? true : l.completed,
-        );
-        if (allDone) {
-          const { data: taskRow } = await supabase
-            .from('WorkOrderTasks')
-            .select('status')
-            .eq('id', lineRow.task_id)
-            .single();
-
-          if (taskRow?.status === 'in_progress') {
-            await completeTask(lineRow.task_id);
-            return;
-          }
-        }
-      }
+    if (error) {
+      patchLineInCache(task.id, lineId, !completed); // revert
+      addNotification({ type: 'error', title: 'Update Failed', message: error.message });
+      return;
     }
 
-    await fetchTasks();
+    // If this completes the last line, auto-complete the task.
+    const willAllBeDone = completed && task.lines.every((l) => (l.id === lineId ? true : l.completed));
+    if (willAllBeDone) {
+      await completeTask(task.id);
+      return;
+    }
+    syncCutCache();
+  };
+
+  // Bulk-toggle every line of a task (the "Select all" header checkbox).
+  const toggleAllLines = async (task: TaskWithMO, checked: boolean) => {
+    if (task.status !== 'in_progress' || task.lines.length === 0) return;
+    patchAllLinesInCache(task.id, checked); // instant UI
+    const now = new Date().toISOString();
+    const ids = task.lines.map((l) => l.id);
+    const { error } = await supabase
+      .from('WorkOrderTaskLines')
+      .update({ completed: checked, completed_at: checked ? now : null })
+      .in('id', ids);
+    if (error) {
+      patchAllLinesInCache(task.id, !checked); // revert
+      addNotification({ type: 'error', title: 'Update Failed', message: error.message });
+      return;
+    }
+    if (checked) {
+      // All lines done → complete the task, mirroring single-line behavior.
+      await completeTask(task.id);
+      return;
+    }
+    syncCutCache();
   };
 
   const startTask = async (taskId: string) => {
@@ -472,7 +553,9 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
       return;
     }
 
-    await supabase
+    patchTaskStatusInCache(taskId, 'in_progress'); // instant UI
+
+    const { error } = await supabase
       .from('WorkOrderTasks')
       .update({
         status: 'in_progress',
@@ -481,12 +564,16 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
         updated_at: now,
       })
       .eq('id', taskId);
+    if (error) {
+      patchTaskStatusInCache(taskId, 'pending'); // revert
+      addNotification({ type: 'error', title: 'Start Failed', message: error.message });
+      return;
+    }
 
     if (task) {
       await advanceMOOnTaskStart(task.manufacturing_order_id);
     }
-
-    await fetchTasks();
+    syncCutCache();
   };
 
   const completeTask = async (taskId: string) => {
@@ -535,7 +622,8 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
       }
     }
 
-    await fetchTasks();
+    await refetchTasks();
+    syncCutCache();
   };
 
   const currentCenter = centers.find((c) => c.id === selectedCenter);
@@ -550,6 +638,67 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
 
   const pendingCount = filteredTasks.filter((t) => t.status === 'pending').length;
   const inProgressCount = filteredTasks.filter((t) => t.status === 'in_progress').length;
+
+  // Returns how many pending tasks in a given MO can be started right now
+  // (a future-scheduled date is the only thing that defers a start).
+  const countStartableInMO = useCallback((moId: string) => {
+    return filteredTasks.filter((t) =>
+      t.manufacturing_order_id === moId &&
+      t.status === 'pending' &&
+      !(t.planned_start_at && parseIsoDate(t.planned_start_at).getTime() > Date.now())
+    ).length;
+  }, [filteredTasks]);
+
+  // Start every startable task within a single Manufacturing Order.
+  const startMOTasks = useCallback(async (moId: string) => {
+    const groupStartable = filteredTasks.filter((t) =>
+      t.manufacturing_order_id === moId &&
+      t.status === 'pending' &&
+      !(t.planned_start_at && parseIsoDate(t.planned_start_at).getTime() > Date.now())
+    );
+    if (groupStartable.length === 0) return;
+    setStartingMO(moId);
+    try {
+      const now = new Date().toISOString();
+      const ids = groupStartable.map((t) => t.id);
+      const { error } = await supabase
+        .from('WorkOrderTasks')
+        .update({ status: 'in_progress', started_at: now, updated_at: now })
+        .in('id', ids);
+      if (error) {
+        addNotification({ type: 'error', title: 'Start Failed', message: error.message });
+        return;
+      }
+      await advanceMOOnTaskStart(moId);
+      addNotification({ type: 'success', title: 'Tasks Started', message: `${ids.length} task(s) started.` });
+      await refetchTasks();
+      syncCutCache();
+    } finally {
+      setStartingMO(null);
+    }
+  }, [filteredTasks, addNotification, refetchTasks]);
+
+  // Group tasks by Manufacturing Order so long, multi-project queues stay compact.
+  const moGroups = useMemo(() => {
+    const map = new Map<string, { moId: string; moNumber: string; customerName: string; tasks: TaskWithMO[] }>();
+    for (const t of filteredTasks) {
+      let g = map.get(t.manufacturing_order_id);
+      if (!g) {
+        g = { moId: t.manufacturing_order_id, moNumber: t.mo_number, customerName: t.customer_name, tasks: [] };
+        map.set(t.manufacturing_order_id, g);
+      }
+      g.tasks.push(t);
+    }
+    return [...map.values()];
+  }, [filteredTasks]);
+
+  const toggleMO = useCallback((moId: string) => {
+    setExpandedMOs((prev) => {
+      const next = new Set(prev);
+      if (next.has(moId)) next.delete(moId); else next.add(moId);
+      return next;
+    });
+  }, []);
 
   if (centersLoading) {
     return (
@@ -589,11 +738,13 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
       </div>
 
       {currentCenter && (
-        <div className="flex items-center gap-4 text-sm text-gray-500">
-          <span className="font-medium text-gray-900">{currentCenter.name}</span>
-          <span>{pendingCount} pending</span>
-          <span>{inProgressCount} in progress</span>
-          <span>{filteredTasks.length} total</span>
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-4 text-sm text-gray-500">
+            <span className="font-medium text-gray-900">{currentCenter.name}</span>
+            <span>{pendingCount} pending</span>
+            <span>{inProgressCount} in progress</span>
+            <span>{filteredTasks.length} total</span>
+          </div>
         </div>
       )}
 
@@ -607,65 +758,126 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
           <p className="text-sm text-gray-500">No pending tasks at this station.</p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {filteredTasks.map((task) => {
-            const completedCount = task.lines.filter((l) => l.completed).length;
-            const totalCount = task.lines.length;
-            const isExpanded = expandedTask === task.id;
+        <div className="space-y-4">
+          {moGroups.map((group) => {
+            const moExpanded = expandedMOs.has(group.moId);
+            const moPending = group.tasks.filter((t) => t.status === 'pending').length;
+            const moInProgress = group.tasks.filter((t) => t.status === 'in_progress').length;
+            const moPartsDone = group.tasks.reduce((s, t) => s + t.lines.filter((l) => l.completed).length, 0);
+            const moPartsTotal = group.tasks.reduce((s, t) => s + t.lines.length, 0);
+            const moPct = moPartsTotal > 0 ? Math.round((moPartsDone / moPartsTotal) * 100) : 0;
+            const moCompleted = group.tasks.every((t) => t.status === 'completed');
+            const moStarted = moInProgress > 0 || moPartsDone > 0 || moCompleted;
 
             return (
-              <div key={task.id} className="border border-gray-200 rounded-lg bg-white overflow-hidden">
-                <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100">
-                  <div className="flex items-center gap-3">
-                    <button type="button" onClick={() => setExpandedTask(isExpanded ? null : task.id)} className="text-gray-500">
+              <div key={group.moId} className={`border rounded-xl bg-white overflow-hidden border-l-4 transition-colors ${
+                moCompleted ? 'border-l-green-500 border-gray-200'
+                : moStarted ? 'border-l-blue-500 border-gray-200'
+                : 'border-l-gray-200 border-gray-200'
+              }`}>
+                {/* MO group header */}
+                <div
+                  className={`flex items-center justify-between gap-4 px-5 py-3.5 hover:bg-gray-50/70 cursor-pointer ${moStarted ? '' : 'bg-gray-50/30'}`}
+                  onClick={() => toggleMO(group.moId)}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    {moExpanded
+                      ? <ChevronDown className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                      : <ChevronRight className="h-4 w-4 text-gray-400 flex-shrink-0" />}
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); router.navigate(`/manufacturing/manufacturing-orders/${group.moId}`); }}
+                      className={`font-semibold text-sm hover:underline flex-shrink-0 ${moStarted ? 'text-primary' : 'text-gray-400'}`}
+                    >
+                      {group.moNumber}
+                    </button>
+                    {!moStarted && (
+                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 border border-gray-200 flex-shrink-0">
+                        Not started
+                      </span>
+                    )}
+                    {group.customerName && group.customerName !== 'N/A' && (
+                      <span className="text-xs text-gray-400 truncate">{group.customerName}</span>
+                    )}
+                    <span className="text-[11px] text-gray-400 flex-shrink-0">
+                      {group.tasks.length} {group.tasks.length === 1 ? 'line' : 'lines'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 flex-shrink-0">
+                    {(() => {
+                      const moStartable = countStartableInMO(group.moId);
+                      if (moStartable === 0) return null;
+                      return (
+                        <button
+                          type="button"
+                          disabled={startingMO === group.moId}
+                          onClick={(e) => { e.stopPropagation(); void startMOTasks(group.moId); }}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-60 transition-colors"
+                          title="Start all pending tasks in this MO"
+                        >
+                          {startingMO === group.moId ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+                          Start All ({moStartable})
+                        </button>
+                      );
+                    })()}
+                    {moInProgress > 0 && <span className="hidden sm:inline text-[11px] text-indigo-600">{moInProgress} in progress</span>}
+                    {moPending > 0 && <span className="hidden sm:inline text-[11px] text-gray-400">{moPending} pending</span>}
+                    <span className="text-[11px] text-gray-500 tabular-nums">{moPartsDone}/{moPartsTotal} parts</span>
+                    <div className="w-20 h-2 bg-gray-100 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full transition-all ${moPct === 100 ? 'bg-green-500' : moPct > 0 ? 'bg-blue-500' : 'bg-gray-300'}`} style={{ width: `${moPct}%` }} />
+                    </div>
+                    <span className="text-[11px] font-medium text-gray-500 tabular-nums w-8 text-right">{moPct}%</span>
+                  </div>
+                </div>
+
+                {moExpanded && (
+                  <div className="divide-y divide-gray-100 border-t border-gray-100">
+                    {group.tasks.map((task) => {
+                      const completedCount = task.lines.filter((l) => l.completed).length;
+                      const totalCount = task.lines.length;
+                      const isExpanded = expandedTasks.has(task.id);
+
+                      return (
+              <div key={task.id} className={`bg-white border-l-4 transition-colors ${
+                task.status === 'in_progress' ? 'border-l-blue-500'
+                : task.status === 'completed' ? 'border-l-green-500'
+                : 'border-l-gray-200'
+              }`}>
+                <div className={`flex items-center justify-between px-4 py-3 ${isExpanded ? 'border-b border-gray-100 bg-gray-50/50' : 'hover:bg-gray-50/40'} ${task.status === 'pending' ? 'bg-gray-50/40' : ''}`}>
+                  <div className={`flex items-center gap-3 min-w-0 ${task.status === 'pending' ? 'opacity-50' : ''}`}>
+                    <button type="button" onClick={() => toggleTask(task.id)} className="text-gray-400 hover:text-gray-600 flex-shrink-0">
                       {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                     </button>
-                    <div>
-                      <button
-                        type="button"
-                        onClick={() => router.navigate(`/manufacturing/manufacturing-orders/${task.manufacturing_order_id}`)}
-                        className="font-semibold text-sm text-primary hover:underline"
-                      >
-                        {task.mo_number}
-                      </button>
-                      <span className="ml-2 text-xs text-gray-500">{task.customer_name}</span>
-                    </div>
+                    {(task.line_position || task.line_area) && (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-medium px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100 flex-shrink-0">
+                        {task.line_position && <span>{task.line_position}</span>}
+                        {task.line_position && task.line_area && <span className="text-indigo-300">·</span>}
+                        {task.line_area && <span>{task.line_area}</span>}
+                      </span>
+                    )}
+                    <span className="text-xs text-gray-700 truncate max-w-[240px]">{task.line_label}</span>
                     <StatusBadge status={task.status} type="manufacturing" size="sm" />
                     {task.assigned_to && (
-                      <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100">
+                      <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100 flex-shrink-0">
                         <User className="w-3 h-3" /> {task.assigned_to}
                       </span>
                     )}
                   </div>
 
                   <div className="flex items-center gap-3">
-                    <span className="text-xs text-gray-500">{task.product_name}</span>
                     {task.due_date && <span className="text-xs text-gray-400">{task.due_date}</span>}
-                    <span className="text-xs text-gray-500">{completedCount}/{totalCount}</span>
+                    <span className="text-xs text-gray-500" title="Components done / total">{completedCount}/{totalCount} parts</span>
 
-                    {(() => {
-                      const upstreamOk = !isAssemblyStation || !task.siblingStatuses?.length ||
-                        task.siblingStatuses.every(s => s.status === 'completed');
-                      return (
-                        <>
-                          {task.status === 'pending' && upstreamOk && (
-                            <button type="button" onClick={() => startTask(task.id)} className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-700">
-                              <Play className="h-3 w-3" /> Start
-                            </button>
-                          )}
-                          {task.status === 'pending' && !upstreamOk && (
-                            <span className="inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded bg-gray-100 text-gray-400 border border-gray-200" title="Blocked by dependencies">
-                              <AlertTriangle className="h-3 w-3" /> Blocked
-                            </span>
-                          )}
-                          {task.status === 'in_progress' && completedCount === totalCount && totalCount > 0 && upstreamOk && (
-                            <button type="button" onClick={() => completeTask(task.id)} className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-green-600 text-white hover:bg-green-700">
-                              <CheckCircle2 className="h-3 w-3" /> Complete
-                            </button>
-                          )}
-                        </>
-                      );
-                    })()}
+                    {task.status === 'pending' && (
+                      <button type="button" onClick={() => startTask(task.id)} className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-700">
+                        <Play className="h-3 w-3" /> Start
+                      </button>
+                    )}
+                    {task.status === 'in_progress' && completedCount === totalCount && totalCount > 0 && (
+                      <button type="button" onClick={() => completeTask(task.id)} className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-green-600 text-white hover:bg-green-700">
+                        <CheckCircle2 className="h-3 w-3" /> Complete
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -686,7 +898,22 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="text-xs text-gray-500 border-b border-gray-100">
-                        <th className="text-left px-4 py-2 w-8"></th>
+                        <th className="text-left px-4 py-2 w-8">
+                          <input
+                            type="checkbox"
+                            title="Select all"
+                            className="rounded border-gray-300"
+                            disabled={task.status !== 'in_progress' || task.lines.length === 0}
+                            checked={task.lines.length > 0 && task.lines.every((l) => l.completed)}
+                            ref={(el) => {
+                              if (el) {
+                                const done = task.lines.filter((l) => l.completed).length;
+                                el.indeterminate = done > 0 && done < task.lines.length;
+                              }
+                            }}
+                            onChange={(e) => { void toggleAllLines(task, e.target.checked); }}
+                          />
+                        </th>
                         <th className="text-left px-4 py-2">SKU</th>
                         <th className="text-left px-4 py-2">Description</th>
                         <th className="text-left px-4 py-2">Role</th>
@@ -771,6 +998,11 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
                       })}
                     </tbody>
                   </table>
+                )}
+              </div>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
             );

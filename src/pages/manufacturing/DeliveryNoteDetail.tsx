@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { router } from '../../lib/router';
 import { supabase } from '../../lib/supabase/client';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
@@ -39,7 +39,7 @@ export default function DeliveryNoteDetail() {
     claimDetail: string | null; customerName: string | null;
   } | null>(null);
 
-  const { deliveryNote, lines, loading, refetch, toggleLine, completeDelivery, isUpdatingLine } = useDeliveryNote(deliveryNoteId);
+  const { deliveryNote, lines, loading, refetch, toggleLine, toggleAllLines, completeDelivery, isUpdatingLine } = useDeliveryNote(deliveryNoteId);
 
   const params = new URLSearchParams(window.location.search);
   const moIdParam = params.get('mo_id');
@@ -104,8 +104,19 @@ export default function DeliveryNoteDetail() {
     registerSubmodules('Manufacturing', filteredSubmodules);
   }, [registerSubmodules, filteredSubmodules]);
 
+  const creatingRef = useRef(false);
   useEffect(() => {
-    if (!deliveryNoteId && user?.id && (moIdParam || soIdParam)) {
+    // Wait for the organization context to hydrate before creating; otherwise
+    // createDeliveryNote throws "No organization selected". The ref guards against
+    // React double-invoking the effect and creating two notes.
+    if (
+      !deliveryNoteId &&
+      user?.id &&
+      activeOrganizationId &&
+      (moIdParam || soIdParam) &&
+      !creatingRef.current
+    ) {
+      creatingRef.current = true;
       createDeliveryNote(
         { moId: moIdParam ?? undefined, salesOrderId: soIdParam ?? undefined },
         user.id,
@@ -116,10 +127,11 @@ export default function DeliveryNoteDetail() {
           addNotification({ type: 'success', title: 'Delivery Note Created', message: result.delivery_number });
         })
         .catch((e) => {
+          creatingRef.current = false; // allow a retry on transient failure
           addNotification({ type: 'error', title: 'Error', message: e.message });
         });
     }
-  }, [moIdParam, soIdParam, deliveryNoteId, user?.id]);
+  }, [moIdParam, soIdParam, deliveryNoteId, user?.id, activeOrganizationId]);
 
   useEffect(() => { if (deliveryNoteId) refetch(); }, [deliveryNoteId, refetch]);
 
@@ -128,6 +140,17 @@ export default function DeliveryNoteDetail() {
   const allChecked = totalCount > 0 && checkedCount === totalCount;
   const someChecked = checkedCount > 0;
   const isCompleted = deliveryNote?.status === 'completed' || deliveryNote?.status === 'partial';
+
+  const handleToggleAll = useCallback(() => {
+    if (isCompleted || totalCount === 0) return;
+    void toggleAllLines(!allChecked).catch((e: unknown) => {
+      addNotification({
+        type: 'error',
+        title: 'Error',
+        message: e instanceof Error ? e.message : 'Failed to update delivery lines',
+      });
+    });
+  }, [isCompleted, totalCount, allChecked, toggleAllLines, addNotification]);
 
   const loadLogoOptions = useCallback(async (): Promise<DeliveryNotePDFOptions> => {
     let organizationName = 'Arquiproductos';
@@ -384,16 +407,45 @@ export default function DeliveryNoteDetail() {
             <Package className="w-4 h-4 text-gray-500" />
             <span className="text-sm font-medium text-gray-700">Delivery Lines</span>
           </div>
-          <span className="text-xs text-gray-500">
-            {checkedCount}/{totalCount} checked
-          </span>
+          <div className="flex items-center gap-3">
+            {!isCompleted && totalCount > 0 && (
+              <button
+                type="button"
+                onClick={handleToggleAll}
+                disabled={isUpdatingLine}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+              >
+                {allChecked ? (
+                  <CheckCircle2 className="w-3.5 h-3.5 text-green-600" />
+                ) : (
+                  <Circle className="w-3.5 h-3.5 text-gray-400" />
+                )}
+                {allChecked ? 'Deselect all' : 'Select all'}
+              </button>
+            )}
+            <span className="text-xs text-gray-500">
+              {checkedCount}/{totalCount} checked
+            </span>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">
               <tr>
-                <th className="px-3 py-2 w-10"></th>
+                <th className="px-3 py-2 w-10 text-center">
+                  {!isCompleted && totalCount > 0 && (
+                    <input
+                      type="checkbox"
+                      aria-label="Select all lines"
+                      className="rounded border-gray-300 cursor-pointer"
+                      checked={allChecked}
+                      ref={(el) => { if (el) el.indeterminate = someChecked && !allChecked; }}
+                      onChange={handleToggleAll}
+                      disabled={isUpdatingLine}
+                    />
+                  )}
+                </th>
                 <th className="px-3 py-2 text-left font-medium text-gray-600 text-xs">Area</th>
                 <th className="px-3 py-2 text-center font-medium text-gray-600 text-xs">Position</th>
                 <th className="px-3 py-2 text-left font-medium text-gray-600 text-xs">Description</th>

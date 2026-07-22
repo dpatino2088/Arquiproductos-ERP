@@ -391,7 +391,9 @@ export function useCreatePurchaseOrder() {
           .upsert(pivotRows, { onConflict: 'purchase_order_id,manufacturing_order_id' });
       }
 
-      queryClient.invalidateQueries({ queryKey: purchaseOrdersListKey(activeOrganizationId) });
+      // refetchType 'all' also refetches the (currently inactive) list query, so the
+      // new PO is present in the cache before the user navigates back to the list.
+      queryClient.invalidateQueries({ queryKey: purchaseOrdersListKey(activeOrganizationId), refetchType: 'all' });
       return po as PurchaseOrder;
     } finally {
       setIsCreating(false);
@@ -564,8 +566,8 @@ export function useUpdatePurchaseOrder() {
         }
       }
 
-      queryClient.invalidateQueries({ queryKey: purchaseOrdersListKey(activeOrganizationId) });
-      queryClient.invalidateQueries({ queryKey: purchaseOrderDetailKey(activeOrganizationId, poId) });
+      queryClient.invalidateQueries({ queryKey: purchaseOrdersListKey(activeOrganizationId), refetchType: 'all' });
+      queryClient.invalidateQueries({ queryKey: purchaseOrderDetailKey(activeOrganizationId, poId), refetchType: 'all' });
     } finally {
       setIsUpdating(false);
     }
@@ -585,7 +587,7 @@ export function useDeletePurchaseOrder() {
     try {
       const { error } = await supabase.from('PurchaseOrders').delete().eq('id', poId);
       if (error) throw error;
-      queryClient.invalidateQueries({ queryKey: purchaseOrdersListKey(activeOrganizationId) });
+      queryClient.invalidateQueries({ queryKey: purchaseOrdersListKey(activeOrganizationId), refetchType: 'all' });
     } finally {
       setIsDeleting(false);
     }
@@ -612,7 +614,7 @@ export function useReceivePurchaseOrder() {
       if (error) throw new Error(`Receipt RPC failed: ${error.message}`);
       const result = data as { ok?: boolean; error?: string; movement_id?: string; movement_no?: string };
       if (result && !result.ok) throw new Error(result.error || 'Receipt failed: unknown RPC error');
-      queryClient.invalidateQueries({ queryKey: ['inventory', 'purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory', 'purchase-orders'], refetchType: 'all' });
       queryClient.invalidateQueries({ queryKey: ['inventory-movements'] });
       queryClient.invalidateQueries({ queryKey: ['inventory-allocations'] });
       if (activeOrganizationId) {

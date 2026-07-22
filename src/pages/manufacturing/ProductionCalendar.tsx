@@ -129,6 +129,23 @@ function moveMoToDay(mo: ManufacturingOrder, targetDay: Date): { planned_start_a
   return { planned_start_at: newStart.toISOString(), planned_end_at: newEnd.toISOString() };
 }
 
+// Human-readable MO status labels shown in the calendar chip (English).
+const MO_STATUS_LABELS: Record<string, string> = {
+  draft: 'Draft',
+  confirmed: 'Confirmed',
+  procurement: 'Procurement',
+  material_available: 'Material Available',
+  materials_ready: 'Material Ready',
+  planned: 'Planned',
+  in_production: 'In Production',
+  quality_check: 'Quality Check',
+  partial_completed: 'Partial Completed',
+  completed: 'Completed',
+  ready_for_pickup: 'Ready for Pickup',
+  delivered: 'Delivered',
+  cancelled: 'Cancelled',
+};
+
 // Draggable block: id = mo.id
 const URGENCY_BADGE_MAP: Record<string, { icon: string; color: string }> = {
   critical: { icon: '!', color: 'bg-red-500 text-white' },
@@ -192,6 +209,9 @@ function DraggableBlock({
         {isLate && !urgency && <AlertCircle className="w-3 h-3 shrink-0 text-red-600" aria-label="Overdue" />}
         {materialIncomplete && <Package className="w-3 h-3 shrink-0 text-amber-600" aria-label="Waiting material" />}
         <span className="truncate">{mo.manufacturing_order_no}</span>
+      </div>
+      <div className="truncate text-[10px] opacity-80 mt-0.5">
+        {MO_STATUS_LABELS[mo.status] ?? mo.status}
       </div>
     </div>
   );

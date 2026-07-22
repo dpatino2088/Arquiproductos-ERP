@@ -98,17 +98,27 @@ export default function Quotes() {
   const [duplicatingLoading, setDuplicatingLoading] = useState(false);
 
   const quotes = hookQuotes;
-  const getStatusForDisplay = useCallback((quote: EnrichedQuote) => {
+  // Returns both the status string and which StatusBadge palette to use. Once the
+  // linked Sales Order advances through the fulfillment lifecycle (production →
+  // ready for delivery → delivered), the quote mirrors that milestone so the list
+  // reflects real progress and ends at "Delivered". Earlier commercial states keep
+  // the quote palette (Approved / Ordered / Released).
+  const LIFECYCLE_TRACKING = new Set(['in_production', 'ready_for_delivery', 'delivered']);
+  const getStatusForDisplay = useCallback((quote: EnrichedQuote): { status: string; type: 'quote' | 'orderTracking' } => {
     const raw = (quote.status || '').toLowerCase();
     if (raw === 'superseded') {
       // Legacy rows that were auto-marked as superseded should keep a neutral editable status in UI.
-      return 'draft';
+      return { status: 'draft', type: 'quote' };
     }
     if (raw === 'approved') {
-      if (!quote.sale_order_id) return 'approved';
-      return quote.has_payment ? 'released' : 'ordered';
+      const tracking = (quote.so_tracking_status || '').toLowerCase();
+      if (LIFECYCLE_TRACKING.has(tracking)) {
+        return { status: tracking, type: 'orderTracking' };
+      }
+      if (!quote.sale_order_id) return { status: 'approved', type: 'quote' };
+      return { status: quote.has_payment ? 'released' : 'ordered', type: 'quote' };
     }
-    return raw;
+    return { status: raw, type: 'quote' };
   }, []);
 
   const [proposalByQuoteMap, setProposalByQuoteMap] = useState<Record<string, { id: string; no: string }>>({});
@@ -830,7 +840,10 @@ export default function Quotes() {
                     </td>
                     <td className="py-3 px-4 text-center">
                       <span className={opts.isOlder ? 'opacity-60' : ''}>
-                        <StatusBadge status={getStatusForDisplay(quote)} type="quote" size="sm" />
+                        {(() => {
+                          const s = getStatusForDisplay(quote);
+                          return <StatusBadge status={s.status} type={s.type} size="sm" />;
+                        })()}
                       </span>
                     </td>
                     {isInternal ? (

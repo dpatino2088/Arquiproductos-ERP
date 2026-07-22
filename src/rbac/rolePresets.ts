@@ -183,10 +183,11 @@ export const ORG_ROLE_PRESETS: Record<OrgRole, string[]> = {
     'catalog.read',
     'catalog.items.read',
     'catalog.bom.read',
-    // Inventory (full read + receive/move stock; no purchasing)
+    // Inventory (full read + receive/move stock; view-only purchasing)
     'inventory.read',
     'inventory.warehouse.read',
     'inventory.warehouse.write',
+    'inventory.purchase_orders.read',
     'inventory.transactions.read',
     'inventory.transactions.write',
     'inventory.receipts.read',
@@ -222,7 +223,7 @@ export const ORG_ROLE_PRESETS: Record<OrgRole, string[]> = {
     'partners.read',
     // Operator Admin does NOT get:
     //  - manufacturing.costs.read (cost visibility is finance/admin only)
-    //  - inventory.purchase_orders.* (procurement role)
+    //  - inventory.purchase_orders.write (creating/editing POs is procurement)
     //  - sales.* / financials.* / settings.* / org.users.manage
   ],
   operator_member: [
@@ -230,8 +231,9 @@ export const ORG_ROLE_PRESETS: Record<OrgRole, string[]> = {
     // Catalog (read-only lookup of SKUs)
     'catalog.read',
     'catalog.items.read',
-    // Inventory (read-only: look up stock & location)
+    // Inventory (read-only: look up stock, location, and purchase orders)
     'inventory.warehouse.read',
+    'inventory.purchase_orders.read',
     // Manufacturing Orders (read-only context for the WO being executed)
     'manufacturing.mo.read',
     'manufacturing.mo.lines.read',

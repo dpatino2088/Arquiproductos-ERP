@@ -50,8 +50,8 @@ function StationCard({ task, moMeta, siblingTasks }: {
 
   return (
     <div className="bg-white overflow-hidden">
-      <div className="flex items-center h-9 px-4 bg-gray-50 border-b border-gray-100">
-        <button type="button" onClick={() => setExpanded(!expanded)} className="text-gray-400 hover:text-gray-600 mr-2 flex-shrink-0">
+      <div className="flex items-center py-2.5 px-5 bg-gray-50/60 hover:bg-gray-50">
+        <button type="button" onClick={() => setExpanded(!expanded)} className="text-gray-400 hover:text-gray-600 mr-2.5 flex-shrink-0">
           {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
         </button>
         <span className="font-semibold text-gray-700 text-xs uppercase tracking-wide w-40 truncate flex-shrink-0">{stationName}</span>
@@ -268,51 +268,20 @@ function SchedulePopup({
   });
   const [stationOverrides, setStationOverrides] = useState<Record<string, string>>({});
 
+  // Flat scheduling: every task starts on the chosen date. No phase cascade,
+  // no predecessor/overlap logic — stations can be overridden individually.
   const computeDates = useCallback((base: string) => {
     const safeBase = clampDateToToday(base, today);
-    const updates: { id: string; planned_start_at: string }[] = [];
-    const phaseMap = new Map<number, string>();
-
-    for (const st of stationTypes) {
-      const phase = stationPhase(st.code);
-      if (!phaseMap.has(phase)) {
-        if (phase === 0) {
-          phaseMap.set(0, safeBase);
-        } else {
-          const prevPhase = phase - 1;
-          const prevDate = phaseMap.get(prevPhase) ?? safeBase;
-          const d = new Date(`${prevDate}T00:00:00`);
-          d.setDate(d.getDate() + 1);
-          while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
-          phaseMap.set(phase, `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
-        }
-      }
-    }
-
-    for (const t of tasks) {
-      const code = t.work_center?.code ?? '';
-      const phase = stationPhase(code);
-      const dateStr = phaseMap.get(phase) ?? safeBase;
-      updates.push({ id: t.id, planned_start_at: dateStr });
-    }
-    return updates;
-  }, [tasks, stationTypes, today]);
+    return tasks.map(t => ({ id: t.id, planned_start_at: safeBase }));
+  }, [tasks, today]);
 
   const preview = useMemo(() => {
     if (!startDate) return [];
-    const updates = computeDates(startDate);
-    const byPhase = new Map<string, string>();
-    for (const u of updates) {
-      const t = tasks.find(x => x.id === u.id);
-      const code = t?.work_center?.code ?? '';
-      if (!byPhase.has(code)) byPhase.set(code, u.planned_start_at);
-    }
     return stationTypes.map(st => ({
       ...st,
-      date: byPhase.get(st.code) ?? startDate,
-      parallel: stationPhase(st.code) === 0,
+      date: startDate,
     }));
-  }, [startDate, computeDates, tasks, stationTypes]);
+  }, [startDate, stationTypes]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -387,7 +356,7 @@ function SchedulePopup({
             )}
           </div>
 
-          {/* Station phase preview */}
+          {/* Per-station dates (all default to the start date) */}
           {startDate && (
             <div className="space-y-1.5">
               <span className="text-[10px] text-gray-400 uppercase tracking-wide">Station Schedule</span>
@@ -400,7 +369,6 @@ function SchedulePopup({
                   <div key={st.code || idx} className={`flex items-center gap-3 py-1.5 px-2 rounded ${overridden ? 'bg-amber-50 border border-amber-100' : 'bg-gray-50'}`}>
                     <div className="flex-1 min-w-0">
                       <span className="text-xs font-medium text-gray-700">{st.name}</span>
-                      {st.parallel && <span className="ml-1.5 text-[9px] text-blue-500 font-medium">PARALLEL</span>}
                       {isGlobal && st.count > 1 && <span className="ml-1.5 text-[9px] text-gray-400">×{st.count} tasks</span>}
                     </div>
                     <input
@@ -433,7 +401,7 @@ function SchedulePopup({
               })}
               {isGlobal && (
                 <p className="text-[10px] text-gray-400 mt-1">
-                  Dates auto-calculate from start. Edit any station to override.
+                  All stations start on the same date. Edit any station to change it.
                 </p>
               )}
             </div>
@@ -674,12 +642,38 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
           .update({ planned_start_at: safeDate, updated_at: new Date().toISOString() })
           .eq('id', u.id);
       }
+
+      // Reflect the schedule at the MO level so the Production Calendar shows it.
+      // The calendar only lists MOs that have MO-level planned dates; scheduling
+      // is optional, but once any task has a date we surface it there.
+      const { data: allTaskDates } = await supabase
+        .from('WorkOrderTasks')
+        .select('planned_start_at, planned_end_at')
+        .eq('manufacturing_order_id', moId)
+        .eq('deleted', false);
+      const starts = (allTaskDates ?? [])
+        .map((t: { planned_start_at: string | null }) => t.planned_start_at)
+        .filter((d: string | null): d is string => Boolean(d))
+        .sort();
+      if (starts.length > 0) {
+        const moStart = starts[0];
+        const ends = (allTaskDates ?? [])
+          .map((t: { planned_start_at: string | null; planned_end_at: string | null }) => t.planned_end_at || t.planned_start_at)
+          .filter((d: string | null): d is string => Boolean(d))
+          .sort();
+        const moEnd = ends.length > 0 ? ends[ends.length - 1] : moStart;
+        await supabase
+          .from('ManufacturingOrders')
+          .update({ planned_start_at: moStart, planned_end_at: moEnd, updated_at: new Date().toISOString() })
+          .eq('id', moId);
+      }
+
       await refetchTasks();
-      addNotification({ type: 'success', title: 'Schedule Saved', message: 'Planned dates updated.' });
+      addNotification({ type: 'success', title: 'Schedule Saved', message: 'Planned dates updated and reflected on the calendar.' });
     } catch {
       addNotification({ type: 'error', title: 'Error', message: 'Could not save schedule.' });
     }
-  }, [refetchTasks, addNotification, materialsIncomplete]);
+  }, [refetchTasks, addNotification, materialsIncomplete, moId]);
 
   if (loading) {
     return (
@@ -748,11 +742,11 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
   const woLineCount = lineGroups.filter(g => g.lineId).length;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {/* Summary Header */}
-      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
         {/* Top bar: WO title + status + link */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <div className="flex items-center gap-3">
             <h2 className="text-base font-semibold text-gray-900">{woNumber}</h2>
             <StatusBadge status={moStatus ?? 'draft'} type="manufacturing" size="sm" />
@@ -768,98 +762,104 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
           </button>
         </div>
 
-        {/* Reference row */}
-        <div className="px-5 py-3 border-b border-gray-50 flex flex-wrap items-center gap-x-6 gap-y-1 text-xs">
-          <span className="text-gray-400">MO</span>
-          <span className="font-medium text-gray-700 -ml-4">{moNumber}</span>
-          <span className="text-gray-300">|</span>
-          <span className="text-gray-400">SO</span>
-          <span className="font-medium text-gray-700 -ml-4">{salesOrderNo || '—'}</span>
-          <span className="text-gray-300">|</span>
-          <span className="text-gray-400">Customer</span>
-          <span className="font-medium text-gray-700 -ml-4">{customerName || '—'}</span>
-          <span className="text-gray-300">|</span>
-          <span className="text-gray-400">Dealer</span>
-          <span className="font-medium text-gray-700 -ml-4">{dealerName || '—'}</span>
-          <span className="text-gray-300">|</span>
-          <span className="text-gray-400">Lines</span>
-          <span className="font-medium text-gray-700 -ml-4">{woLineCount}</span>
-          <span className="text-gray-300">|</span>
-          <span className="text-gray-400">Start</span>
-          <span className="font-medium text-gray-700 -ml-4">{globalEarliestStart ? formatShortDate(globalEarliestStart) : '—'}</span>
-          <button
-            type="button"
-            title="Schedule all lines"
-            onClick={() => {
-              if (!canOpenSchedule) {
-                addNotification({
-                  type: 'warning',
-                  title: 'Schedule Locked',
-                  message: 'Material Ready is required before setting calendar.',
-                });
-                return;
-              }
-              setSchedulePopup({ label: 'All Lines', tasks, isGlobal: true });
-            }}
-            className={`p-0.5 rounded -ml-3 ${canOpenSchedule ? 'hover:bg-gray-100 text-gray-400 hover:text-primary' : 'text-gray-300 cursor-not-allowed'}`}
-          >
-            <CalendarDays className="w-3.5 h-3.5" />
-          </button>
+        {/* Reference grid — one labeled field per cell, plenty of breathing room */}
+        <div className="px-6 py-5 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-x-8 gap-y-4">
+          {[
+            { label: 'MO', value: moNumber || '—' },
+            { label: 'SO', value: salesOrderNo || '—' },
+            { label: 'Customer', value: customerName || '—' },
+            { label: 'Dealer', value: dealerName || '—' },
+            { label: 'Lines', value: String(woLineCount) },
+          ].map((f) => (
+            <div key={f.label} className="min-w-0">
+              <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-0.5">{f.label}</div>
+              <div className="text-sm font-medium text-gray-800 truncate">{f.value}</div>
+            </div>
+          ))}
+          <div className="min-w-0">
+            <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-0.5">Start</div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm font-medium text-gray-800">{globalEarliestStart ? formatShortDate(globalEarliestStart) : '—'}</span>
+              <button
+                type="button"
+                title="Schedule all lines"
+                onClick={() => {
+                  if (!canOpenSchedule) {
+                    addNotification({
+                      type: 'warning',
+                      title: 'Schedule Locked',
+                      message: 'Material Ready is required before setting calendar.',
+                    });
+                    return;
+                  }
+                  setSchedulePopup({ label: 'All Lines', tasks, isGlobal: true });
+                }}
+                className={`p-1 rounded-md ${canOpenSchedule ? 'hover:bg-gray-100 text-gray-400 hover:text-primary' : 'text-gray-300 cursor-not-allowed'}`}
+              >
+                <CalendarDays className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
         </div>
 
-        {/* Progress bar (inline) */}
-        <div className="px-5 py-2.5 flex items-center gap-3">
-          <span className="text-[10px] text-gray-400 uppercase tracking-wide flex-shrink-0">Progress</span>
-          <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+        {/* Progress */}
+        <div className="px-6 pb-5">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[10px] text-gray-400 uppercase tracking-wider">Progress</span>
+            <span className="text-xs font-medium text-gray-500 tabular-nums">{globalCompletedLines}/{globalTotalLines} · {globalPct}%</span>
+          </div>
+          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
             <div
               className={`h-full rounded-full transition-all ${globalPct === 100 ? 'bg-green-500' : globalPct > 0 ? 'bg-blue-500' : 'bg-gray-300'}`}
               style={{ width: `${globalPct}%` }}
             />
           </div>
-          <span className="text-[11px] font-medium text-gray-500 flex-shrink-0 tabular-nums">{globalCompletedLines}/{globalTotalLines} · {globalPct}%</span>
         </div>
 
-        {/* Operator assignment (collapsible row) */}
+        {/* Operator assignment */}
         {operators.length > 0 && workstationAssignments.length > 0 && (
-          <div className="px-5 py-2.5 border-t border-gray-50 flex flex-wrap items-center gap-x-4 gap-y-2">
-            <span className="text-[10px] text-gray-400 uppercase tracking-wide flex-shrink-0 mr-1">Operators</span>
-            <div className="inline-flex items-center gap-1.5">
-              <span className="text-[11px] text-primary font-semibold">All</span>
-              <select
-                value="__assign_all__"
-                onChange={e => {
-                  if (e.target.value === '__assign_all__') return;
-                  void handleAssignAll(e.target.value);
-                }}
-                title="Assign one operator to every workstation"
-                className="text-[11px] border border-primary/40 rounded px-1.5 py-0.5 bg-primary/5 text-primary focus:ring-1 focus:ring-primary focus:border-primary min-w-[120px]"
-              >
-                <option value="__assign_all__">Assign for all…</option>
-                {operators.map(op => (
-                  <option key={op.user_id} value={op.user_id}>{op.display_name}</option>
-                ))}
-              </select>
-            </div>
-            <span className="text-gray-200">|</span>
-            {workstationAssignments.map((ws) => (
-              <div key={ws.workCenterId} className="inline-flex items-center gap-1.5">
-                <span className="text-[11px] text-gray-500 font-medium">{ws.name}</span>
+          <div className="px-6 py-5 border-t border-gray-100">
+            <div className="flex items-center justify-between mb-3 gap-3">
+              <span className="text-[10px] text-gray-400 uppercase tracking-wider">Operators</span>
+              <div className="inline-flex items-center gap-2">
+                <span className="text-[11px] text-gray-400">Assign all</span>
                 <select
-                  value={ws.value}
+                  value="__assign_all__"
                   onChange={e => {
-                    if (e.target.value === '__mixed__' || e.target.value === '__unassigned__') return;
-                    void handleAssignByWorkstation(ws.workCenterId, e.target.value);
+                    if (e.target.value === '__assign_all__') return;
+                    void handleAssignAll(e.target.value);
                   }}
-                  className="text-[11px] border border-gray-200 rounded px-1.5 py-0.5 bg-white text-gray-600 focus:ring-1 focus:ring-primary focus:border-primary min-w-[120px]"
+                  title="Assign one operator to every workstation"
+                  className="text-xs border border-primary/40 rounded-lg px-2.5 py-1.5 bg-primary/5 text-primary focus:ring-1 focus:ring-primary focus:border-primary min-w-[150px]"
                 >
-                  <option value="__unassigned__" disabled>—</option>
-                  <option value="__mixed__" disabled>Mixed</option>
+                  <option value="__assign_all__">Select operator…</option>
                   {operators.map(op => (
                     <option key={op.user_id} value={op.user_id}>{op.display_name}</option>
                   ))}
                 </select>
               </div>
-            ))}
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-4">
+              {workstationAssignments.map((ws) => (
+                <div key={ws.workCenterId} className="min-w-0">
+                  <div className="text-[11px] text-gray-500 font-medium mb-1 truncate">{ws.name}</div>
+                  <select
+                    value={ws.value}
+                    onChange={e => {
+                      if (e.target.value === '__mixed__' || e.target.value === '__unassigned__') return;
+                      void handleAssignByWorkstation(ws.workCenterId, e.target.value);
+                    }}
+                    className="w-full text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:ring-1 focus:ring-primary focus:border-primary"
+                  >
+                    <option value="__unassigned__" disabled>Unassigned</option>
+                    <option value="__mixed__" disabled>Mixed</option>
+                    {operators.map(op => (
+                      <option key={op.user_id} value={op.user_id}>{op.display_name}</option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -901,30 +901,29 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
         return (
           <div key={groupKey} className="rounded-xl border border-gray-200 bg-white overflow-hidden">
             <div
-              className="w-full flex items-center justify-between px-5 py-3 bg-gradient-to-r from-gray-50 to-white border-b border-gray-200 hover:from-gray-100 transition-colors cursor-pointer text-left"
+              className="w-full flex items-center justify-between gap-4 px-6 py-4 hover:bg-gray-50/70 transition-colors cursor-pointer text-left"
               onClick={() => toggleGroup(groupKey)}
             >
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 min-w-0">
                 {isExpanded
-                  ? <ChevronDown className="w-4 h-4 text-gray-500 flex-shrink-0" />
-                  : <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" />}
-                <div>
+                  ? <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                  : <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />}
+                <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="font-bold text-gray-900 text-sm tracking-wide">{group.label}</span>
+                    <span className="font-semibold text-gray-900 text-sm">{group.label}</span>
                     <StatusBadge status={groupStatus} type="workOrder" size="sm" />
                   </div>
                   {group.product && (
-                    <div className="text-xs text-gray-500 mt-0.5">
+                    <div className="text-xs text-gray-500 mt-1 truncate">
                       {ptLabel}{ptLabel && ' — '}{fabricName}
-                      {group.product.manufacturer && <span className="text-gray-400"> | {group.product.manufacturer}</span>}
                       {group.product.hardware_color && <span className="text-gray-400"> · {group.product.hardware_color}</span>}
                     </div>
                   )}
                 </div>
               </div>
-              <div className="flex items-center gap-3 text-xs text-gray-500">
+              <div className="flex items-center gap-5 flex-shrink-0">
                 {earliestStart && (
-                  <span className="inline-flex items-center gap-1 text-[11px] text-gray-500">
+                  <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-gray-400">
                     <Clock className="w-3 h-3" />{formatShortDate(earliestStart)}
                   </span>
                 )}
@@ -943,21 +942,23 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
                     }
                     setSchedulePopup({ label: group.label, tasks: group.tasks, isGlobal: false });
                   }}
-                  className={`p-1 rounded ${canOpenSchedule ? 'hover:bg-gray-200 text-gray-400 hover:text-primary' : 'text-gray-300 cursor-not-allowed'}`}
+                  className={`p-1.5 rounded-md ${canOpenSchedule ? 'hover:bg-gray-100 text-gray-400 hover:text-primary' : 'text-gray-300 cursor-not-allowed'}`}
                 >
-                  <CalendarDays className="w-3.5 h-3.5" />
+                  <CalendarDays className="w-4 h-4" />
                 </button>
-                <span className="text-gray-300">|</span>
-                <span>{group.tasks.length} stations</span>
-                <span>·</span>
-                <span>{completedLines}/{totalLines} components</span>
-                <div className="w-16 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                  <div className="h-full bg-green-500 rounded-full transition-all" style={{ width: `${totalLines > 0 ? Math.round((completedLines / totalLines) * 100) : 0}%` }} />
+                <div className="flex items-center gap-2.5">
+                  <span className="hidden md:inline text-[11px] text-gray-400 tabular-nums">
+                    {group.tasks.length} stations · {completedLines}/{totalLines}
+                  </span>
+                  <div className="w-20 h-2 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-green-500 rounded-full transition-all" style={{ width: `${totalLines > 0 ? Math.round((completedLines / totalLines) * 100) : 0}%` }} />
+                  </div>
+                  <span className="text-[11px] font-medium text-gray-500 tabular-nums w-8 text-right">{totalLines > 0 ? Math.round((completedLines / totalLines) * 100) : 0}%</span>
                 </div>
               </div>
             </div>
             {isExpanded && (
-              <div className="divide-y divide-gray-200">
+              <div className="divide-y divide-gray-100 border-t border-gray-100">
                 {group.tasks.map((task) => (
                   <StationCard
                     key={task.id}

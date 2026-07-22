@@ -62,7 +62,7 @@ export default function ApprovedBOMList() {
       // Always register submodules to ensure tabs are visible
       registerSubmodules('Manufacturing', [
         { id: 'manufacturing-orders', label: 'Manufacturing Orders', href: '/manufacturing/manufacturing-orders' },
-        { id: 'work-orders', label: 'Work Orders', href: '/manufacturing/work-orders' },
+        { id: 'workstation', label: 'Workstation', href: '/manufacturing/workstations' },
       ]);
     }
     

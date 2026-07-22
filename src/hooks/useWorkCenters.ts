@@ -73,6 +73,19 @@ export function useWorkCenters() {
     await fetch();
   }, [activeOrganizationId, fetch]);
 
+  const insertMany = useCallback(async (inputs: WorkCenterInput[]) => {
+    if (!activeOrganizationId) throw new Error('No organization');
+    if (inputs.length === 0) return;
+    const rows = inputs.map((input) => ({
+      ...input,
+      organization_id: activeOrganizationId,
+      routing_rule: input.routing_rule ?? {},
+    }));
+    const { error: err } = await supabase.from('WorkCenters').insert(rows);
+    if (err) throw new Error(err.message);
+    await fetch();
+  }, [activeOrganizationId, fetch]);
+
   const remove = useCallback(async (id: string) => {
     if (!activeOrganizationId) return;
     const { error: err } = await supabase
@@ -84,5 +97,5 @@ export function useWorkCenters() {
     await fetch();
   }, [activeOrganizationId, fetch]);
 
-  return { centers, loading, error, upsert, remove, refetch: fetch };
+  return { centers, loading, error, upsert, insertMany, remove, refetch: fetch };
 }

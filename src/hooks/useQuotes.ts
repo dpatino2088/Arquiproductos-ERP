@@ -46,6 +46,10 @@ export interface QuoteListItem {
   root_quote_id?: string | null;
   version_no?: number | null;
   is_version?: boolean | null;
+  /** Delivery-lifecycle milestone of the linked Sales Order (mirrored to Quotes). */
+  so_tracking_status?: string | null;
+  /** Internal status of the linked Sales Order. */
+  so_status?: string | null;
   [key: string]: unknown;
 }
 
@@ -190,19 +194,24 @@ export function useQuotes(dealerId?: string | null) {
       if (signal?.aborted) return;
 
       // SalesOrders + payments: chunked .in() to stay under the row cap.
-      const saleOrderByQuoteId = new Map<string, { id: string; quote_id: string }>();
+      const saleOrderByQuoteId = new Map<string, { id: string; quote_id: string; tracking_status: string | null; status: string | null }>();
       await Promise.all(
         chunkArray(quoteIds, 500).map(async (ids) => {
           const { data } = await supabase
             .from('SalesOrders')
-            .select('id, quote_id, created_at')
+            .select('id, quote_id, created_at, tracking_status, status')
             .in('quote_id', ids)
             .eq('organization_id', activeOrganizationId)
             .or('deleted.is.false,deleted.is.null')
             .order('created_at', { ascending: false });
           (data || []).forEach((so: any) => {
             if (so?.quote_id && so?.id && !saleOrderByQuoteId.has(so.quote_id)) {
-              saleOrderByQuoteId.set(so.quote_id, { id: so.id, quote_id: so.quote_id });
+              saleOrderByQuoteId.set(so.quote_id, {
+                id: so.id,
+                quote_id: so.quote_id,
+                tracking_status: so.tracking_status ?? null,
+                status: so.status ?? null,
+              });
             }
           });
         }),
@@ -246,6 +255,8 @@ export function useQuotes(dealerId?: string | null) {
           line_count: t?.line_count ?? 0,
           created_by: createdBy,
           sale_order_id: salesOrder?.id ?? null,
+          so_tracking_status: salesOrder?.tracking_status ?? null,
+          so_status: salesOrder?.status ?? null,
           total_paid: totalPaid,
           has_payment: totalPaid > 0,
         };

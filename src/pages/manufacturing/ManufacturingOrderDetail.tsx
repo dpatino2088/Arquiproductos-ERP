@@ -105,8 +105,11 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     total_invoiced: number;
     total_paid: number;
     balance_due: number;
+    so_total: number;
+    fully_invoiced: boolean;
     invoice_status: string;
     has_delivery_override: boolean;
+    delivery_allowed: boolean;
   } | null>(null);
   const listPath = '/manufacturing/manufacturing-orders';
   const productTypeSummary = useMemo(() => {
@@ -364,41 +367,47 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
 
   const fetchFinancialSummary = useCallback(async () => {
     if (!mo?.sales_order_id) { setFinancialSummary(null); return; }
-    const [summaryRes, soRes, overrideRes] = await Promise.all([
+    // Single source of truth for the delivery decision: the same gate the server
+    // enforces. Financial display figures (paid / invoice status) come from the
+    // canonical view, which the gate function itself reads from.
+    const [gateRes, viewRes] = await Promise.all([
+      supabase.rpc('get_sales_order_delivery_gate', { p_sales_order_id: mo.sales_order_id }),
       supabase
         .from('sales_order_financial_summary')
-        .select('total_invoiced, total_paid, balance_due, invoice_status')
+        .select('total_paid, invoice_status')
         .eq('sales_order_id', mo.sales_order_id)
         .maybeSingle(),
-      supabase
-        .from('SalesOrders')
-        .select('total_amount')
-        .eq('id', mo.sales_order_id)
-        .maybeSingle(),
-      supabase
-        .from('SalesOrderDeliveryOverrides')
-        .select('id')
-        .eq('sales_order_id', mo.sales_order_id)
-        .eq('status', 'active')
-        .eq('deleted', false)
-        .limit(1),
     ]);
 
-    const summaryData = (summaryRes.data ?? null) as {
-      total_invoiced?: number | null;
+    const gateRows = gateRes.data as
+      | {
+          balance_due?: number | null;
+          payment_complete?: boolean | null;
+          has_active_override?: boolean | null;
+          delivery_allowed?: boolean | null;
+          fully_invoiced?: boolean | null;
+          total_invoiced?: number | null;
+          so_total?: number | null;
+        }[]
+      | null;
+    const gate = Array.isArray(gateRows) ? gateRows[0] : (gateRows ?? null);
+    if (!gate) { setFinancialSummary(null); return; }
+
+    const view = (viewRes.data ?? null) as {
       total_paid?: number | null;
-      balance_due?: number | null;
       invoice_status?: string | null;
     } | null;
-    const soTotal = Number((soRes.data as { total_amount?: number | null } | null)?.total_amount ?? 0);
-    const fallbackBalance = Math.max(soTotal, 0);
 
+    const totalInvoiced = Number(gate.total_invoiced ?? 0);
     setFinancialSummary({
-      total_invoiced: Number(summaryData?.total_invoiced ?? soTotal),
-      total_paid: Number(summaryData?.total_paid ?? 0),
-      balance_due: Number(summaryData?.balance_due ?? fallbackBalance),
-      invoice_status: summaryData?.invoice_status ?? (soTotal > 0 ? 'issued' : 'none'),
-      has_delivery_override: (overrideRes.data ?? []).length > 0,
+      total_invoiced: totalInvoiced,
+      total_paid: Number(view?.total_paid ?? 0),
+      balance_due: Number(gate.balance_due ?? 0),
+      so_total: Number(gate.so_total ?? 0),
+      fully_invoiced: Boolean(gate.fully_invoiced),
+      invoice_status: view?.invoice_status ?? (totalInvoiced > 0 ? 'issued' : 'none'),
+      has_delivery_override: Boolean(gate.has_active_override),
+      delivery_allowed: Boolean(gate.delivery_allowed),
     });
   }, [mo?.sales_order_id]);
 
@@ -784,6 +793,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const materialDemandEnabledStatuses = ['confirmed', 'procurement', 'materials_ready', 'in_production'] as const;
   const canViewMaterialDemand = materialDemandEnabledStatuses.includes(status as (typeof materialDemandEnabledStatuses)[number]);
   const paymentComplete = financialSummary ? financialSummary.balance_due <= 0 : false;
+  const fullyInvoiced = financialSummary ? financialSummary.fully_invoiced : false;
   const hasDeliveryOverride = financialSummary?.has_delivery_override === true;
 
   const deliveryBlocked = (() => {
@@ -791,14 +801,19 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       if (!claimInfo.chargeable) return false;
       return !claimInvoicePaid;
     }
-    return !!financialSummary && financialSummary.balance_due > 0 && !hasDeliveryOverride;
+    if (!financialSummary) return false;
+    // Single source: mirror the server's delivery gate decision.
+    return !financialSummary.delivery_allowed;
   })();
 
   const deliveryBlockedMessage = (() => {
     if (isServiceMO && claimInfo?.chargeable && !claimInvoicePaid) {
       return 'Delivery blocked: claim invoice is not fully paid.';
     }
-    return `Delivery blocked: balance due is $${financialSummary?.balance_due?.toFixed(2) ?? '0.00'}. Financials must settle to 0.00 or issue an override.`;
+    if (financialSummary && !fullyInvoiced) {
+      return 'Delivery blocked: the sales order is not fully invoiced.';
+    }
+    return `Delivery blocked: balance due is $${financialSummary?.balance_due?.toFixed(2) ?? '0.00'}. The sales order must be fully paid or issue an override.`;
   })();
 
   const paymentStatus: 'not_invoiced' | 'unpaid' | 'partial' | 'paid' =
@@ -819,14 +834,10 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
         onClick: () => handleTransition('ready_for_pickup'),
       });
     }
-    if (status === 'ready_for_pickup') {
-      actionItems.push({
-        label: 'Mark Delivered',
-        onClick: () => handleTransition('delivered'),
-        disabled: deliveryBlocked,
-        title: deliveryBlocked ? deliveryBlockedMessage : undefined,
-      });
-    }
+    // NOTE: "Delivered" is NOT a manual action here. The delivered status is only
+    // reached by completing the actual Delivery Note (Finished Goods → deliver
+    // lines), which the DB propagates back to the MO. The MO screen only reflects
+    // the delivery status; it cannot set it.
     if (['draft', 'confirmed', 'procurement', 'material_available', 'materials_ready'].includes(status)) {
       actionItems.push({ label: 'Cancel MO', onClick: () => setShowCancelDialog(true), danger: true });
     }

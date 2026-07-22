@@ -409,6 +409,27 @@ export function useDeliveryNote(deliveryNoteId: string | null) {
     }
   }, [lines]);
 
+  const toggleAllLines = useCallback(async (checked: boolean) => {
+    if (!deliveryNoteId) return;
+    const now = new Date().toISOString();
+    const prev = lines;
+    // Optimistic: flip every line at once.
+    setLines((p) => p.map((l) => ({ ...l, checked, checked_at: checked ? now : null })));
+    setPendingLineUpdates((n) => n + 1);
+    try {
+      const { error } = await supabase
+        .from('DeliveryNoteLines')
+        .update({ checked, checked_at: checked ? now : null })
+        .eq('delivery_note_id', deliveryNoteId);
+      if (error) throw error;
+    } catch (e) {
+      setLines(prev); // revert to the exact previous state on failure
+      throw e;
+    } finally {
+      setPendingLineUpdates((n) => Math.max(0, n - 1));
+    }
+  }, [deliveryNoteId, lines]);
+
   const completeDelivery = useCallback(async (receivedByName: string, notes?: string) => {
     if (!deliveryNoteId) return null;
 
@@ -429,5 +450,5 @@ export function useDeliveryNote(deliveryNoteId: string | null) {
     return result;
   }, [deliveryNoteId]);
 
-  return { deliveryNote, lines, loading, refetch: fetch, toggleLine, completeDelivery, isUpdatingLine: pendingLineUpdates > 0 };
+  return { deliveryNote, lines, loading, refetch: fetch, toggleLine, toggleAllLines, completeDelivery, isUpdatingLine: pendingLineUpdates > 0 };
 }

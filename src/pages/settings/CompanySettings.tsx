@@ -117,7 +117,7 @@ export default function CompanySettings() {
     { id: 'organization', label: 'Organization', icon: Users },
     { id: 'dealer-profile', label: 'Dealer Profile', icon: Building },
     { id: 'cost-engine', label: 'Cost Engine', icon: SettingsIcon },
-    { id: 'work-centers', label: 'Work Centers', icon: Factory },
+    { id: 'work-centers', label: 'Workstations', icon: Factory },
     { id: 'fabric-rules', label: 'Fabric & System Rules', icon: Scissors },
     { id: 'address-directory', label: 'Address Directory', icon: MapPin },
     { id: 'roles', label: 'Roles & Permissions', icon: Shield }

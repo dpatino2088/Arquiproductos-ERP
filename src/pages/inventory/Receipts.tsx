@@ -7,7 +7,7 @@ import { usePurchaseOrders, useReceivePurchaseOrder, type PurchaseOrderStatus } 
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useUIStore } from '../../stores/ui-store';
 import { supabase } from '../../lib/supabase/client';
-import { Search, SortAsc, SortDesc, Plus, ArrowLeft, Package } from 'lucide-react';
+import { Search, SortAsc, SortDesc, Plus, ArrowLeft, Package, Printer } from 'lucide-react';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
 
 const INVENTORY_SUBMODULES = [
@@ -179,11 +179,62 @@ export default function Receipts() {
     else { setPoLines([]); setReceiveQtyMap({}); }
   };
 
-  const handleConfirmReceipt = async (viewPdf = false) => {
-    if (!selectedPOId) return;
-    const toReceive = Object.entries(receiveQtyMap)
+  const getReceiveEntries = () =>
+    Object.entries(receiveQtyMap)
       .filter(([, qty]) => qty > 0)
       .map(([lineId, qty]) => ({ purchase_order_line_id: lineId, received_qty: qty }));
+
+  const buildPdfLines = (
+    toReceive: { purchase_order_line_id: string; received_qty: number }[]
+  ) => {
+    const lineById = new Map(poLines.map((line) => [line.id, line]));
+    return toReceive
+      .map((entry) => {
+        const line = lineById.get(entry.purchase_order_line_id);
+        if (!line) return null;
+        const suffix = line.is_roll_snapshot
+          ? formatRollPurchaseInfo(line.roll_length_value_snapshot, line.roll_length_uom_snapshot)
+          : formatPurchaseSuffix(line.purchase_unit_snapshot, line.units_per_purchase_unit_snapshot);
+        return {
+          sku: line.sku || '—',
+          description: line.is_one_off
+            ? line.description || 'One-off item'
+            : `${line.name}${suffix ? ` ${suffix}` : ''}`,
+          qty: entry.received_qty,
+          unit: line.purchase_unit_snapshot ?? line.unit ?? 'ea',
+        };
+      })
+      .filter((line): line is { sku: string; description: string; qty: number; unit: string } => Boolean(line));
+  };
+
+  // Print a PDF preview of the quantities entered, without confirming the receipt.
+  const handlePrintPdf = async () => {
+    if (!selectedPOId) return;
+    const toReceive = getReceiveEntries();
+    if (toReceive.length === 0) {
+      addNotification({ type: 'warning', title: 'No quantities', message: 'Enter received quantity for at least one line.' });
+      return;
+    }
+    const selectedPO = receivablePOs.find((po) => po.id === selectedPOId);
+    const { generateReceiptPDF } = await import('../../lib/pdf/generateReceiptPDF');
+    const doc = generateReceiptPDF(
+      {
+        receipt_no: 'DRAFT',
+        movement_date: new Date().toISOString(),
+        po_number: selectedPO?.po_number ?? selectedPOId.slice(0, 8),
+        vendor_name: selectedPO?.DirectoryVendors?.name ?? null,
+        warehouse_name: selectedPO?.Warehouses?.name ?? null,
+      },
+      buildPdfLines(toReceive)
+    );
+    const blob = doc.output('blob');
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+  };
+
+  const handleConfirmReceipt = async () => {
+    if (!selectedPOId) return;
+    const toReceive = getReceiveEntries();
     if (toReceive.length === 0) {
       addNotification({ type: 'warning', title: 'No quantities', message: 'Enter received quantity for at least one line.' });
       return;
@@ -200,49 +251,12 @@ export default function Receipts() {
         setPoLines([]);
         return;
       }
-      const selectedPO = receivablePOs.find((po) => po.id === selectedPOId);
       const result = await receivePurchaseOrder(selectedPOId, toReceive);
       addNotification({
         type: 'success',
         title: 'Receipt Created',
         message: `Receipt ${(result as any).movement_no ?? ''} created successfully.`,
       });
-
-      if (viewPdf) {
-        const { generateReceiptPDF } = await import('../../lib/pdf/generateReceiptPDF');
-        const lineById = new Map(poLines.map((line) => [line.id, line]));
-        const pdfLines = toReceive
-          .map((entry) => {
-            const line = lineById.get(entry.purchase_order_line_id);
-            if (!line) return null;
-            const suffix = line.is_roll_snapshot
-              ? formatRollPurchaseInfo(line.roll_length_value_snapshot, line.roll_length_uom_snapshot)
-              : formatPurchaseSuffix(line.purchase_unit_snapshot, line.units_per_purchase_unit_snapshot);
-            return {
-              sku: line.sku || '—',
-              description: line.is_one_off
-                ? line.description || 'One-off item'
-                : `${line.name}${suffix ? ` ${suffix}` : ''}`,
-              qty: entry.received_qty,
-              unit: line.purchase_unit_snapshot ?? line.unit ?? 'ea',
-            };
-          })
-          .filter((line): line is { sku: string; description: string; qty: number; unit: string } => Boolean(line));
-
-        const doc = generateReceiptPDF(
-          {
-            receipt_no: (result as any).movement_no ?? 'DRAFT',
-            movement_date: (result as any).movement_date ?? new Date().toISOString(),
-            po_number: selectedPO?.po_number ?? selectedPOId.slice(0, 8),
-            vendor_name: selectedPO?.DirectoryVendors?.name ?? null,
-            warehouse_name: selectedPO?.Warehouses?.name ?? null,
-          },
-          pdfLines
-        );
-        const blob = doc.output('blob');
-        const url = URL.createObjectURL(blob);
-        window.open(url, '_blank');
-      }
 
       setShowNewReceipt(false);
       setSelectedPOId('');
@@ -316,21 +330,21 @@ export default function Receipts() {
               </button>
               <button
                 type="button"
-                onClick={() => handleConfirmReceipt(false)}
+                onClick={handlePrintPdf}
+                disabled={!selectedPOId || poLines.length === 0}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+              >
+                <Printer className="w-4 h-4" />
+                Print PDF
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmReceipt}
                 disabled={isReceiving || !selectedPOId || poLines.length === 0}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50"
               >
                 <Package className="w-4 h-4" />
                 {isReceiving ? 'Creating...' : 'Confirm Receipt'}
-              </button>
-              <button
-                type="button"
-                onClick={() => handleConfirmReceipt(true)}
-                disabled={isReceiving || !selectedPOId || poLines.length === 0}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
-              >
-                <Package className="w-4 h-4" />
-                {isReceiving ? 'Creating...' : 'Confirm & View PDF'}
               </button>
             </div>
           </div>

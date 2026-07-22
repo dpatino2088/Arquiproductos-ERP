@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase/client';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useOrganizationContext } from '../../context/OrganizationContext';
@@ -11,11 +12,12 @@ import CutPlanVisualizer from '../../components/manufacturing/CutPlanVisualizer'
 import RollCutVisualizer from '../../components/manufacturing/RollCutVisualizer';
 import FabricSpecsCard from '../../components/manufacturing/FabricSpecsCard';
 import PanelCutDetail from '../../components/manufacturing/PanelCutDetail';
+import { advanceMOOnAllTasksComplete } from '../../lib/moLifecycle';
 import { optimize1D, type CutPiece } from '../../lib/cutOptimizer';
 import { optimize2D, type FabricPiece, type PlacedFabricPiece } from '../../lib/cutOptimizer2D';
 import { generateConsolidated1DPDF, generateCutPlanPDF, type ConsolidatedCutGroup } from '../../lib/pdf/generateCutPlanPDF';
 import { generateThermalCutStickersPDF, type ThermalCutLabel } from '../../lib/pdf/thermalCutStickerPdf';
-import { Scissors, Layers, RefreshCw, Loader2, ChevronDown, ChevronRight, Printer, MoreVertical, CheckCircle2, Circle, ArrowLeft } from 'lucide-react';
+import { Scissors, Layers, RefreshCw, Loader2, ChevronDown, ChevronRight, Printer, CheckCircle2, Circle, ArrowLeft, FileDown } from 'lucide-react';
 import StatusTabs from '../../components/shared/StatusTabs';
 
 type Mode = 'profiles' | 'fabric';
@@ -98,6 +100,9 @@ function skuAnchorId(sku: string): string {
   return `cut-sku-${encodeURIComponent(sku)}`;
 }
 
+// Stable empty reference so effects/memos don't re-run while the query has no data yet.
+const EMPTY_CUTS: PendingCut[] = [];
+
 export default function CutOptimization() {
   const filteredSubmodules = useFilteredMfgSubmodules();
   const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
@@ -108,21 +113,20 @@ export default function CutOptimization() {
   const currentUserId = user?.id ?? null;
   const [mode, setMode] = useState<Mode>('profiles');
   const [cutStatus, setCutStatus] = useState<CutStatusFilter>('pending');
-  const [loading, setLoading] = useState(true);
   const [markingReady, setMarkingReady] = useState<string | null>(null);
-  const [pendingCuts, setPendingCuts] = useState<PendingCut[]>([]);
   const [fabricSpecs, setFabricSpecs] = useState<FabricSpec[]>([]);
   const [fabricRules, setFabricRules] = useState<FabricRuleInfo[]>([]);
   const [selectedSkus, setSelectedSkus] = useState<Set<string>>(new Set());
   const [excludedMOs, setExcludedMOs] = useState<Set<string>>(new Set());
   const [expandedSkuMOs, setExpandedSkuMOs] = useState<Set<string>>(new Set());
   const [expandedSpec, setExpandedSpec] = useState<string | null>(null);
-  const [ineligibleCutCount, setIneligibleCutCount] = useState(0);
+  const queryClient = useQueryClient();
   const [selectedFabricPiece, setSelectedFabricPiece] = useState<{ piece: PlacedFabricPiece; skuGroup: SkuGroup } | null>(null);
-  const [actionsOpen, setActionsOpen] = useState(false);
   const [selectedPieceMaterials, setSelectedPieceMaterials] = useState<Array<{ sku: string; item_name: string; component_role: string; qty: number; uom: string }>>([]);
   const [materialsLoading, setMaterialsLoading] = useState(false);
   const [confirmCut, setConfirmCut] = useState<{ sku: string; markCompleted: boolean } | null>(null);
+  const [confirmAllCut, setConfirmAllCut] = useState(false);
+  const [markingAll, setMarkingAll] = useState(false);
   const [focusedSku, setFocusedSku] = useState<string | null>(null);
   const addNotification = useUIStore((s) => s.addNotification);
 
@@ -142,17 +146,20 @@ export default function CutOptimization() {
     };
   }, [registerSubmodules, clearSubmoduleNav, filteredSubmodules]);
 
-  const fetchPendingCuts = useCallback(async () => {
-    if (!activeOrganizationId) return;
-    setLoading(true);
-    try {
+  const fetchPendingCuts = useCallback(async (): Promise<{ cuts: PendingCut[]; ineligibleCount: number }> => {
+    if (!activeOrganizationId) return { cuts: [], ineligibleCount: 0 };
+    {
       const stationCode = mode === 'profiles' ? 'CUT-PROFILE' : 'CUT-ROLL';
 
+      // Only surface work that has actually been STARTED at the station. A task
+      // still 'pending' (no Start / Start All pressed) must NOT appear here —
+      // otherwise every MO in production would flood Cut Optimization. Completed
+      // tasks stay so their cuts remain visible in the Completed/All tabs.
       let taskQuery = supabase
         .from('WorkOrderTasks')
         .select('id, manufacturing_order_id, work_center_id, status, assigned_to_user_id, planned_start_at, sales_order_line_id')
         .eq('deleted', false)
-        .in('status', ['pending', 'in_progress', 'completed']);
+        .in('status', ['in_progress', 'completed']);
 
       if (isOperator && currentUserId) {
         taskQuery = taskQuery.eq('assigned_to_user_id', currentUserId);
@@ -160,7 +167,7 @@ export default function CutOptimization() {
 
       const { data: tasks } = await taskQuery;
 
-      if (!tasks || tasks.length === 0) { setPendingCuts([]); setLoading(false); return; }
+      if (!tasks || tasks.length === 0) return { cuts: [], ineligibleCount: 0 };
 
       const { data: wcs } = await supabase
         .from('WorkCenters')
@@ -170,7 +177,7 @@ export default function CutOptimization() {
 
       const wcIds = new Set((wcs ?? []).map((w: any) => w.id));
       const matchedTasks = tasks.filter((t: any) => wcIds.has(t.work_center_id));
-      if (matchedTasks.length === 0) { setPendingCuts([]); setLoading(false); return; }
+      if (matchedTasks.length === 0) return { cuts: [], ineligibleCount: 0 };
 
       const taskIds = matchedTasks.map((t: any) => t.id);
       const moIds = [...new Set(matchedTasks.map((t: any) => t.manufacturing_order_id))];
@@ -380,18 +387,36 @@ export default function CutOptimization() {
         };
       });
 
-      setIneligibleCutCount(Math.max(0, modeEligibleLines.length - cuts.length));
-      setPendingCuts(cuts);
-      setSelectedSkus(new Set(cuts.map(c => c.sku)));
-    } catch (err) {
-      console.error('Failed to fetch pending cuts:', err);
-      setIneligibleCutCount(0);
-    } finally {
-      setLoading(false);
+      return { cuts, ineligibleCount: Math.max(0, modeEligibleLines.length - cuts.length) };
     }
   }, [activeOrganizationId, mode, isOperator, currentUserId]);
 
-  useEffect(() => { fetchPendingCuts(); }, [fetchPendingCuts]);
+  const cutsQueryKey = useMemo(
+    () => ['cut-pending', activeOrganizationId, mode, isOperator, currentUserId] as const,
+    [activeOrganizationId, mode, isOperator, currentUserId],
+  );
+
+  const {
+    data: cutData,
+    isLoading: loading,
+    refetch: refetchCutsQuery,
+  } = useQuery({
+    queryKey: cutsQueryKey,
+    queryFn: fetchPendingCuts,
+    enabled: !!activeOrganizationId,
+  });
+
+  const pendingCuts = cutData?.cuts ?? EMPTY_CUTS;
+  const ineligibleCutCount = cutData?.ineligibleCount ?? 0;
+
+  const refetchCuts = useCallback(async () => {
+    await refetchCutsQuery();
+  }, [refetchCutsQuery]);
+
+  // Reset SKU selection whenever a fresh set of cuts arrives (mount / mode change / refetch).
+  useEffect(() => {
+    setSelectedSkus(new Set(pendingCuts.map(c => c.sku)));
+  }, [cutData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch FabricRules for rotation/heatseal info
   useEffect(() => {
@@ -584,14 +609,84 @@ export default function CutOptimization() {
         });
         return;
       }
+      // Auto-start any pending cut tasks instead of blocking: cutting implies the
+      // task is underway, so we move it to in_progress transparently.
       if (notStarted.length > 0) {
-        addNotification({ type: 'warning', title: 'Task Not Started', message: `The cut task must be started (In Progress) before marking lines as cut. Start it from the Work Order detail.` });
-        return;
+        const now = new Date().toISOString();
+        await supabase
+          .from('WorkOrderTasks')
+          .update({ status: 'in_progress', started_at: now, updated_at: now })
+          .in('id', notStarted.map((t: any) => t.id));
       }
     }
 
     setConfirmCut({ sku, markCompleted });
   }, [pendingCuts, addNotification]);
+
+  // A cutting/pick task is "done" for downstream (Assembly) readiness once ALL
+  // its lines are completed. Cutting in this screen only flips line flags, so we
+  // reconcile the parent task status here: complete it when fully cut, and
+  // re-open it (in_progress) if a line is later un-cut.
+  const syncTaskCompletionForLines = useCallback(async (wotlIds: string[]) => {
+    if (wotlIds.length === 0) return;
+    const { data: taskRows } = await supabase
+      .from('WorkOrderTaskLines')
+      .select('task_id')
+      .in('id', wotlIds);
+    const taskIds = [...new Set((taskRows ?? []).map((r: any) => r.task_id).filter(Boolean))] as string[];
+    if (taskIds.length === 0) return;
+
+    const [{ data: allLines }, { data: tasks }] = await Promise.all([
+      supabase.from('WorkOrderTaskLines').select('task_id, completed').in('task_id', taskIds),
+      supabase.from('WorkOrderTasks').select('id, status, manufacturing_order_id').in('id', taskIds),
+    ]);
+
+    const agg = new Map<string, { total: number; done: number }>();
+    for (const l of allLines ?? []) {
+      const tid = (l as any).task_id as string;
+      const e = agg.get(tid) ?? { total: 0, done: 0 };
+      e.total += 1;
+      if ((l as any).completed) e.done += 1;
+      agg.set(tid, e);
+    }
+    const statusById = new Map<string, string>((tasks ?? []).map((t: any) => [t.id, t.status]));
+    const moByTask = new Map<string, string>((tasks ?? []).map((t: any) => [t.id, t.manufacturing_order_id]));
+    const now = new Date().toISOString();
+    const toComplete: string[] = [];
+    const toReopen: string[] = [];
+    for (const [tid, v] of agg) {
+      const allDone = v.total > 0 && v.done === v.total;
+      const st = statusById.get(tid);
+      if (allDone && st !== 'completed') toComplete.push(tid);
+      else if (!allDone && st === 'completed') toReopen.push(tid);
+    }
+    if (toComplete.length > 0) {
+      await supabase.from('WorkOrderTasks')
+        .update({ status: 'completed', completed_at: now, updated_at: now })
+        .in('id', toComplete);
+    }
+    if (toReopen.length > 0) {
+      await supabase.from('WorkOrderTasks')
+        .update({ status: 'in_progress', completed_at: null, updated_at: now })
+        .in('id', toReopen);
+    }
+
+    // If completing these cut tasks finishes ALL of an MO's tasks, advance it to QC.
+    if (toComplete.length > 0) {
+      const affectedMoIds = [...new Set(toComplete.map((tid) => moByTask.get(tid)).filter(Boolean))] as string[];
+      for (const moId of affectedMoIds) {
+        const { data: moTasks } = await supabase
+          .from('WorkOrderTasks')
+          .select('status')
+          .eq('manufacturing_order_id', moId)
+          .eq('deleted', false);
+        const allDone = (moTasks ?? []).length > 0 && (moTasks ?? []).every((t: any) => t.status === 'completed');
+        if (allDone) {
+          await advanceMOOnAllTasksComplete(moId);
+        }
+      }
+    }
+  }, []);
 
   const executeMarkCut = useCallback(async () => {
     if (!confirmCut) return;
@@ -607,9 +702,9 @@ export default function CutOptimization() {
       .map(c => c.wotl_id);
 
     if (wotlIdsToUpdate.length === 0) {
-      setPendingCuts(prev => prev.map(c =>
-        c.sku === sku ? { ...c, completed: markCompleted } : c,
-      ));
+      queryClient.setQueryData<{ cuts: PendingCut[]; ineligibleCount: number }>(cutsQueryKey, (old) =>
+        old ? { ...old, cuts: old.cuts.map(c => (c.sku === sku ? { ...c, completed: markCompleted } : c)) } : old,
+      );
       return;
     }
 
@@ -625,9 +720,18 @@ export default function CutOptimization() {
         return;
       }
 
-      setPendingCuts(prev => prev.map(c =>
-        c.sku === sku ? { ...c, completed: markCompleted } : c,
-      ));
+      // Complete/reopen the parent task so Assembly readiness reflects it.
+      await syncTaskCompletionForLines(wotlIdsToUpdate);
+
+      queryClient.setQueryData<{ cuts: PendingCut[]; ineligibleCount: number }>(cutsQueryKey, (old) =>
+        old ? { ...old, cuts: old.cuts.map(c => (c.sku === sku ? { ...c, completed: markCompleted } : c)) } : old,
+      );
+
+      // Keep the Workstation view in sync: its part counts and (auto-started)
+      // task statuses depend on these same WorkOrderTaskLines. removeQueries (not
+      // invalidate) is required because refetchOnMount is disabled globally, so a
+      // merely-stale cache would not refetch when Workstation is next opened.
+      queryClient.removeQueries({ queryKey: ['workstation-tasks'] });
 
       addNotification({
         type: 'success',
@@ -637,7 +741,7 @@ export default function CutOptimization() {
     } finally {
       setMarkingReady(null);
     }
-  }, [confirmCut, pendingCuts, addNotification]);
+  }, [confirmCut, pendingCuts, addNotification, queryClient, cutsQueryKey, syncTaskCompletionForLines]);
 
   // All SKU groups (unfiltered) for the sidebar
   const allSkuGroups: SkuGroup[] = useMemo(() => {
@@ -703,6 +807,92 @@ export default function CutOptimization() {
     () => skuGroups.filter(g => selectedSkus.has(g.sku)),
     [skuGroups, selectedSkus],
   );
+
+  // Count of not-yet-cut lines across all visible SKUs (drives the "Mark All" button).
+  const uncutLineCount = useMemo(
+    () => skuGroups.reduce((sum, g) => sum + g.cuts.filter(c => !c.completed).length, 0),
+    [skuGroups],
+  );
+
+  const executeMarkAllCut = useCallback(async () => {
+    setConfirmAllCut(false);
+    const allCuts = skuGroups.flatMap(g => g.cuts).filter(c => !c.completed);
+    const wotlIds = [...new Set(allCuts.map(c => c.wotl_id))];
+    if (wotlIds.length === 0) return;
+
+    setMarkingAll(true);
+    try {
+      // Resolve parent tasks: block only if the MO is not in production; otherwise
+      // auto-start any pending tasks so cutting is never blocked by "Start".
+      const { data: taskRows } = await supabase
+        .from('WorkOrderTaskLines')
+        .select('task_id')
+        .in('id', wotlIds);
+      const taskIds = [...new Set((taskRows ?? []).map((r: any) => r.task_id))];
+
+      if (taskIds.length > 0) {
+        const { data: tasks } = await supabase
+          .from('WorkOrderTasks')
+          .select('id, status, manufacturing_order_id')
+          .in('id', taskIds);
+
+        const moIds = [...new Set((tasks ?? []).map((t: any) => t.manufacturing_order_id).filter(Boolean))];
+        if (moIds.length > 0) {
+          const { data: mos } = await supabase
+            .from('ManufacturingOrders')
+            .select('id, status')
+            .in('id', moIds);
+          const draft = (mos ?? []).filter((m: any) => m.status !== 'in_production');
+          if (draft.length > 0) {
+            addNotification({
+              type: 'warning',
+              title: 'MO Not In Production',
+              message: 'Some Work Orders are still draft/planned. Move them to In Production before marking materials as cut.',
+            });
+            return;
+          }
+        }
+
+        const now = new Date().toISOString();
+        const notStartedIds = (tasks ?? []).filter((t: any) => t.status === 'pending').map((t: any) => t.id);
+        if (notStartedIds.length > 0) {
+          await supabase
+            .from('WorkOrderTasks')
+            .update({ status: 'in_progress', started_at: now, updated_at: now })
+            .in('id', notStartedIds);
+        }
+      }
+
+      const nowIso = new Date().toISOString();
+      const { error } = await supabase
+        .from('WorkOrderTaskLines')
+        .update({ completed: true, completed_at: nowIso })
+        .in('id', wotlIds);
+
+      if (error) {
+        addNotification({ type: 'error', title: 'Update Failed', message: error.message });
+        return;
+      }
+
+      // Complete parent tasks that are now fully cut (Assembly readiness).
+      await syncTaskCompletionForLines(wotlIds);
+
+      queryClient.setQueryData<{ cuts: PendingCut[]; ineligibleCount: number }>(cutsQueryKey, (old) =>
+        old ? { ...old, cuts: old.cuts.map(c => (wotlIds.includes(c.wotl_id) ? { ...c, completed: true } : c)) } : old,
+      );
+
+      queryClient.removeQueries({ queryKey: ['workstation-tasks'] });
+
+      addNotification({
+        type: 'success',
+        title: 'All Marked as Cut',
+        message: `${wotlIds.length} line(s) across ${skuGroups.length} material(s) marked as cut.`,
+      });
+      await refetchCuts();
+    } finally {
+      setMarkingAll(false);
+    }
+  }, [skuGroups, addNotification, queryClient, cutsQueryKey, refetchCuts, syncTaskCompletionForLines]);
 
   const toggleSku = (sku: string) => {
     setSelectedSkus(prev => {
@@ -788,8 +978,9 @@ export default function CutOptimization() {
     return { base64: logoBase64, w, h };
   }, []);
 
-  const handlePrintAllProfiles = useCallback(async () => {
-    const profileGroups = selectedGroups.filter(g => {
+  const handlePrintAllProfiles = useCallback(async (groupsArg?: SkuGroup[]) => {
+    const source = groupsArg ?? selectedGroups;
+    const profileGroups = source.filter(g => {
       return g.cuts.some(c => c.cut_length_mm != null && c.cut_length_mm > 0);
     });
     if (profileGroups.length === 0) return;
@@ -831,17 +1022,18 @@ export default function CutOptimization() {
     doc.save(`CutOrder-Profiles-${new Date().toISOString().slice(0, 10)}.pdf`);
   }, [selectedGroups, loadLogo]);
 
-  const handlePrintAllFabric = useCallback(async () => {
-    if (selectedGroups.length === 0) return;
+  const handlePrintAllFabric = useCallback(async (groupsArg?: SkuGroup[]) => {
+    const source = groupsArg ?? selectedGroups;
+    if (source.length === 0) return;
     const logo = await loadLogo();
 
-    const allMoIds = [...new Set(selectedGroups.flatMap(g => g.cuts.map(c => c.mo_id)))];
+    const allMoIds = [...new Set(source.flatMap(g => g.cuts.map(c => c.mo_id)))];
     const moHexMap: Record<string, string> = {};
     allMoIds.forEach((id, i) => { moHexMap[id] = MO_HEX_COLORS[i % MO_HEX_COLORS.length]; });
     const moNumberMap: Record<string, string> = {};
-    selectedGroups.forEach(g => g.cuts.forEach(c => { moNumberMap[c.mo_id] = c.mo_number; }));
+    source.forEach(g => g.cuts.forEach(c => { moNumberMap[c.mo_id] = c.mo_number; }));
 
-    for (const group of selectedGroups) {
+    for (const group of source) {
       const fabricPieces: FabricPiece[] = group.cuts.flatMap(c =>
         decomposePanelIntoDrops(c, group.rollWidthMm),
       );
@@ -1049,45 +1241,51 @@ export default function CutOptimization() {
           {/* Refresh */}
           <button
             type="button"
-            onClick={fetchPendingCuts}
+            onClick={() => { void refetchCuts(); }}
             className="inline-flex items-center justify-center w-8 h-8 text-gray-500 hover:text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
             title="Refresh"
           >
             <RefreshCw className="w-3.5 h-3.5" />
           </button>
 
-          {/* Actions dropdown */}
+          {/* Download all SKUs of the current cutting station in one PDF */}
+          {skuGroups.length > 0 && (
+            <button
+              type="button"
+              onClick={() => { void (mode === 'profiles' ? handlePrintAllProfiles(skuGroups) : handlePrintAllFabric(skuGroups)); }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-500 transition-colors"
+              title={mode === 'profiles'
+                ? 'Download all SKUs of this station in one consolidated cut-order PDF (grouped by SKU)'
+                : 'Download a cut-order PDF for every SKU of this station'}
+            >
+              <FileDown className="w-3.5 h-3.5" />
+              All SKU PDF{mode === 'profiles' ? '' : ` (${skuGroups.length})`}
+            </button>
+          )}
+
+          {/* Mark every visible cut as cut at once */}
+          {uncutLineCount > 0 && (
+            <button
+              type="button"
+              disabled={markingAll}
+              onClick={() => setConfirmAllCut(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-60 transition-colors"
+              title="Mark all pending cuts of this station as cut (auto-starts tasks)"
+            >
+              {markingAll ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+              Mark All Cut ({uncutLineCount})
+            </button>
+          )}
+
+          {/* Thermal stickers (All SKU PDF lives in its own toolbar button) */}
           {selectedGroups.length > 0 && (
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setActionsOpen((p) => !p)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors"
-              >
-                Actions <MoreVertical className="w-3.5 h-3.5" />
-              </button>
-              {actionsOpen && (
-                <>
-                  <div className="fixed inset-0 z-30" onClick={() => setActionsOpen(false)} />
-                  <div className="absolute right-0 mt-1 w-52 bg-white border border-gray-200 rounded-lg shadow-lg z-40 py-1">
-                    <button
-                      type="button"
-                      onClick={() => { setActionsOpen(false); mode === 'profiles' ? handlePrintAllProfiles() : handlePrintAllFabric(); }}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                    >
-                      <Printer className="w-4 h-4 text-gray-400" /> Cut Order PDF
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setActionsOpen(false); printThermalStickers(); }}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                    >
-                      <Printer className="w-4 h-4 text-gray-400" /> Thermal Stickers (4×1″)
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
+            <button
+              type="button"
+              onClick={() => printThermalStickers()}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-gray-700 rounded-lg hover:bg-gray-600 transition-colors"
+            >
+              <Printer className="w-3.5 h-3.5" /> PDF Stickers (4×1″)
+            </button>
           )}
         </div>
       </div>
@@ -1515,6 +1713,25 @@ export default function CutOptimization() {
               <button type="button" onClick={executeMarkCut} className={`px-3 py-1.5 text-xs font-medium text-white rounded ${confirmCut.markCompleted ? 'bg-green-600 hover:bg-green-700' : 'bg-amber-600 hover:bg-amber-700'}`}>
                 {confirmCut.markCompleted ? 'Yes, Mark as Cut' : 'Yes, Revert'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Confirm Mark All Cut Dialog */}
+      {confirmAllCut && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-sm p-6">
+            <h3 className="text-sm font-semibold text-gray-900 mb-2">Mark All as Cut</h3>
+            <p className="text-sm text-gray-600 mb-1">
+              Mark <span className="font-semibold">{uncutLineCount}</span> pending line(s) across{' '}
+              <span className="font-semibold">{skuGroups.length}</span> material(s) as cut?
+            </p>
+            <p className="text-xs text-gray-400 mb-5">
+              Any not-yet-started cut tasks will be started automatically. Materials will move to the Completed tab.
+            </p>
+            <div className="flex items-center justify-end gap-2">
+              <button type="button" onClick={() => setConfirmAllCut(false)} className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded hover:bg-gray-200">Cancel</button>
+              <button type="button" onClick={executeMarkAllCut} className="px-3 py-1.5 text-xs font-medium text-white rounded bg-green-600 hover:bg-green-700">Yes, Mark All as Cut</button>
             </div>
           </div>
         </div>

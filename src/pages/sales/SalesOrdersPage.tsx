@@ -27,7 +27,7 @@ const STATUS_LABELS: Record<string, string> = {
   in_production: 'In Production',
   ready_for_delivery: 'Ready for Delivery',
   on_hold: 'On Hold',
-  delivered: 'Completed',
+  delivered: 'Delivered',
   closed: 'Closed',
   cancelled: 'Cancelled',
 };
@@ -45,7 +45,7 @@ export default function SalesOrdersPage() {
   const { salesOrders, loading, error, refetch } = useSalesOrders();
   const orders: SalesOrderRow[] = (salesOrders ?? []) as SalesOrderRow[];
   const [moCountBySoId, setMoCountBySoId] = useState<Record<string, number>>({});
-  const [financialBySoId, setFinancialBySoId] = useState<Record<string, { total_paid: number }>>({});
+  const [financialBySoId, setFinancialBySoId] = useState<Record<string, { total_paid: number; settled: boolean }>>({});
   const [activeTab, setActiveTab] = useState(() => {
     const raw = new URLSearchParams(window.location.search).get('status')?.toLowerCase() ?? 'all';
     if ((STATUS_VALUES as readonly string[]).includes(raw)) return raw;
@@ -89,13 +89,14 @@ export default function SalesOrdersPage() {
     const soIds = orders.map((o) => o.id);
     supabase
       .from('sales_order_financial_summary')
-      .select('sales_order_id, total_paid')
+      .select('sales_order_id, total_paid, delivery_financials_ok')
       .in('sales_order_id', soIds)
-      .then(({ data }: { data: { sales_order_id: string; total_paid: number | null }[] | null }) => {
-        const nextBySo: Record<string, { total_paid: number }> = {};
+      .then(({ data }: { data: { sales_order_id: string; total_paid: number | null; delivery_financials_ok: boolean | null }[] | null }) => {
+        const nextBySo: Record<string, { total_paid: number; settled: boolean }> = {};
         (data || []).forEach((row) => {
           nextBySo[row.sales_order_id] = {
             total_paid: Number(row.total_paid ?? 0),
+            settled: Boolean(row.delivery_financials_ok),
           };
         });
         setFinancialBySoId(nextBySo);
@@ -387,13 +388,17 @@ export default function SalesOrdersPage() {
                           <div className="flex justify-center">
                             {(() => {
                               const total = order.total_amount ?? 0;
-                              const paid = financialBySoId[order.id]?.total_paid ?? 0;
-                              const status = total <= 0
+                              const fin = financialBySoId[order.id];
+                              const paid = fin?.total_paid ?? 0;
+                              // "Settled" (fully invoiced + fully paid within rounding) is the
+                              // single source of truth; a rounding penny must not read as partial.
+                              const settled = Boolean(fin?.settled);
+                              const status = total <= 0 || paid <= 0
                                 ? 'collection_unpaid'
-                                : paid <= 0
-                                  ? 'collection_unpaid'
-                                  : paid >= total
-                                    ? (paid > total ? 'collection_overpaid' : 'collection_paid')
+                                : paid > total + 0.05
+                                  ? 'collection_overpaid'
+                                  : settled
+                                    ? 'collection_paid'
                                     : 'collection_partial';
                               return <StatusBadge status={status} type="payment" size="sm" />;
                             })()}

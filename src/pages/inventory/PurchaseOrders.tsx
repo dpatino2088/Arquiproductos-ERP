@@ -6,6 +6,7 @@ import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { usePurchaseOrders, PurchaseOrderStatus } from '../../hooks/usePurchaseOrders';
 import { useWarehouses } from '../../hooks/useWarehouses';
 import { useOrganizationContext } from '../../context/OrganizationContext';
+import { usePermissions } from '../../hooks/usePermissions';
 import { Search, SortAsc, SortDesc, Plus } from 'lucide-react';
 import {
   Select,
@@ -41,6 +42,8 @@ function fmtCurrency(v: number, currency = 'USD'): string {
 export default function PurchaseOrders() {
   const { registerSubmodules } = useSubmoduleNav();
   const { activeOrganizationId } = useOrganizationContext();
+  const { can } = usePermissions();
+  const canManagePOs = can('inventory.purchase_orders.write');
   const { warehouses } = useWarehouses(activeOrganizationId);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<PurchaseOrderStatus | ''>('');
@@ -107,14 +110,16 @@ export default function PurchaseOrders() {
             {purchaseOrders.length} purchase order{purchaseOrders.length === 1 ? '' : 's'}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => router.navigate('/inventory/purchase-orders/new')}
-          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-gray-800 rounded-lg hover:bg-gray-700"
-        >
-          <Plus className="w-4 h-4" />
-          New Purchase Order
-        </button>
+        {canManagePOs && (
+          <button
+            type="button"
+            onClick={() => router.navigate('/inventory/purchase-orders/new')}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-gray-800 rounded-lg hover:bg-gray-700"
+          >
+            <Plus className="w-4 h-4" />
+            New Purchase Order
+          </button>
+        )}
       </div>
 
       <div className="mb-4">
