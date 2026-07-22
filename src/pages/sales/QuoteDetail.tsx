@@ -114,6 +114,8 @@ interface QuoteLine {
   name: string | null;
   sku: string | null;
   product_type: string | null;
+  configured_product_id?: string | null;
+  custom_category?: string | null;
   width_m: number | null;
   height_m: number | null;
   quantity: number;
@@ -269,7 +271,7 @@ export default function QuoteDetail() {
       const [linesRes, proposalsRes, soRes, timelineRes, totalsRes] = await Promise.all([
         supabase
           .from('QuoteLines')
-          .select('id, name, sku, product_type, width_m, height_m, quantity, unit_msrp, msrp, unit_dealer_price_snapshot, dealer_price_total, config_snapshot')
+          .select('id, name, sku, product_type, configured_product_id, custom_category, width_m, height_m, quantity, unit_msrp, msrp, unit_dealer_price_snapshot, dealer_price_total, config_snapshot')
           .eq('quote_id', quoteId)
           .order('sort_order', { ascending: true })
           .order('created_at', { ascending: true }),
@@ -584,13 +586,26 @@ export default function QuoteDetail() {
 
   const status = (quote?.status || '').toLowerCase();
   const measuresConfirmed = quote?.measures_confirmed ?? false;
+  // Only made-to-measure / manufactured lines need measures confirmed. A quote that
+  // holds only Service / Product / Shipping / catalog lines skips the step entirely.
+  const quoteRequiresMeasures = useMemo(
+    () =>
+      lines.some(
+        (l) =>
+          (l.configured_product_id != null && (l.product_type ?? '') !== 'catalog') ||
+          (l.custom_category ?? '') === 'made_to_measure',
+      ),
+    [lines],
+  );
   const canCreateProposal =
     ['draft', 'approved'].includes(status) && !hasActiveProposal && !measuresConfirmed;
   const canConfirmMeasures =
-    status === 'approved' && !measuresConfirmed && !salesOrder;
+    status === 'approved' && !measuresConfirmed && !salesOrder && quoteRequiresMeasures;
   const canReopenMeasures =
     measuresConfirmed && status !== 'converted' && !salesOrder;
-  const canCreateSO = status === 'approved' && measuresConfirmed && !salesOrder;
+  // SO can be created once measures are confirmed OR when no line needs measures.
+  const canCreateSO =
+    status === 'approved' && !salesOrder && (measuresConfirmed || !quoteRequiresMeasures);
   const canEditQuote = !measuresConfirmed && status !== 'converted';
   const canDuplicate = !!quote;
   // Undo a mistaken approval: internal user with quotes permission, approved quote,

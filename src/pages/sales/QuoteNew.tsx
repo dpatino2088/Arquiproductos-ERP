@@ -15,6 +15,7 @@ import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAccessContext } from '../../hooks/useAccessContext';
 import { useDirectoryCustomers } from '../../hooks/useDirectoryCustomers';
 import { useCreateQuote, useUpdateQuote, useQuoteLines, approveQuote, normalizeStatus } from '../../hooks/useQuotes';
+import { useProductTypes } from '../../hooks/useProductTypes';
 import { QuoteStatus } from '../../types/catalog';
 import { Plus, Edit, Trash2, X, Download, GripVertical, Eye, Copy, FileText, Printer, ChevronDown, Settings2, ArrowLeft, Ruler, ShoppingBag, Ban, Check } from 'lucide-react';
 import { useProposalsByQuote, createProposalFromQuote } from '../../hooks/useProposals';
@@ -784,15 +785,22 @@ export default function QuoteNew() {
   // ── Custom / service lines (inline-editable, saved on Quote save) ──
   // qty/unit_price are kept as raw strings while editing to avoid controlled
   // number-input quirks (stuck leading zero); parsed to numbers on save/total.
-  type CustomLineCategory = 'service' | 'shipping' | 'installation' | 'delivery' | 'other';
-  type ServiceLineDraft = { id: string; name: string; qty: string; unit_cost: string; markup_pct: string; unit_price: string; category: CustomLineCategory; area: string; position: string };
+  type CustomLineCategory = 'service' | 'product' | 'shipping' | 'made_to_measure' | 'installation' | 'delivery' | 'other';
+  // Dimensions are captured in millimeters (like the configurator) and stored as meters.
+  type ServiceLineDraft = { id: string; name: string; qty: string; unit_cost: string; markup_pct: string; unit_price: string; category: CustomLineCategory; area: string; position: string; width_mm: string; height_mm: string; product_type_id: string; drive: string };
   const CUSTOM_LINE_CATEGORIES: { value: CustomLineCategory; label: string }[] = [
     { value: 'service', label: 'Service' },
+    { value: 'product', label: 'Product' },
     { value: 'shipping', label: 'Shipping' },
+    { value: 'made_to_measure', label: 'Made-to-measure' },
     { value: 'installation', label: 'Installation' },
     { value: 'delivery', label: 'Delivery' },
     { value: 'other', label: 'Other' },
   ];
+  // Only made-to-measure custom lines carry width/height and require Confirm Measures.
+  const MADE_TO_MEASURE_CATEGORY: CustomLineCategory = 'made_to_measure';
+  const customCategoryLabel = (cat: string | null | undefined): string =>
+    CUSTOM_LINE_CATEGORIES.find((c) => c.value === cat)?.label ?? 'Service';
   // Sale price from cost + markup. Returns '' so the field can stay empty while editing.
   const customLinePriceFromCostMarkup = (cost: string, markup: string): string => {
     const c = Number(cost);
@@ -803,6 +811,8 @@ export default function QuoteNew() {
   };
   const [draftServiceLines, setDraftServiceLines] = useState<ServiceLineDraft[]>([]);
   const [savingServiceLines, setSavingServiceLines] = useState(false);
+  // Custom Item is created/edited in a type-aware modal (one line at a time).
+  const [editingCustomDraftId, setEditingCustomDraftId] = useState<string | null>(null);
   const [globalCommercialDiscountPct, setGlobalCommercialDiscountPct] = useState<string>('');
   const [globalCommercialReason, setGlobalCommercialReason] = useState('');
   const [globalCommercialNote, setGlobalCommercialNote] = useState('');
@@ -817,6 +827,12 @@ export default function QuoteNew() {
   const configuratorDraftKey = quoteId ? `productConfiguratorDraft:${quoteId}` : null;
 
   const { lines: quoteLines, loading: loadingLines, error: errorLines, refetch: refetchLines } = useQuoteLines(quoteId);
+  // Product types for made-to-measure custom items (excludes the internal "service" type).
+  const { productTypes: allProductTypes } = useProductTypes();
+  const selectableProductTypes = useMemo(
+    () => (allProductTypes || []).filter((pt) => (pt.code ?? '').toLowerCase() !== 'service'),
+    [allProductTypes],
+  );
   const { settings: costSettings } = useCostSettings();
   const { tiers: dealerTiers } = useDealerTiers();
   const normalizedInternalRole = (internalRole ?? '').toString().trim().toLowerCase();
@@ -3554,8 +3570,13 @@ export default function QuoteNew() {
           category: (target.custom_category as CustomLineCategory) ?? 'service',
           area: target.area ?? '',
           position: target.position ?? '',
+          width_mm: target.width_m != null ? String(Math.round(Number(target.width_m) * 1000)) : '',
+          height_mm: target.height_m != null ? String(Math.round(Number(target.height_m) * 1000)) : '',
+          product_type_id: (target.custom_category === 'made_to_measure' && target.product_type_id) ? String(target.product_type_id) : '',
+          drive: target.drive_type ? String(target.drive_type) : '',
         },
       ]);
+      setEditingCustomDraftId(lineId);
       return;
     }
     setEditingLineId(lineId);
@@ -3652,10 +3673,21 @@ export default function QuoteNew() {
   };
 
   const addCustomLine = () => {
+    const newId = `temp-${Date.now()}`;
     setDraftServiceLines((prev) => [
       ...prev,
-      { id: `temp-${Date.now()}`, name: '', qty: '1', unit_cost: '', markup_pct: '', unit_price: '', category: 'service', area: '', position: '' },
+      { id: newId, name: '', qty: '1', unit_cost: '', markup_pct: '', unit_price: '', category: 'service', area: '', position: '', width_mm: '', height_mm: '', product_type_id: '', drive: '' },
     ]);
+    setEditingCustomDraftId(newId);
+  };
+
+  // Close the custom-item modal and discard the in-progress draft. For a brand-new line
+  // this drops it entirely; for an existing line it discards unsaved edits so the saved
+  // row (hidden while editing) reappears unchanged.
+  const closeCustomModal = () => {
+    const id = editingCustomDraftId;
+    setEditingCustomDraftId(null);
+    if (id) removeCustomLineDraft(id);
   };
 
   const updateCustomLineDraft = (id: string, fields: Partial<ServiceLineDraft>) => {
@@ -3729,6 +3761,10 @@ export default function QuoteNew() {
       targetId = inserted?.id ?? null;
     }
     if (targetId) {
+      const isMadeToMeasure = d.category === MADE_TO_MEASURE_CATEGORY;
+      // Inputs are millimeters (like the configurator); store as meters.
+      const widthMm = isMadeToMeasure ? Number(d.width_mm) : NaN;
+      const heightMm = isMadeToMeasure ? Number(d.height_mm) : NaN;
       await supabase.rpc('set_custom_quote_line_pricing', {
         p_quote_line_id: targetId,
         p_name: d.name.trim(),
@@ -3739,7 +3775,18 @@ export default function QuoteNew() {
         p_category: d.category || 'service',
         p_area: d.area.trim() || null,
         p_position: d.position.trim() || null,
+        p_width_m: Number.isFinite(widthMm) && widthMm > 0 ? widthMm / 1000 : null,
+        p_height_m: Number.isFinite(heightMm) && heightMm > 0 ? heightMm / 1000 : null,
       });
+      // Made-to-measure lines can carry a Product Type and System Drive so their table
+      // columns match regular product lines. Non-MTM lines fall back to the service type.
+      await supabase
+        .from('QuoteLines')
+        .update({
+          product_type_id: isMadeToMeasure && d.product_type_id ? d.product_type_id : servicePTId,
+          drive_type: isMadeToMeasure && d.drive ? d.drive : null,
+        })
+        .eq('id', targetId);
     }
     return targetId;
   };
@@ -3764,6 +3811,7 @@ export default function QuoteNew() {
       const savedId = await persistCustomLineDraft(draft, qid);
       if (!savedId) return; // persist failed → keep the draft so the user doesn't lose their work
       setDraftServiceLines((prev) => prev.filter((d) => d.id !== id));
+      setEditingCustomDraftId(null);
       await refetchLines();
     } finally {
       setSavingServiceLines(false);
@@ -4261,13 +4309,17 @@ export default function QuoteNew() {
         const productTypeCode = String(line.product_type ?? '').trim().toLowerCase();
         const isCatalogLine = productTypeCode === 'catalog';
         const isServiceLine = productTypeCode === 'service';
+        const isMadeToMeasure = isServiceLine && String((line as any).custom_category ?? '') === 'made_to_measure';
+        const mtmTypeName = ((line as any).ProductType?.name && (line as any).ProductType?.code !== 'service')
+          ? (line as any).ProductType.name
+          : 'Made-to-measure';
         return {
           id: line.id,
           sku: line.sku ?? line.CatalogItems?.sku ?? null,
           catalog_code: line.CatalogItems?.sku ?? null,
           area: line.area,
           position: line.position,
-          product_type: isServiceLine ? 'Service' : (line.ProductType?.name ?? line.product_type ?? '—'),
+          product_type: isServiceLine ? (isMadeToMeasure ? mtmTypeName : 'Service') : (line.ProductType?.name ?? line.product_type ?? '—'),
           style_code: line.config_snapshot?.style_code ?? line.config_snapshot?.styleCode ?? null,
           track_only: Boolean(line.config_snapshot?.track_only),
           has_side_channel:
@@ -4282,12 +4334,12 @@ export default function QuoteNew() {
             || line.config_snapshot?.bottom_channel === true,
           collection_name: line.collection_name,
           variant_name: line.variant_name,
-          drive_type: isServiceLine ? null : line.drive_type,
+          drive_type: isServiceLine ? (isMadeToMeasure ? (line.drive_type ?? null) : null) : line.drive_type,
           operating_system_sku_name: isServiceLine ? null : (line.drive_system_label ?? null),
           width_m: line.width_m,
           height_m: line.height_m,
           service_name: isServiceLine ? (line.name ?? null) : null,
-          dimensions_source: (isCatalogLine || isServiceLine)
+          dimensions_source: (isCatalogLine || (isServiceLine && !isMadeToMeasure))
             ? null
             : {
                 width_m: line.width_m,
@@ -4489,13 +4541,17 @@ export default function QuoteNew() {
         const productTypeCode = String(line.product_type ?? '').trim().toLowerCase();
         const isCatalogLine = productTypeCode === 'catalog';
         const isServiceLine = productTypeCode === 'service';
+        const isMadeToMeasure = isServiceLine && String((line as any).custom_category ?? '') === 'made_to_measure';
+        const mtmTypeName = ((line as any).ProductType?.name && (line as any).ProductType?.code !== 'service')
+          ? (line as any).ProductType.name
+          : 'Made-to-measure';
         return {
           id: line.id,
           sku: line.sku ?? line.CatalogItems?.sku ?? null,
           catalog_code: line.CatalogItems?.sku ?? null,
           area: line.area,
           position: line.position,
-          product_type: isServiceLine ? 'Service' : (line.ProductType?.name ?? line.product_type ?? '—'),
+          product_type: isServiceLine ? (isMadeToMeasure ? mtmTypeName : 'Service') : (line.ProductType?.name ?? line.product_type ?? '—'),
           style_code: line.config_snapshot?.style_code ?? line.config_snapshot?.styleCode ?? null,
           track_only: Boolean(line.config_snapshot?.track_only),
           has_side_channel:
@@ -4510,12 +4566,12 @@ export default function QuoteNew() {
             || line.config_snapshot?.bottom_channel === true,
           collection_name: line.collection_name,
           variant_name: line.variant_name,
-          drive_type: isServiceLine ? null : line.drive_type,
+          drive_type: isServiceLine ? (isMadeToMeasure ? (line.drive_type ?? null) : null) : line.drive_type,
           operating_system_sku_name: isServiceLine ? null : (line.drive_system_label ?? null),
           width_m: line.width_m,
           height_m: line.height_m,
           service_name: isServiceLine ? (line.name ?? null) : null,
-          dimensions_source: (isCatalogLine || isServiceLine)
+          dimensions_source: (isCatalogLine || (isServiceLine && !isMadeToMeasure))
             ? null
             : {
                 width_m: line.width_m,
@@ -5302,27 +5358,6 @@ export default function QuoteNew() {
                 <span>Total</span>
                 <span className="tabular-nums">{formatCurrency(totals.total, watch('currency'))}</span>
               </div>
-              {useDealerPrice && totals.effectiveDiscountPct != null && (
-                <div
-                  className="flex justify-between items-start py-1 mt-1 text-xs"
-                  title={`Promedio ponderado del descuento real sobre MSRP en todas las líneas.${dealerTierLabel ? ` Tier del dealer: ${dealerTierLabel} (${dealerDiscountPctForDisplay}%).` : ` Tier: ${dealerDiscountPctForDisplay}%.`}${totals.isBlendedDiscount ? ' Difiere del tier porque algunas categorías topan más bajo (ej. Motorized 60%).' : ''}`}
-                >
-                  <span className="text-gray-500">
-                    Effective discount
-                    {totals.isBlendedDiscount && (
-                      <span className="ml-1 text-amber-600">(blended)</span>
-                    )}
-                  </span>
-                  <span className="text-right">
-                    <span className="tabular-nums font-medium text-gray-700">{totals.effectiveDiscountPct}%</span>
-                    {totals.isBlendedDiscount && (
-                      <span className="block text-[10px] text-gray-400 tabular-nums">
-                        {dealerTierLabel ? `${dealerTierLabel} ` : ''}tier {dealerDiscountPctForDisplay}%
-                      </span>
-                    )}
-                  </span>
-                </div>
-              )}
               {quoteLines.length > 0 && (quoteLines[0] as { quote_created_by?: string })?.quote_created_by && (
                 <div className="text-xs text-gray-500 pt-1 border-t border-gray-100">
                   Created by: {(quoteLines[0] as { quote_created_by?: string }).quote_created_by}
@@ -5362,7 +5397,7 @@ export default function QuoteNew() {
                   className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium"
                 >
                   <Plus className="w-4 h-4" />
-                  Custom Line
+                  Custom Item
                 </button>
                 )}
                 <button
@@ -5442,7 +5477,13 @@ export default function QuoteNew() {
                           ? String(line.CatalogItems.item_role).replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())
                           : 'Catalog')
                       : isFilmLine ? 'Window Film'
-                      : isServiceLine ? 'Service'
+                      : isServiceLine ? (
+                          (line as any).custom_category === MADE_TO_MEASURE_CATEGORY
+                            ? (((line as any).ProductType?.name && (line as any).ProductType?.code !== 'service')
+                                ? (line as any).ProductType.name
+                                : 'Made-to-measure')
+                            : customCategoryLabel((line as any).custom_category)
+                        )
                       : isDraperyTrackOnly
                         ? 'Drapery Track'
                         : (line.ProductType?.name || line.product_type || 'N/A');
@@ -5477,7 +5518,10 @@ export default function QuoteNew() {
                     const catalogMfr = (isCatalogLine || isFilmLine)
                       ? ((line.CatalogItems?.Manufacturers as any)?.name || line.CatalogItems?.manufacturer || null)
                       : null;
-                    const driveDisplay = isServiceLine ? '—' : (isCatalogLine || isFilmLine) ? (catalogMfr || '—') : driveLabel;
+                    const serviceDriveLabel = (line.drive_type === 'motor' || line.drive_type === 'motorized')
+                      ? 'Motorized'
+                      : line.drive_type === 'manual' ? 'Manual' : '—';
+                    const driveDisplay = isServiceLine ? serviceDriveLabel : (isCatalogLine || isFilmLine) ? (catalogMfr || '—') : driveLabel;
                     const snap = line.config_snapshot ?? {};
                     const isRealItemId = (value: unknown): boolean =>
                       typeof value === 'string' && value.trim().length > 10 && value.toUpperCase() !== 'NONE';
@@ -5588,7 +5632,13 @@ export default function QuoteNew() {
                                 </div>
                               </div>
                             );
-                          })() : (
+                          })() : isServiceLine ? (
+                            (line as any).custom_category === MADE_TO_MEASURE_CATEGORY && (line.width_m || line.height_m) ? (
+                              <DimensionsStackView source={{ width_m: line.width_m, height_m: line.height_m }} />
+                            ) : (
+                              <span className="text-gray-400">—</span>
+                            )
+                          ) : (
                           <div className="inline-block">
                             <DimensionsStackView
                               source={{
@@ -5698,144 +5748,7 @@ export default function QuoteNew() {
                       </tr>
                     );
                   })}
-                  {/* ── Draft custom / service lines ── */}
-                  {draftServiceLines.map((d) => (
-                    <tr key={d.id} className="border-b border-gray-100 bg-blue-50/30 align-middle">
-                      {/* drag (disabled until the line is saved) */}
-                      <td className="py-3 px-2 w-10 align-middle text-gray-200" title="Save the line to enable drag & reorder">
-                        <GripVertical className="w-4 h-4" />
-                      </td>
-                      {/* # */}
-                      <td className="py-3 px-1 text-center text-gray-400 text-sm w-[28px] align-middle">—</td>
-                      {/* Area */}
-                      <td className="py-3 px-2 align-middle">
-                        <input
-                          className="w-full h-8 text-xs border border-gray-300 rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary/40"
-                          placeholder="Area"
-                          value={d.area}
-                          onChange={(e) => updateCustomLineDraft(d.id, { area: e.target.value })}
-                        />
-                      </td>
-                      {/* Position */}
-                      <td className="py-3 px-2 align-middle">
-                        <input
-                          className="w-full h-8 text-xs border border-gray-300 rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary/40"
-                          placeholder="Position"
-                          value={d.position}
-                          onChange={(e) => updateCustomLineDraft(d.id, { position: e.target.value })}
-                        />
-                      </td>
-                      {/* Product type → category selector (styled dropdown) */}
-                      <td className="py-3 pl-4 pr-2 align-middle">
-                        <SelectShadcn
-                          value={d.category}
-                          onValueChange={(v) => updateCustomLineDraft(d.id, { category: v as CustomLineCategory })}
-                        >
-                          <SelectTrigger
-                            className="!h-8 !rounded-md !border-gray-300 px-2.5 font-medium text-gray-700 hover:!border-gray-400 focus:!ring-primary/30 transition-colors"
-                            title="Custom line category"
-                          >
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent className="!rounded-md min-w-[9rem]">
-                            {CUSTOM_LINE_CATEGORIES.map((c) => (
-                              <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </SelectShadcn>
-                      </td>
-                      {/* Description */}
-                      <td className="py-3 px-2 align-middle">
-                        <input
-                          className="w-full h-8 text-sm border border-gray-300 rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary/40"
-                          placeholder="Description (e.g. Shipping, Installation…)"
-                          value={d.name}
-                          onChange={(e) => updateCustomLineDraft(d.id, { name: e.target.value })}
-                          autoFocus
-                        />
-                      </td>
-                      {/* System Drive → unit cost (internal) */}
-                      <td className="py-3 px-2 align-middle">
-                        <div className="relative">
-                          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-gray-400 pointer-events-none">$</span>
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            placeholder="Cost"
-                            className="w-full h-8 text-xs border border-gray-300 rounded pl-5 pr-2 text-right tabular-nums focus:outline-none focus:ring-1 focus:ring-primary/40"
-                            value={d.unit_cost}
-                            onChange={(e) => updateCustomLineDraft(d.id, { unit_cost: e.target.value.replace(/[^0-9.]/g, '') })}
-                            title="Internal unit cost (not shown to dealer)"
-                          />
-                        </div>
-                      </td>
-                      {/* Measurements → markup % */}
-                      <td className="py-3 px-2 align-middle">
-                        <div className="relative">
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            placeholder="Markup"
-                            className="w-full h-8 text-xs border border-gray-300 rounded pl-2 pr-5 text-right tabular-nums focus:outline-none focus:ring-1 focus:ring-primary/40"
-                            value={d.markup_pct}
-                            onChange={(e) => updateCustomLineDraft(d.id, { markup_pct: e.target.value.replace(/[^0-9.\-]/g, '') })}
-                            title="Sale markup over cost"
-                          />
-                          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-gray-400 pointer-events-none">%</span>
-                        </div>
-                      </td>
-                      {/* Qty (multiplier) — type=text avoids the number spinner that pushes the digit left */}
-                      <td className="py-3 pl-1 pr-2 text-right align-middle">
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          className="w-full h-8 text-sm border border-gray-300 rounded pl-1 pr-[3px] text-right tabular-nums focus:outline-none focus:ring-1 focus:ring-primary/40"
-                          value={d.qty}
-                          onChange={(e) => updateCustomLineDraft(d.id, { qty: e.target.value.replace(/[^0-9]/g, '') })}
-                          onBlur={(e) => { if (!e.target.value || Number(e.target.value) < 1) updateCustomLineDraft(d.id, { qty: '1' }); }}
-                        />
-                      </td>
-                      {/* Dealer price / unit price */}
-                      <td className="py-3 pl-2 pr-2 text-right align-middle" style={{ width: '92px' }}>
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          placeholder="0.00"
-                          className="w-[84px] h-8 text-sm border border-gray-300 rounded px-2 text-right focus:outline-none focus:ring-1 focus:ring-primary/40"
-                          value={d.unit_price}
-                          onChange={(e) => updateCustomLineDraft(d.id, { unit_price: e.target.value.replace(/[^0-9.]/g, '') })}
-                        />
-                      </td>
-                      {/* Total */}
-                      <td className="py-3 pl-2 pr-4 text-right font-medium text-gray-900 text-sm tabular-nums whitespace-nowrap align-middle" style={{ width: '96px' }}>
-                        {formatCurrency((Number(d.unit_price) || 0) * Math.max(1, Number(d.qty) || 1), watch('currency') as string ?? 'USD')}
-                      </td>
-                      {/* Actions */}
-                      <td className="py-3 pl-3 pr-3 whitespace-nowrap text-right align-middle" style={{ width: '140px' }}>
-                        <div className="flex items-center gap-0.5 justify-end">
-                          <button
-                            type="button"
-                            onClick={() => commitCustomLine(d.id)}
-                            disabled={savingServiceLines || !d.name.trim()}
-                            className="p-1.5 rounded transition-colors text-green-600 hover:bg-green-50 disabled:text-gray-300 disabled:hover:bg-transparent disabled:cursor-not-allowed"
-                            title={d.name.trim() ? 'Save line (enables reorder)' : 'Add a description first'}
-                          >
-                            <Check className="w-4 h-4" />
-                          </button>
-                          <span className="p-1.5 rounded text-gray-300" aria-hidden><Copy className="w-4 h-4" /></span>
-                          <span className="p-1.5 rounded text-gray-300" aria-hidden><Edit className="w-4 h-4" /></span>
-                          <button
-                            type="button"
-                            onClick={() => removeCustomLineDraft(d.id)}
-                            className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
-                            title="Delete line"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {/* Custom Items are created/edited in a type-aware modal (see below). */}
                 </tbody>
               </table>
             </div>
@@ -5864,6 +5777,209 @@ export default function QuoteNew() {
           />
         </div>
       )}
+
+      {/* ── Custom Item modal (type-aware: fields adapt to the selected type) ── */}
+      {editingCustomDraftId && (() => {
+        const d = draftServiceLines.find((x) => x.id === editingCustomDraftId);
+        if (!d) return null;
+        const isMTM = d.category === MADE_TO_MEASURE_CATEGORY;
+        const isNew = d.id.startsWith('temp-');
+        const currency = (watch('currency') as string) ?? 'USD';
+        const previewTotal = (Number(d.unit_price) || 0) * Math.max(1, Number(d.qty) || 1);
+        const set = (fields: Partial<ServiceLineDraft>) => updateCustomLineDraft(d.id, fields);
+        return (
+          <div className="fixed inset-0 bg-black bg-opacity-40 z-50 flex items-center justify-center p-6">
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between px-6 py-5 border-b">
+                <h3 className="text-base font-semibold text-gray-900">{isNew ? 'New Custom Item' : 'Edit Custom Item'}</h3>
+                <button type="button" onClick={closeCustomModal} className="p-1 hover:bg-gray-100 rounded" disabled={savingServiceLines}>
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="px-6 py-5 space-y-5">
+                {/* Type — drives which fields are relevant below */}
+                <div>
+                  <Label className="text-xs text-gray-600 mb-1.5">Type</Label>
+                  <SelectShadcn value={d.category} onValueChange={(v) => set({ category: v as CustomLineCategory })}>
+                    <SelectTrigger className="!h-10 !rounded-md !border-gray-300">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="!rounded-md">
+                      {CUSTOM_LINE_CATEGORIES.map((c) => (
+                        <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </SelectShadcn>
+                  {isMTM && (
+                    <p className="mt-1.5 text-[11px] text-amber-600">
+                      Made-to-measure items require dimensions and Confirm Measures before creating the Sales Order.
+                    </p>
+                  )}
+                </div>
+
+                {/* Product Type & System Drive — only for made-to-measure, so the line matches
+                    regular product columns in the table. */}
+                {isMTM && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label className="text-xs text-gray-600 mb-1.5">Product Type</Label>
+                      <SelectShadcn value={d.product_type_id || ''} onValueChange={(v) => set({ product_type_id: v })}>
+                        <SelectTrigger className="!h-10 !rounded-md !border-gray-300">
+                          <SelectValue placeholder="Select…" />
+                        </SelectTrigger>
+                        <SelectContent className="!rounded-md">
+                          {selectableProductTypes.map((pt) => (
+                            <SelectItem key={pt.id} value={pt.id}>{pt.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </SelectShadcn>
+                    </div>
+                    <div>
+                      <Label className="text-xs text-gray-600 mb-1.5">System Drive</Label>
+                      <SelectShadcn value={d.drive || ''} onValueChange={(v) => set({ drive: v })}>
+                        <SelectTrigger className="!h-10 !rounded-md !border-gray-300">
+                          <SelectValue placeholder="Select…" />
+                        </SelectTrigger>
+                        <SelectContent className="!rounded-md">
+                          <SelectItem value="manual">Manual</SelectItem>
+                          <SelectItem value="motor">Motorized</SelectItem>
+                        </SelectContent>
+                      </SelectShadcn>
+                    </div>
+                  </div>
+                )}
+
+                {/* Description — always required */}
+                <div>
+                  <Label className="text-xs text-gray-600 mb-1.5">Description <span className="text-red-500">*</span></Label>
+                  <Input
+                    autoFocus
+                    value={d.name}
+                    onChange={(e) => set({ name: e.target.value })}
+                    placeholder={
+                      d.category === 'shipping' ? 'e.g. Freight to site'
+                        : d.category === 'installation' ? 'e.g. On-site installation'
+                        : d.category === 'delivery' ? 'e.g. Local delivery'
+                        : d.category === 'product' ? 'e.g. Motor remote control'
+                        : isMTM ? 'e.g. Custom blackout panel'
+                        : 'e.g. Design service'
+                    }
+                  />
+                </div>
+
+                {/* Location — optional context, useful for products & made-to-measure */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-xs text-gray-600 mb-1.5">Area</Label>
+                    <Input value={d.area} onChange={(e) => set({ area: e.target.value })} placeholder="Optional" />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-600 mb-1.5">Position</Label>
+                    <Input value={d.position} onChange={(e) => set({ position: e.target.value })} placeholder="Optional" />
+                  </div>
+                </div>
+
+                {/* Dimensions — only for made-to-measure */}
+                {isMTM && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label className="text-xs text-gray-600 mb-1.5">Width (mm)</Label>
+                      <Input
+                        inputMode="decimal"
+                        value={d.width_mm}
+                        onChange={(e) => set({ width_mm: e.target.value.replace(/[^0-9.]/g, '') })}
+                        placeholder="e.g. 1000"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs text-gray-600 mb-1.5">Height (mm)</Label>
+                      <Input
+                        inputMode="decimal"
+                        value={d.height_mm}
+                        onChange={(e) => set({ height_mm: e.target.value.replace(/[^0-9.]/g, '') })}
+                        placeholder="e.g. 2000"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Quantity & dealer price */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-xs text-gray-600 mb-1.5">Quantity</Label>
+                    <Input
+                      inputMode="numeric"
+                      value={d.qty}
+                      onChange={(e) => set({ qty: e.target.value.replace(/[^0-9]/g, '') })}
+                      onBlur={(e) => { if (!e.target.value || Number(e.target.value) < 1) set({ qty: '1' }); }}
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-600 mb-1.5">Dealer price ($)</Label>
+                    <Input
+                      inputMode="decimal"
+                      value={d.unit_price}
+                      onChange={(e) => set({ unit_price: e.target.value.replace(/[^0-9.]/g, '') })}
+                      placeholder="0.00"
+                    />
+                  </div>
+                </div>
+
+                {/* Internal costing — optional, not shown to the dealer */}
+                <div className="rounded-md border border-gray-200 bg-gray-50/60 p-4">
+                  <p className="text-[11px] font-medium text-gray-500 mb-3">Internal — not shown to the dealer</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label className="text-xs text-gray-600 mb-1.5">Cost ($)</Label>
+                      <Input
+                        inputMode="decimal"
+                        value={d.unit_cost}
+                        onChange={(e) => set({ unit_cost: e.target.value.replace(/[^0-9.]/g, '') })}
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs text-gray-600 mb-1.5">Markup %</Label>
+                      <Input
+                        inputMode="decimal"
+                        value={d.markup_pct}
+                        onChange={(e) => set({ markup_pct: e.target.value.replace(/[^0-9.\-]/g, '') })}
+                        placeholder="e.g. 30"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-1 border-t border-gray-100">
+                  <span className="text-sm text-gray-500">Line total</span>
+                  <span className="text-lg font-semibold text-gray-900 tabular-nums">{formatCurrency(previewTotal, currency)}</span>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 px-6 py-4 border-t bg-gray-50">
+                <button
+                  type="button"
+                  onClick={closeCustomModal}
+                  disabled={savingServiceLines}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-md transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => commitCustomLine(d.id)}
+                  disabled={savingServiceLines || !d.name.trim() || (isMTM && (!Number(d.width_mm) || !Number(d.height_mm)))}
+                  className="px-4 py-2 text-sm font-medium text-white bg-primary hover:bg-primary/90 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={isMTM && (!Number(d.width_mm) || !Number(d.height_mm)) ? 'Enter width and height' : undefined}
+                >
+                  {savingServiceLines ? 'Saving…' : isNew ? 'Add Item' : 'Save Changes'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {commercialLineId && (
         <div className="fixed inset-0 bg-black bg-opacity-40 z-50 flex items-center justify-center p-6">
