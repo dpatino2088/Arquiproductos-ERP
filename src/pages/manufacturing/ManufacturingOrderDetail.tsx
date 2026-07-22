@@ -94,6 +94,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const [cancelReason, setCancelReason] = useState('');
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [advancingLineId, setAdvancingLineId] = useState<string | null>(null);
+  const [creatingAllWO, setCreatingAllWO] = useState(false);
   const [taskProgress, setTaskProgress] = useState<{ total: number; completed: number; inProgress: number }>({ total: 0, completed: 0, inProgress: 0 });
   const [woLineIds, setWoLineIds] = useState<Set<string>>(new Set());
   const [siblingMOs, setSiblingMOs] = useState<{ id: string; manufacturing_order_no: string }[]>([]);
@@ -145,7 +146,18 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const canWriteNotes = can('manufacturing.mo.notes.write');
   const canWriteAttachments = can('manufacturing.mo.attachments.write');
   const MATERIAL_READY_OR_BEYOND = ['materials_ready', 'in_production', 'completed'];
-  const linesReady = moLines.filter(l => MATERIAL_READY_OR_BEYOND.includes(l.status)).length;
+  const linesReady = moLines.filter(l => {
+    if (MATERIAL_READY_OR_BEYOND.includes(l.status)) return true;
+    // Material already allocated (readiness ok) counts as ready even if the line
+    // hasn't been promoted to materials_ready yet — no manual "Allocate" needed.
+    if (l.status === 'material_available' && l.sales_order_line_id) {
+      return lineReadinessBySoLineId.get(l.sales_order_line_id)?.readiness_status === 'ok';
+    }
+    return false;
+  }).length;
+  const eligibleWOCount = moLines.filter(
+    (l) => l.status === 'materials_ready' && !!l.sales_order_line_id && !woLineIds.has(l.sales_order_line_id as string)
+  ).length;
   const materialTag = moLines.length === 0
     ? ''
     : linesReady === moLines.length
@@ -314,13 +326,14 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   useEffect(() => {
     if (!moId) return;
     refetchMaterialReadiness();
-  }, [moId, allocationSignature, refetchMaterialReadiness]);
+    fetchMOLines();
+  }, [moId, allocationSignature, refetchMaterialReadiness, fetchMOLines]);
 
   useEffect(() => {
     if (autoPromotingLinesRef.current) return;
     const promotable = moLines.filter((l) => {
       if (!l.sales_order_line_id) return false;
-      if (l.status !== 'reviewed' && l.status !== 'confirmed') return false;
+      if (l.status !== 'reviewed' && l.status !== 'confirmed' && l.status !== 'material_available') return false;
       const r = lineReadinessBySoLineId.get(l.sales_order_line_id);
       return r?.readiness_status === 'ok';
     });
@@ -627,6 +640,67 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       message: `${Number(result.tasks_created ?? 0)} task(s) and ${Number(result.lines_created ?? 0)} component line(s) generated.`,
     });
   }, [moId, addNotification, fetchTaskProgress]);
+
+  const handleCreateAllWO = useCallback(async () => {
+    if (!moId) return;
+    const eligible = moLines.filter(
+      (l) => l.status === 'materials_ready' && !!l.sales_order_line_id && !woLineIds.has(l.sales_order_line_id as string)
+    );
+    if (eligible.length === 0) return;
+
+    setCreatingAllWO(true);
+    let created = 0;
+    let tasksTotal = 0;
+    let linesTotal = 0;
+    const createdSoLineIds: string[] = [];
+    const failures: string[] = [];
+
+    for (const line of eligible) {
+      const { data, error: rpcErr } = await supabase.rpc('generate_work_orders_for_line', {
+        p_mo_id: moId,
+        p_sales_order_line_id: line.sales_order_line_id,
+        p_regenerate: false,
+      });
+      const result = data as { ok?: boolean; error?: string; tasks_created?: number; lines_created?: number } | null;
+      if (rpcErr || !result?.ok) {
+        const message = (result?.error ?? rpcErr?.message ?? '').toLowerCase();
+        if (message.includes('already exist')) {
+          createdSoLineIds.push(line.sales_order_line_id as string);
+          continue;
+        }
+        failures.push(result?.error ?? rpcErr?.message ?? 'Unknown error');
+        continue;
+      }
+      created += 1;
+      tasksTotal += Number(result.tasks_created ?? 0);
+      linesTotal += Number(result.lines_created ?? 0);
+      createdSoLineIds.push(line.sales_order_line_id as string);
+    }
+
+    setCreatingAllWO(false);
+    await fetchTaskProgress();
+    if (createdSoLineIds.length > 0) {
+      setWoLineIds((prev) => {
+        const next = new Set(prev);
+        createdSoLineIds.forEach((id) => next.add(id));
+        return next;
+      });
+    }
+    if (created > 0) {
+      addNotification({
+        type: 'success',
+        title: 'Work Orders created',
+        message: `${created} line(s): ${tasksTotal} task(s) and ${linesTotal} component line(s) generated.`,
+      });
+    }
+    if (failures.length > 0) {
+      addNotification({
+        type: 'error',
+        title: 'Some lines failed',
+        message: `${failures.length} line(s) could not generate Work Orders. ${failures[0]}`,
+      });
+    }
+  }, [moId, moLines, woLineIds, addNotification, fetchTaskProgress]);
 
 
   if (!moId) {
@@ -1138,6 +1212,27 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       {/* Lines tab */}
       {activeTab === 'lines' && (
         <div className="rounded-lg border border-gray-200 overflow-hidden bg-white">
+          {!isTerminal && moLines.length > 0 && (
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50">
+              <span className="text-xs text-gray-500">
+                {eligibleWOCount > 0
+                  ? `${eligibleWOCount} line(s) ready to generate Work Orders`
+                  : 'All material-ready lines already have Work Orders'}
+              </span>
+              <button
+                onClick={(e) => { e.stopPropagation(); handleCreateAllWO(); }}
+                disabled={creatingAllWO || eligibleWOCount === 0}
+                title={eligibleWOCount === 0 ? 'No material-ready lines pending Work Orders' : undefined}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+                  creatingAllWO || eligibleWOCount === 0
+                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    : 'bg-primary text-white hover:bg-primary/90'
+                }`}
+              >
+                {creatingAllWO ? 'Creating…' : `Create All WO${eligibleWOCount > 0 ? ` (${eligibleWOCount})` : ''}`}
+              </button>
+            </div>
+          )}
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">
               <tr>
@@ -1221,22 +1316,29 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
                         <StatusBadge status={lineStatus} type="moLineStatus" size="sm" />
                       </td>
                       <td className="px-4 py-3 text-center">
-                        {!isTerminal && lineStatus === 'materials_ready' && (
+                        {/* Create WO: appears once material is allocated (ok). Disabled until the
+                            line reaches materials_ready — no manual "Allocate" step needed. */}
+                        {!isTerminal && (lineStatus === 'materials_ready' || (lineStatus === 'material_available' && materialOk)) && (
                           <button
-                            onClick={(e) => { e.stopPropagation(); handleCreateWO(line); }}
-                            disabled={advancingLineId === line.id || hasWO}
+                            onClick={(e) => { e.stopPropagation(); if (lineStatus === 'materials_ready') handleCreateWO(line); }}
+                            disabled={lineStatus !== 'materials_ready' || advancingLineId === line.id || hasWO}
+                            title={lineStatus !== 'materials_ready' ? 'Waiting for material to be ready' : undefined}
                             className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-                              advancingLineId === line.id
-                                ? 'bg-emerald-100 text-emerald-700 cursor-wait'
-                                : hasWO
-                                  ? 'bg-emerald-100 text-emerald-700 cursor-default'
-                                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200 active:bg-emerald-100 active:text-emerald-700'
+                              lineStatus !== 'materials_ready'
+                                ? 'bg-gray-50 text-gray-400 cursor-not-allowed'
+                                : advancingLineId === line.id
+                                  ? 'bg-emerald-100 text-emerald-700 cursor-wait'
+                                  : hasWO
+                                    ? 'bg-emerald-100 text-emerald-700 cursor-default'
+                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200 active:bg-emerald-100 active:text-emerald-700'
                             }`}
                           >
                             {advancingLineId === line.id ? 'Creating...' : hasWO ? 'WO Ready' : 'Create WO'}
                           </button>
                         )}
-                        {!isTerminal && LINE_STATUS_FLOW[lineStatus] && lineStatus !== 'cancelled' && lineStatus !== 'materials_ready' && (
+                        {/* Generic advance for early statuses. material_available is excluded:
+                            when allocated it auto-promotes; when short it shows "Waiting material". */}
+                        {!isTerminal && LINE_STATUS_FLOW[lineStatus] && lineStatus !== 'cancelled' && lineStatus !== 'materials_ready' && lineStatus !== 'material_available' && (
                           <button
                             onClick={(e) => { e.stopPropagation(); handleAdvanceLine(line.id, lineStatus); }}
                             disabled={advancingLineId === line.id}
@@ -1249,7 +1351,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
                             {advancingLineId === line.id ? '...' : LINE_STATUS_FLOW[lineStatus].label}
                           </button>
                         )}
-                        {!isTerminal && (lineStatus === 'reviewed' || lineStatus === 'confirmed') && !materialOk && (
+                        {!isTerminal && ((lineStatus === 'reviewed' || lineStatus === 'confirmed' || lineStatus === 'material_available') && !materialOk) && (
                           <span className="text-[10px] text-gray-400">Waiting material</span>
                         )}
                       </td>
