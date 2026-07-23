@@ -18,6 +18,10 @@ import { supabase } from '../../lib/supabase/client';
 import { ArrowLeft, CheckCircle, Plus, Trash2, Save, Search, FileDown, Eye, ChevronDown, AlertTriangle, MessageSquare } from 'lucide-react';
 
 import { INVENTORY_SUBMODULES } from './inventorySubmodules';
+import {
+  convertPurchaseQtyToInternal,
+  resolveInventoryUnitModel,
+} from '../../lib/inventoryUnitModel';
 
 const TYPE_LABELS: Record<string, string> = {
   receipt: 'Receipt',
@@ -43,6 +47,10 @@ interface DraftLine {
   unit: string;
   currentStock: number | null;
   lineNotes: string;
+  measure_basis: string | null;
+  purchase_unit: string | null;
+  units_per_purchase_unit: number | null;
+  is_roll: boolean;
 }
 
 interface CatalogSearchResult {
@@ -50,6 +58,9 @@ interface CatalogSearchResult {
   sku: string;
   name: string;
   measure_basis: string | null;
+  purchase_unit: string | null;
+  units_per_purchase_unit: number | null;
+  is_roll: boolean;
   stockOnHand: number | null;
 }
 
@@ -61,6 +72,55 @@ function defaultUnitForBasis(basis: string | null): string {
   if (basis === 'linear') return 'm';
   if (basis === 'area') return 'm2';
   return 'ea';
+}
+
+/** Convert draft line qty/unit into internal stock qty (meters for linear tubes). */
+function toInternalStockQty(line: Pick<DraftLine, 'quantity' | 'unit' | 'measure_basis' | 'purchase_unit' | 'units_per_purchase_unit' | 'is_roll'>): {
+  quantity: number;
+  unit: string;
+  convertedFromPieces: boolean;
+  metersPerPiece: number | null;
+} {
+  const enteredUnit = String(line.unit || '').toLowerCase();
+  const measureBasis = (line.measure_basis === 'linear' || line.measure_basis === 'area' || line.measure_basis === 'unit')
+    ? line.measure_basis
+    : 'unit';
+  const model = resolveInventoryUnitModel({
+    isRoll: !!line.is_roll,
+    measureBasis,
+    purchaseUnit: line.purchase_unit,
+  });
+
+  // Pieces entered for linear stocked-in-meters items → convert via UPPU.
+  if (
+    model.stockBasis === 'linear_m' &&
+    model.purchaseMode === 'unit_packaged' &&
+    (enteredUnit === 'ea' || enteredUnit === 'each')
+  ) {
+    const uppu = Math.max(0, Number(line.units_per_purchase_unit ?? 0));
+    if (uppu > 0) {
+      const signed = Number(line.quantity) || 0;
+      const absInternal = convertPurchaseQtyToInternal({
+        qtyInPurchaseUnit: Math.abs(signed),
+        purchaseMode: 'unit_packaged',
+        purchaseUnit: line.purchase_unit || 'each',
+        unitsPerPurchaseUnit: uppu,
+      });
+      return {
+        quantity: signed < 0 ? -absInternal : absInternal,
+        unit: 'm',
+        convertedFromPieces: true,
+        metersPerPiece: uppu,
+      };
+    }
+  }
+
+  return {
+    quantity: Number(line.quantity) || 0,
+    unit: line.unit || defaultUnitForBasis(line.measure_basis),
+    convertedFromPieces: false,
+    metersPerPiece: null,
+  };
 }
 
 interface TransactionDetailProps {
@@ -129,6 +189,10 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
         unit: l.unit ?? 'ea',
         currentStock: null,
         lineNotes: l.notes ?? '',
+        measure_basis: (l.CatalogItems as { measure_basis?: string | null } | undefined)?.measure_basis ?? null,
+        purchase_unit: (l.CatalogItems as { purchase_unit?: string | null } | undefined)?.purchase_unit ?? null,
+        units_per_purchase_unit: (l.CatalogItems as { units_per_purchase_unit?: number | null } | undefined)?.units_per_purchase_unit ?? null,
+        is_roll: !!(l.CatalogItems as { is_roll?: boolean } | undefined)?.is_roll,
       })));
     }
   }, [movement, lines]);
@@ -166,7 +230,7 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
     try {
       const { data, error } = await supabase
         .from('CatalogItems')
-        .select('id, sku, name, measure_basis')
+        .select('id, sku, name, measure_basis, purchase_unit, units_per_purchase_unit, is_roll')
         .eq('organization_id', activeOrganizationId)
         .eq('is_active', true)
         .or(`sku.ilike.%${firstToken}%,name.ilike.%${firstToken}%`)
@@ -258,9 +322,22 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
       sku: item.sku,
       name: item.name,
       quantity: 0,
-      unit: defaultUnitForBasis(item.measure_basis),
+      // Default to ea for packaged linear tubes so qty = piece count → converted to m on save.
+      unit: (() => {
+        const model = resolveInventoryUnitModel({
+          isRoll: !!item.is_roll,
+          measureBasis: (item.measure_basis as 'unit' | 'linear' | 'area') || 'unit',
+          purchaseUnit: item.purchase_unit,
+        });
+        if (model.stockBasis === 'linear_m' && model.purchaseMode === 'unit_packaged') return 'ea';
+        return defaultUnitForBasis(item.measure_basis);
+      })(),
       currentStock,
       lineNotes: '',
+      measure_basis: item.measure_basis,
+      purchase_unit: item.purchase_unit,
+      units_per_purchase_unit: item.units_per_purchase_unit,
+      is_roll: !!item.is_roll,
     }]);
     setItemSearch('');
     setSearchResults([]);
@@ -287,7 +364,8 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
     if (!isAdjustmentType) return false;
     return draftLines.some(l => {
       const current = l.currentStock ?? 0;
-      const newQty = current + l.quantity;
+      const { quantity: internalQty } = toInternalStockQty(l);
+      const newQty = current + internalQty;
       return newQty < 0;
     });
   }, [draftLines, isAdjustmentType]);
@@ -330,15 +408,20 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
         const mt = isCreateMode
           ? (isAdjustmentContext ? 'adjustment' : movementType)
           : (movement?.movement_type ?? movementType);
+        const converted = toInternalStockQty(line);
         const signedQty = mt === 'adjustment'
-          ? line.quantity
-          : ['return', 'receipt'].includes(mt) ? Math.abs(line.quantity) : -Math.abs(line.quantity);
+          ? converted.quantity
+          : ['return', 'receipt'].includes(mt) ? Math.abs(converted.quantity) : -Math.abs(converted.quantity);
+        const convertNote = converted.convertedFromPieces && converted.metersPerPiece
+          ? `Converted ${Math.abs(line.quantity)} ea × ${converted.metersPerPiece} m/ea → ${Math.abs(converted.quantity)} m`
+          : null;
+        const notesParts = [line.lineNotes?.trim() || null, convertNote].filter(Boolean);
         await supabase.from('InventoryMovementLines').insert({
           inventory_movement_id: movId,
           catalog_item_id: line.catalog_item_id,
           quantity: signedQty,
-          unit: line.unit,
-          notes: line.lineNotes || null,
+          unit: converted.unit,
+          notes: notesParts.length ? notesParts.join(' | ') : null,
         });
       }
 
@@ -829,16 +912,43 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
                       </td>
                     </tr>
                   ) : displayLines.map(line => {
+                    const draftMeta = isDraft
+                      ? draftLines.find((d) => d.tempId === line.id)
+                      : null;
+                    const converted = draftMeta
+                      ? toInternalStockQty(draftMeta)
+                      : { quantity: line.quantity, unit: line.unit, convertedFromPieces: false, metersPerPiece: null as number | null };
                     const currentStock = line.currentStock ?? 0;
-                    const newQty = currentStock + line.quantity;
+                    const newQty = currentStock + converted.quantity;
                     const isNegativeResult = newQty < 0;
+                    const uppuHint = draftMeta?.units_per_purchase_unit != null && Number(draftMeta.units_per_purchase_unit) > 0
+                      && draftMeta.measure_basis === 'linear' && !draftMeta.is_roll
+                      ? Number(draftMeta.units_per_purchase_unit)
+                      : null;
                     return (
                       <tr key={line.id} className="border-t hover:bg-gray-50">
                         <td className="px-4 py-3 font-medium text-gray-900">{line.sku}</td>
-                        <td className="px-4 py-3 text-gray-700">{line.name}</td>
+                        <td className="px-4 py-3 text-gray-700">
+                          <div>{line.name}</div>
+                          {uppuHint != null && (
+                            <div className="text-[10px] text-gray-500 mt-0.5">
+                              Stock in meters · 1 ea = {uppuHint.toFixed(2)} m
+                              {converted.convertedFromPieces ? (
+                                <span className="ml-1 text-amber-700">
+                                  → {Math.abs(converted.quantity).toFixed(2)} m
+                                </span>
+                              ) : null}
+                            </div>
+                          )}
+                        </td>
                         {isAdjustmentType && (
                           <td className="px-4 py-3 text-right tabular-nums text-gray-600">
-                            {line.currentStock !== null ? Number(line.currentStock).toFixed(2) : '—'}
+                            {line.currentStock !== null ? (
+                              <>
+                                {Number(line.currentStock).toFixed(2)}
+                                <span className="text-[10px] text-gray-400 ml-0.5">m</span>
+                              </>
+                            ) : '—'}
                           </td>
                         )}
                         <td className="px-4 py-3 text-right">
@@ -868,6 +978,7 @@ export default function TransactionDetail({ transactionId }: TransactionDetailPr
                               value={line.unit}
                               onChange={e => updateLineUnit(line.id, e.target.value)}
                               className="w-16 px-1 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                              title={uppuHint != null ? `ea = pieces (×${uppuHint} m); m = meters directly` : undefined}
                             >
                               <option value="ea">ea</option>
                               <option value="m">m</option>

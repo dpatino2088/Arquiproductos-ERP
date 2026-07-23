@@ -10,6 +10,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { formatDimensionsForProposalPDF, type DimensionsSource } from '../formatDimensions';
 import { formatDate } from '../utils';
+import { formatDraperyStyleLabel, formatDraperyTrackDescription } from '../drapery/labels';
 
 export type PDFVariant = 'dealer' | 'client';
 
@@ -29,8 +30,10 @@ export interface QuotePDFLine {
   height_m?: number | null;
   /** Dimensions source for per-panel format (same as Viewer) */
   dimensions_source?: DimensionsSource | null;
-  /** Drapery style code (e.g. wave_2.0, pinch_pleat) */
+  /** Drapery style code (e.g. wave_2.0, pinch_pleat) — size/fullness, not system */
   style_code?: string | null;
+  /** Drapery product line / system (e.g. wave_drapery, ripple_fold, pinch_pleat) */
+  product_line?: string | null;
   /** True when drapery is configured as track-only (no fabric) */
   track_only?: boolean;
   /** Whether side channel is included in config */
@@ -118,16 +121,6 @@ function formatCurrency(amount: number, currency: string = 'USD'): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(amount);
-}
-
-function normalizeStyleLabel(styleCode?: string | null): string {
-  const raw = (styleCode || '').trim();
-  if (!raw) return '';
-  return raw
-    .replace(/[_-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 export function generateQuotePDF(
@@ -369,13 +362,19 @@ export function generateQuotePDF(
       return (line as any).service_name?.trim() || line.sku?.trim() || '—';
     }
 
-    const isDraperyTrackOnly =
-      String(line.product_type ?? '').trim().toLowerCase() === 'drapery' &&
-      !!line.track_only;
-    const styleLabel = normalizeStyleLabel(line.style_code);
+    const ptLower = String(line.product_type ?? '').trim().toLowerCase();
+    const isDrapery = ptLower === 'drapery' || ptLower.includes('drapery');
+    const isDraperyTrackOnly = isDrapery && !!line.track_only;
+    const styleLabel = formatDraperyStyleLabel({
+      productLine: line.product_line,
+      styleCode: line.style_code,
+    });
     if (isDraperyTrackOnly) {
-      const base = styleLabel ? `Drapery Track\nStyle: ${styleLabel}` : 'Drapery Track';
-      return codeLine ? `${base}\n${codeLine}` : base;
+      const trackName = formatDraperyTrackDescription({
+        productLine: line.product_line,
+        styleCode: line.style_code,
+      });
+      return codeLine ? `${trackName}\n${codeLine}` : trackName;
     }
 
     // Catalog items: show item name + optional color (no collection/variant/drive)
@@ -408,6 +407,7 @@ export function generateQuotePDF(
             : '';
     const lines: string[] = [];
     if (collectionVariant) lines.push(collectionVariant);
+    if (isDrapery && styleLabel) lines.push(`Style: ${styleLabel}`);
     if (operatingSystem) lines.push(operatingSystem);
     if (line.has_side_channel === true) lines.push('Side Channel: Yes');
     if (line.has_bottom_channel === true) lines.push('Bottom Channel: Yes');
@@ -444,10 +444,13 @@ export function generateQuotePDF(
           ? line.line_total * (1 - clientDiscountPct / 100)
           : line.line_total;
     const unitPrice = lineTotal / qty;
+    const ptLower = String(line.product_type ?? '').trim().toLowerCase();
     const isDraperyTrackOnly =
-      String(line.product_type ?? '').trim().toLowerCase() === 'drapery' &&
-      !!line.track_only;
-    const styleLabel = normalizeStyleLabel(line.style_code);
+      (ptLower === 'drapery' || ptLower.includes('drapery')) && !!line.track_only;
+    const styleLabel = formatDraperyStyleLabel({
+      productLine: line.product_line,
+      styleCode: line.style_code,
+    });
     const productTypeLabel = isDraperyTrackOnly
       ? (styleLabel ? `Drapery Track (${styleLabel})` : 'Drapery Track')
       : (line.product_type ?? line.CatalogItems?.item_name ?? '—');

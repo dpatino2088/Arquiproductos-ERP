@@ -108,8 +108,8 @@ export const CONDITION_KEY_OPTIONS = [
   { value: '', label: '-- None --' },
   { value: 'system_size', label: 'System Size (glider spacing)' },
   { value: 'drive_side', label: 'Drive Side (left/right)' },
-  { value: 'gear_ratio', label: 'Gear Ratio (clutch type)' },
-  { value: 'motor_item_id', label: 'Motor (configurator selection)' },
+  { value: 'gear_ratio', label: 'Drive — gear ratio (manual)' },
+  { value: 'motor_item_id', label: 'Drive — motor (configurator)' },
 ] as const;
 
 export const CONDITION_VALUE_OPTIONS: Record<string, { value: string; label: string }[]> = {

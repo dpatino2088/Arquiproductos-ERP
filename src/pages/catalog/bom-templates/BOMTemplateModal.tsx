@@ -19,6 +19,13 @@ import BOMChildrenModal from './BOMChildrenModal';
 import BOMEngineeringPopup from './BOMEngineeringPopup';
 import CutBreakdownPanel from './CutBreakdownPanel';
 import type { BOMComponentDraft } from './types';
+import {
+  derivePreviewOptionGroups,
+  filterBreakdownForAssemble,
+  filterComponentsForAssemble,
+  selectedDriveOption,
+  type PreviewAssembleSelection,
+} from './previewAssemble';
 import { supabase } from '../../../lib/supabase/client';
 import { useOrganizationContext } from '../../../context/OrganizationContext';
 
@@ -70,7 +77,7 @@ export default function BOMTemplateModal({
   const [showCutBreakdown, setShowCutBreakdown] = useState(false);
   const [previewDriveSideOverride, setPreviewDriveSideOverride] = useState<'left' | 'right'>('right');
   const [previewPanelCount, setPreviewPanelCount] = useState<number>(1);
-  const [previewMotorItemId, setPreviewMotorItemId] = useState<string>('');
+  const [previewAssemble, setPreviewAssemble] = useState<PreviewAssembleSelection>({});
   const [codeManuallyEdited, setCodeManuallyEdited] = useState(() => !!editingTemplateId);
 
   const selectedPt = form.productTypes.find((pt: any) => pt.id === form.productTypeId);
@@ -139,28 +146,16 @@ export default function BOMTemplateModal({
   const [cutBreakdownLoading, setCutBreakdownLoading] = useState(false);
   const [cutBreakdownError, setCutBreakdownError] = useState<string | null>(null);
 
-  // List of motor variants declared on this template (condition_key = 'motor_item_id').
-  // Used both to default-select a motor for the preview and to render the selector below.
-  const motorVariants = React.useMemo(() => {
-    const seen = new Set<string>();
-    const out: { value: string; label: string }[] = [];
-    for (const c of form.components) {
-      if (c.parent_component_id) continue;
-      if (c.condition_key !== 'motor_item_id') continue;
-      const v = (c.condition_value || '').trim();
-      if (!v || seen.has(v)) continue;
-      seen.add(v);
-      const ci = c.catalog_item as any;
-      const label = ci?.name ? `${ci.name} (${ci.sku || v})` : (ci?.sku || v);
-      out.push({ value: v, label });
-    }
-    return out;
-  }, [form.components]);
+  // Pick-one option groups for the assemble preview (Drive / Brackets / Headbox).
+  const previewOptionGroups = React.useMemo(
+    () => derivePreviewOptionGroups(form.components),
+    [form.components],
+  );
 
   const loadCutBreakdown = useCallback(async (
     templateId: string | null,
     panelCountOverride?: number,
-    motorOverride?: string,
+    assembleOverride?: PreviewAssembleSelection,
   ) => {
     if (!templateId || !activeOrganizationId) {
       setCutBreakdown([]);
@@ -174,13 +169,20 @@ export default function BOMTemplateModal({
       const mockPanels = Array.from({ length: panelCount }, () => ({
         width_mm: 1000 / panelCount,
       }));
-      const motorItemId = motorOverride !== undefined ? motorOverride : previewMotorItemId;
+      const assemble = assembleOverride ?? previewAssemble;
+      const driveOpt = selectedDriveOption(assemble, previewOptionGroups);
       const previewConfig: Record<string, unknown> = {
-        drive_side: form.templateDriveSide,
+        drive_side: previewDriveSideOverride || form.templateDriveSide,
         opening_direction: form.templateOpeningDirection === 'all' ? null : form.templateOpeningDirection,
         panels: mockPanels,
       };
-      if (motorItemId) previewConfig.motor_item_id = motorItemId;
+      // Same Drive field: motor → motor_item_id; manual clutch → gear_ratio.
+      if (driveOpt?.driveKind === 'motor') {
+        previewConfig.motor_item_id = driveOpt.catalogItemId || driveOpt.value;
+      } else if (driveOpt?.driveKind === 'manual') {
+        previewConfig.gear_ratio = driveOpt.value;
+        if (driveOpt.catalogItemId) previewConfig.drive_item_id = driveOpt.catalogItemId;
+      }
       let { data, error } = await supabase.rpc('compute_template_cut_breakdown_preview', {
         p_bom_template_id: templateId,
         p_org_id: activeOrganizationId,
@@ -207,7 +209,15 @@ export default function BOMTemplateModal({
     } finally {
       setCutBreakdownLoading(false);
     }
-  }, [activeOrganizationId, form.templateDriveSide, form.templateOpeningDirection, previewPanelCount, previewMotorItemId]);
+  }, [
+    activeOrganizationId,
+    form.templateDriveSide,
+    form.templateOpeningDirection,
+    previewPanelCount,
+    previewAssemble,
+    previewDriveSideOverride,
+    previewOptionGroups,
+  ]);
 
   useEffect(() => {
     loadCutBreakdown(editingTemplateId);
@@ -219,16 +229,50 @@ export default function BOMTemplateModal({
     setPreviewPanelCount((cur) => (cur === min ? cur : min));
   }, [form.templatePanelCount]);
 
-  // Default-select the first motor variant so motor + drive deductions show up in preview.
+  // Default each assemble group to its first option (headbox optional → None when allowNone).
   useEffect(() => {
-    if (!motorVariants.length) {
-      if (previewMotorItemId) setPreviewMotorItemId('');
-      return;
-    }
-    if (!previewMotorItemId || !motorVariants.some(m => m.value === previewMotorItemId)) {
-      setPreviewMotorItemId(motorVariants[0].value);
-    }
-  }, [motorVariants, previewMotorItemId]);
+    setPreviewAssemble((prev) => {
+      let changed = false;
+      const next: PreviewAssembleSelection = { ...prev };
+      for (const g of previewOptionGroups) {
+        if (g.key === 'drive') {
+          if (!next.drive || !g.options.some((o) => o.value === next.drive)) {
+            next.drive = g.options[0]?.value;
+            changed = true;
+          }
+        } else if (g.key === 'bracket') {
+          if (!next.bracket || !g.options.some((o) => o.value === next.bracket)) {
+            next.bracket = g.options[0]?.value;
+            changed = true;
+          }
+        } else if (g.key === 'headbox') {
+          if (next.headbox === undefined) {
+            next.headbox = g.allowNone ? null : (g.options[0]?.value ?? null);
+            changed = true;
+          } else if (
+            next.headbox !== null
+            && !g.options.some((o) => o.value === next.headbox)
+          ) {
+            next.headbox = g.allowNone ? null : (g.options[0]?.value ?? null);
+            changed = true;
+          }
+        }
+      }
+      if (!previewOptionGroups.some((g) => g.key === 'drive') && next.drive) {
+        delete next.drive;
+        changed = true;
+      }
+      if (!previewOptionGroups.some((g) => g.key === 'bracket') && next.bracket) {
+        delete next.bracket;
+        changed = true;
+      }
+      if (!previewOptionGroups.some((g) => g.key === 'headbox') && next.headbox !== undefined) {
+        delete next.headbox;
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [previewOptionGroups]);
 
   const handlePreviewPanelCountChange = useCallback((next: number) => {
     const clamped = Math.max(1, Math.floor(Number(next) || 1));
@@ -236,14 +280,31 @@ export default function BOMTemplateModal({
     loadCutBreakdown(editingTemplateId, clamped);
   }, [editingTemplateId, loadCutBreakdown]);
 
-  const handlePreviewMotorChange = useCallback((next: string) => {
-    setPreviewMotorItemId(next);
-    loadCutBreakdown(editingTemplateId, undefined, next);
+  const handleAssembleChange = useCallback((patch: PreviewAssembleSelection) => {
+    setPreviewAssemble((prev) => {
+      const next = { ...prev, ...patch };
+      loadCutBreakdown(editingTemplateId, undefined, next);
+      return next;
+    });
   }, [editingTemplateId, loadCutBreakdown]);
 
   useEffect(() => {
     setPreviewDriveSideOverride(form.templateDriveSide === 'left' ? 'left' : 'right');
   }, [form.templateDriveSide]);
+
+  // Filtered breakdown / components for the current assemble selection.
+  const assembledBreakdown = React.useMemo(
+    () => filterBreakdownForAssemble(cutBreakdown, previewAssemble, previewOptionGroups),
+    [cutBreakdown, previewAssemble, previewOptionGroups],
+  );
+  const assembledComponents = React.useMemo(
+    () => filterComponentsForAssemble(form.components, previewAssemble, previewOptionGroups),
+    [form.components, previewAssemble, previewOptionGroups],
+  );
+  const assembledHeadboxMode: 'none' | 'optional' | 'required' =
+    previewAssemble.headbox === null
+      ? 'none'
+      : cutDiagramHeadboxMode;
 
   const toggleExpand = useCallback((id: string) => {
     setExpandedRows(prev => {
@@ -866,6 +927,13 @@ export default function BOMTemplateModal({
                             }));
                           }}
                         />
+                        {['bracket', 'brackets'].includes(String(form.formData.component_role || '').toLowerCase()) && (
+                          <p className="mt-1 text-[11px] text-gray-500 leading-snug">
+                            Catalog Δ = 1 piece. Left+right pair → Qty <span className="font-medium">2</span>
+                            {' '}(5 mm/side). A sold-as-1 kit of 2 also uses Qty 2 for cut
+                            {' '}(preview treats Qty 1 as that pair).
+                          </p>
+                        )}
                       </div>
                       <div>
                         <Label>UOM</Label>
@@ -1418,48 +1486,81 @@ export default function BOMTemplateModal({
                     </p>
                   ) : (
                     <>
-                      <div className="mb-2 flex items-center justify-end gap-3 flex-wrap">
-                        {motorVariants.length > 0 && (
-                          <div className="flex items-center gap-2">
-                            <span className="text-[11px] text-gray-500">Motor preview</span>
-                            <SelectShadcn
-                              value={previewMotorItemId || motorVariants[0].value}
-                              onValueChange={handlePreviewMotorChange}
-                            >
-                              <SelectTrigger className="h-7 w-[220px] text-xs">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {motorVariants.map(m => (
-                                  <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </SelectShadcn>
-                          </div>
-                        )}
-                        <div className="flex items-center gap-2">
-                          <span className="text-[11px] text-gray-500">Drive preview</span>
+                      {/* Assemble: one choice per option group — airy single row */}
+                      <div className="mb-5 flex flex-wrap items-end gap-x-8 gap-y-4">
+                        {previewOptionGroups.map((g) => {
+                          const current =
+                            g.key === 'drive' ? (previewAssemble.drive ?? g.options[0]?.value ?? '')
+                            : g.key === 'bracket' ? (previewAssemble.bracket ?? g.options[0]?.value ?? '')
+                            : previewAssemble.headbox === null
+                              ? '__none__'
+                              : (previewAssemble.headbox ?? g.options[0]?.value ?? '');
+                          return (
+                            <div key={g.key} className="min-w-[140px]">
+                              <div className="text-[11px] text-gray-400 mb-1.5 tracking-wide">{g.label}</div>
+                              <SelectShadcn
+                                value={current}
+                                onValueChange={(v) => {
+                                  if (g.key === 'drive') handleAssembleChange({ drive: v });
+                                  else if (g.key === 'bracket') handleAssembleChange({ bracket: v });
+                                  else handleAssembleChange({ headbox: v === '__none__' ? null : v });
+                                }}
+                              >
+                                <SelectTrigger className="h-9 w-[200px] text-sm border-gray-200 bg-transparent shadow-none">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {g.allowNone && (
+                                    <SelectItem value="__none__">None</SelectItem>
+                                  )}
+                                  {g.options.map((o) => (
+                                    <SelectItem key={`${o.driveKind || 'x'}:${o.value}`} value={o.value}>{o.label}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </SelectShadcn>
+                            </div>
+                          );
+                        })}
+                        <div className="min-w-[140px]">
+                          <div className="text-[11px] text-gray-400 mb-1.5 tracking-wide">Side</div>
                           <SelectShadcn
                             value={previewDriveSideOverride}
                             onValueChange={(v) => setPreviewDriveSideOverride(v as 'left' | 'right')}
                           >
-                            <SelectTrigger className="h-7 w-[185px] text-xs">
+                            <SelectTrigger className="h-9 w-[160px] text-sm border-gray-200 bg-transparent shadow-none">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="right">Option A · Motor Right</SelectItem>
-                              <SelectItem value="left">Option B · Motor Left</SelectItem>
+                              <SelectItem value="right">Drive Right</SelectItem>
+                              <SelectItem value="left">Drive Left</SelectItem>
+                            </SelectContent>
+                          </SelectShadcn>
+                        </div>
+                        <div className="min-w-[100px]">
+                          <div className="text-[11px] text-gray-400 mb-1.5 tracking-wide">Panels</div>
+                          <SelectShadcn
+                            value={String(previewPanelCount >= 3 ? 3 : previewPanelCount)}
+                            onValueChange={(v) => handlePreviewPanelCountChange(Number(v))}
+                          >
+                            <SelectTrigger className="h-9 w-[120px] text-sm border-gray-200 bg-transparent shadow-none">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="1">1 Panel</SelectItem>
+                              <SelectItem value="2">2 Panels</SelectItem>
+                              <SelectItem value="3">3+ Panels</SelectItem>
                             </SelectContent>
                           </SelectShadcn>
                         </div>
                       </div>
                     <CutBreakdownPanel
-                      components={form.components}
-                      previewBreakdown={cutBreakdown}
+                      components={assembledComponents}
+                      previewBreakdown={assembledBreakdown}
                       previewDriveSide={previewDriveSideOverride}
                       previewPanelCount={previewPanelCount}
                       onPreviewPanelCountChange={handlePreviewPanelCountChange}
-                      headboxMode={cutDiagramHeadboxMode}
+                      showPanelControls={false}
+                      headboxMode={assembledHeadboxMode}
                       isDrapery={isDrapery}
                       openingDirection={
                         form.templateOpeningDirection === 'center'

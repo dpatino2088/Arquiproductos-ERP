@@ -15,12 +15,13 @@ import type { Proposal, ProposalLine, ProposalCustomCategory, ProposalLineAddOn,
 import { generateProposalPDF, type ProposalPDFLine } from '../../lib/pdf/generateProposalPDF';
 import { generateMeasurementFormPDF, type MeasurementFormLine } from '../../lib/pdf/generateMeasurementFormPDF';
 import { formatDimensionsForProposalPDF } from '../../lib/formatDimensions';
+import { formatDraperyStyleLabel, formatDraperyTrackDescription } from '../../lib/drapery/labels';
 import { getLogoPathFromUrl } from '../../lib/dealerLogo';
 import { useResolvedStorageUrl } from '../../hooks/useResolvedStorageUrl';
 import Input from '../../components/ui/Input';
 import Label from '../../components/ui/Label';
 import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
-import { ChevronDown, ChevronRight, GripVertical, Plus, AlertTriangle, Printer, Eye, ArrowLeft, Download, Trash2, ExternalLink, Lock, Ruler } from 'lucide-react';
+import { ChevronDown, ChevronRight, GripVertical, Plus, AlertTriangle, Printer, Eye, ArrowLeft, Download, Trash2, ExternalLink, Lock, Ruler, X, Pencil } from 'lucide-react';
 import DetailPageLayout from '../../components/shared/DetailPageLayout';
 import StatusBadge from '../../components/shared/StatusBadge';
 import TimelineView from '../../components/shared/TimelineView';
@@ -61,11 +62,41 @@ const PROPOSAL_STATUS_OPTIONS: { value: Proposal['status']; label: string }[] = 
 ];
 
 const CUSTOM_CATEGORIES: { value: ProposalCustomCategory; label: string }[] = [
+  { value: 'service', label: 'Service' },
+  { value: 'product', label: 'Product' },
+  { value: 'shipping', label: 'Shipping' },
+  { value: 'made_to_measure', label: 'Made-to-measure' },
   { value: 'installation', label: 'Installation' },
   { value: 'delivery', label: 'Delivery' },
-  { value: 'service', label: 'Service' },
   { value: 'other', label: 'Other' },
 ];
+
+const MADE_TO_MEASURE_CATEGORY: ProposalCustomCategory = 'made_to_measure';
+
+/** Modal draft for Custom Item — same field layout as Quote Custom Item. */
+type CustomItemModalDraft = {
+  id: string;
+  name: string;
+  qty: string;
+  unit_cost: string;
+  markup_pct: string;
+  unit_price: string;
+  category: ProposalCustomCategory;
+  area: string;
+  position: string;
+  width_mm: string;
+  height_mm: string;
+  product_type_id: string;
+  drive: string;
+};
+
+function customLinePriceFromCostMarkup(cost: string, markup: string): string {
+  const c = Number(cost);
+  const m = Number(markup);
+  if (!Number.isFinite(c) || c <= 0) return '';
+  const pct = Number.isFinite(m) ? m : 0;
+  return String(Math.round(c * (1 + pct / 100) * 100) / 100);
+}
 
 /** Wrapper for sortable table row - applies useSortable, passes handleProps to renderFirstCell */
 function SortableRow({
@@ -176,25 +207,31 @@ function getProposalLineQty(
   return 1;
 }
 
-function normalizeStyleLabel(styleCode?: string | null): string {
-  const raw = (styleCode || '').trim();
-  if (!raw) return '';
-  return raw
-    .replace(/[_-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
 function getDraperyTrackDescription(params: {
   productTypeName?: string | null;
   trackOnly?: boolean | null;
+  productLine?: string | null;
   styleCode?: string | null;
 }): string | null {
   const isDrapery = /drapery/i.test(params.productTypeName ?? '');
   if (!isDrapery || !params.trackOnly) return null;
-  const styleLabel = normalizeStyleLabel(params.styleCode);
-  return styleLabel ? `Drapery Track | ${styleLabel}` : 'Drapery Track';
+  return formatDraperyTrackDescription({
+    productLine: params.productLine,
+    styleCode: params.styleCode,
+  });
+}
+
+function readDraperyProductLine(
+  snap: { product_line?: string; productLine?: string } | null | undefined,
+  config: { product_line?: string; productLine?: string } | null | undefined
+): string | null {
+  return (
+    snap?.product_line ??
+    snap?.productLine ??
+    config?.product_line ??
+    config?.productLine ??
+    null
+  );
 }
 
 /** A config item id counts as "selected" when it is a real UUID (not empty / 'NONE'). */
@@ -238,6 +275,8 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
   const [removedCustomLineIds, setRemovedCustomLineIds] = useState<string[]>([]);
   const [linesDirty, setLinesDirty] = useState(false);
   const [addonsDirty, setAddonsDirty] = useState(false);
+  /** Custom Item modal draft (Quote-style popup). Null when closed. */
+  const [customModalDraft, setCustomModalDraft] = useState<CustomItemModalDraft | null>(null);
   const lastLinesRef = useRef<ProposalLine[]>([]);
   const lastAddonsMapRef = useRef<Map<string, ProposalLineAddOn[]>>(new Map());
   useEffect(() => {
@@ -658,18 +697,24 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           if (line.id.startsWith('temp-')) {
             const hasMarkup = line.markup_pct != null && !Number.isNaN(line.markup_pct);
             const overrideMode = hasMarkup ? 'markup_pct' : 'inherit';
+            const isMtm = line.custom_category === MADE_TO_MEASURE_CATEGORY;
             const insertPayload: Record<string, unknown> = {
               organization_id: proposal.organization_id,
               dealer_id: proposal.dealer_id,
               proposal_id: proposal.id,
               line_type: 'custom',
               override_mode: overrideMode,
+              custom_category: line.custom_category ?? 'service',
               area: line.area?.trim() || null,
               position: line.position?.trim() || null,
               description: line.description ?? 'New line',
               qty: line.qty ?? 1,
               unit_cost: line.unit_cost ?? null,
               unit_price: line.unit_price ?? 0,
+              width_m: isMtm && line.width_m != null ? line.width_m : null,
+              height_m: isMtm && line.height_m != null ? line.height_m : null,
+              product_type_id: isMtm ? (line.product_type_id ?? null) : null,
+              drive_type: isMtm ? (line.drive_type ?? null) : null,
               sort_order: draftLines.indexOf(line),
             };
             if (overrideMode === 'markup_pct') {
@@ -687,6 +732,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           } else {
             const hasMarkup = line.markup_pct != null && !Number.isNaN(line.markup_pct);
             const overrideMode = hasMarkup ? 'markup_pct' : 'inherit';
+            const isMtm = line.custom_category === MADE_TO_MEASURE_CATEGORY;
             const updatePayload: Record<string, unknown> = {
               override_mode: overrideMode,
               line_adjustment_pct: line.line_adjustment_pct,
@@ -697,6 +743,10 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
               unit_cost: line.unit_cost ?? null,
               unit_price: line.unit_price,
               custom_category: line.custom_category,
+              width_m: isMtm && line.width_m != null ? line.width_m : null,
+              height_m: isMtm && line.height_m != null ? line.height_m : null,
+              product_type_id: isMtm ? (line.product_type_id ?? null) : null,
+              drive_type: isMtm ? (line.drive_type ?? null) : null,
               sort_order: draftLines.indexOf(line),
             };
             if (overrideMode === 'markup_pct') {
@@ -900,67 +950,158 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     [canWrite]
   );
 
-  const updateCustomLine = useCallback(
-    (lineId: string, fields: {
-      description?: string;
-      custom_category?: ProposalCustomCategory | null;
-      qty?: number;
-      unit_price?: number;
-      area?: string | null;
-      position?: string | null;
-      unit_cost?: number | null;
-      markup_pct?: number | null;
-    }) => {
+  const updateCustomModalDraft = useCallback((fields: Partial<CustomItemModalDraft>) => {
+    setCustomModalDraft((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, ...fields };
+      const touchedCostOrMarkup = 'unit_cost' in fields || 'markup_pct' in fields;
+      if (touchedCostOrMarkup && !('unit_price' in fields)) {
+        const derived = customLinePriceFromCostMarkup(next.unit_cost, next.markup_pct);
+        if (derived !== '') next.unit_price = derived;
+      }
+      if ('unit_price' in fields) {
+        const c = Number(next.unit_cost);
+        const p = Number(next.unit_price);
+        if (Number.isFinite(c) && c > 0 && Number.isFinite(p)) {
+          next.markup_pct = String(Math.round((p / c - 1) * 1000) / 10);
+        }
+      }
+      return next;
+    });
+  }, []);
+
+  const closeCustomModal = useCallback(() => {
+    setCustomModalDraft(null);
+  }, []);
+
+  const openEditCustomModal = useCallback(
+    (lineId: string) => {
       if (!canWrite) return;
-      setDraftLines((prev) =>
-        prev.map((l) => {
-          if (l.id !== lineId) return l;
-          const next = { ...l, ...fields };
-          if (next.line_type === 'custom' && (fields.unit_cost !== undefined || fields.markup_pct !== undefined)) {
-            const cost = Number(fields.unit_cost !== undefined ? fields.unit_cost : (l.unit_cost ?? 0)) || 0;
-            const markup = fields.markup_pct !== undefined ? fields.markup_pct : (l.markup_pct ?? 0);
-            next.unit_price = cost * (1 + (Number(markup) || 0) / 100);
-          }
-          return next;
-        })
-      );
-      setLinesDirty(true);
+      const line = displayLines.find((l) => l.id === lineId && l.line_type === 'custom');
+      if (!line) return;
+      const cost = Number(line.unit_cost ?? 0) || 0;
+      const isMtm = line.custom_category === MADE_TO_MEASURE_CATEGORY;
+      setCustomModalDraft({
+        id: line.id,
+        name: line.description ?? '',
+        qty: String(Math.max(1, Number(line.qty) || 1)),
+        unit_cost: cost > 0 ? String(cost) : '',
+        markup_pct: line.markup_pct != null ? String(line.markup_pct) : '',
+        unit_price: String(Number(line.unit_price) || 0),
+        category: line.custom_category ?? 'service',
+        area: line.area ?? '',
+        position: line.position ?? '',
+        width_mm: isMtm && line.width_m != null ? String(Math.round(Number(line.width_m) * 1000)) : '',
+        height_mm: isMtm && line.height_m != null ? String(Math.round(Number(line.height_m) * 1000)) : '',
+        product_type_id: isMtm && line.product_type_id ? String(line.product_type_id) : '',
+        drive: isMtm && line.drive_type ? String(line.drive_type) : '',
+      });
     },
-    [canWrite]
+    [canWrite, displayLines]
   );
 
   const addCustomLine = useCallback(() => {
     if (!proposal || !canWrite) return;
-    const newLine: ProposalLine = {
+    setCustomModalDraft({
       id: `temp-${Date.now()}`,
-      organization_id: proposal.organization_id,
-      dealer_id: proposal.dealer_id,
-      proposal_id: proposal.id,
-      quote_line_id: null,
-      line_type: 'custom',
-      override_mode: 'inherit',
-      discount_pct: null,
-      markup_pct: null,
-      fixed_unit_price: null,
-      fixed_line_total: null,
-      custom_category: 'other',
-      area: null,
-      position: null,
-      description: 'New line',
-      qty: 1,
-      uom: null,
-      unit_price: 0,
-      unit_cost: null,
-      line_total: 0,
-      line_adjustment_pct: null,
-      sort_order: displayLines.length,
-      deleted: false,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-    setDraftLines((prev) => [...prev, newLine]);
+      name: '',
+      qty: '1',
+      unit_cost: '',
+      markup_pct: '',
+      unit_price: '',
+      category: 'service',
+      area: '',
+      position: '',
+      width_mm: '',
+      height_mm: '',
+      product_type_id: '',
+      drive: '',
+    });
+  }, [proposal, canWrite]);
+
+  const commitCustomModal = useCallback(() => {
+    if (!proposal || !canWrite || !customModalDraft) return;
+    const d = customModalDraft;
+    if (!d.name.trim()) return;
+    const isMtm = d.category === MADE_TO_MEASURE_CATEGORY;
+    if (isMtm && (!Number(d.width_mm) || !Number(d.height_mm))) return;
+
+    const qty = Math.max(1, Number(d.qty) || 1);
+    const unitCostRaw = d.unit_cost.trim() === '' ? null : Math.max(0, Number(d.unit_cost) || 0);
+    const markupRaw = d.markup_pct.trim() === '' ? null : Number(d.markup_pct);
+    const unitCost = unitCostRaw ?? 0;
+    const markupPct = Number.isFinite(markupRaw as number) ? (markupRaw as number) : 0;
+    const unitPrice = Math.max(
+      0,
+      Number(d.unit_price) || (unitCost > 0 ? unitCost * (1 + markupPct / 100) : 0)
+    );
+    const widthM = isMtm ? Number(d.width_mm) / 1000 : null;
+    const heightM = isMtm ? Number(d.height_mm) / 1000 : null;
+    const productTypeId = isMtm && d.product_type_id ? d.product_type_id : null;
+    const driveType = isMtm && d.drive ? d.drive : null;
+
+    const isNew = d.id.startsWith('temp-') && !draftLines.some((l) => l.id === d.id);
+
+    if (isNew) {
+      const newLine: ProposalLine = {
+        id: d.id,
+        organization_id: proposal.organization_id,
+        dealer_id: proposal.dealer_id,
+        proposal_id: proposal.id,
+        quote_line_id: null,
+        line_type: 'custom',
+        override_mode: markupRaw != null && !Number.isNaN(markupRaw) ? 'markup_pct' : 'inherit',
+        discount_pct: null,
+        markup_pct: markupRaw != null && !Number.isNaN(markupRaw) ? markupRaw : null,
+        fixed_unit_price: null,
+        fixed_line_total: null,
+        custom_category: d.category,
+        area: d.area.trim() || null,
+        position: d.position.trim() || null,
+        description: d.name.trim(),
+        qty,
+        uom: null,
+        unit_price: unitPrice,
+        unit_cost: unitCostRaw,
+        line_total: unitPrice * qty,
+        line_adjustment_pct: null,
+        width_m: widthM,
+        height_m: heightM,
+        product_type_id: productTypeId,
+        drive_type: driveType,
+        sort_order: draftLines.length,
+        deleted: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      setDraftLines((prev) => [...prev, newLine]);
+    } else {
+      setDraftLines((prev) =>
+        prev.map((l) => {
+          if (l.id !== d.id) return l;
+          return {
+            ...l,
+            description: d.name.trim(),
+            custom_category: d.category,
+            area: d.area.trim() || null,
+            position: d.position.trim() || null,
+            qty,
+            unit_cost: unitCostRaw,
+            markup_pct: markupRaw != null && !Number.isNaN(markupRaw) ? markupRaw : null,
+            unit_price: unitPrice,
+            line_total: unitPrice * qty,
+            override_mode: markupRaw != null && !Number.isNaN(markupRaw) ? 'markup_pct' : 'inherit',
+            width_m: widthM,
+            height_m: heightM,
+            product_type_id: productTypeId,
+            drive_type: driveType,
+          };
+        })
+      );
+    }
     setLinesDirty(true);
-  }, [proposal, canWrite, displayLines.length]);
+    setCustomModalDraft(null);
+  }, [proposal, canWrite, customModalDraft, draftLines]);
 
   const removeCustomLine = useCallback(
     (lineId: string) => {
@@ -1440,6 +1581,10 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           (qlInfo?.config_snapshot as { style_code?: string; styleCode?: string } | null)?.style_code ??
           (qlInfo?.config_snapshot as { style_code?: string; styleCode?: string } | null)?.styleCode ??
           null;
+        const productLine = readDraperyProductLine(
+          snapFrozen as { product_line?: string; productLine?: string } | null,
+          qlInfo?.config_snapshot as { product_line?: string; productLine?: string } | null
+        );
         const trackOnly =
           Boolean((snapFrozen as { track_only?: boolean } | null)?.track_only) ||
           Boolean((qlInfo?.config_snapshot as { track_only?: boolean } | null)?.track_only);
@@ -1464,12 +1609,15 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
         const draperyTrackDescription = getDraperyTrackDescription({
           productTypeName: productTypeName ?? null,
           trackOnly,
+          productLine,
           styleCode,
         });
         const isDraperyLine = /drapery/i.test(String(productTypeName ?? productTypeRaw ?? ''));
         // Fold style for full drapery curtains (track-only already carries it in the name).
         const draperyStyleLabel =
-          isDraperyLine && !draperyTrackDescription && styleCode ? normalizeStyleLabel(styleCode) : null;
+          isDraperyLine && !draperyTrackDescription
+            ? formatDraperyStyleLabel({ productLine, styleCode }) || null
+            : null;
         const hasHeadbox = detectHeadbox(snapFrozen) || detectHeadbox(qlInfo?.config_snapshot);
         const isCatalogLine = String(productTypeRaw ?? '').trim().toLowerCase() === 'catalog';
         const isServiceLine = String(productTypeRaw ?? '').trim().toLowerCase() === 'service';
@@ -2478,14 +2626,14 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
               style={{ backgroundColor: 'var(--primary-brand-hex)' }}
             >
               <Plus className="w-4 h-4" />
-              Add Custom Line
+              Custom Item
             </button>
           )}
         </div>
 
         {displayLines.length === 0 ? (
           <div className="py-12 px-6 text-center">
-            <p className="text-gray-500 mb-4">No lines yet. Add lines from the Quote or add a custom line.</p>
+            <p className="text-gray-500 mb-4">No lines yet. Add lines from the Quote or add a custom item.</p>
             <div className="flex flex-wrap gap-3 justify-center">
               {!contentReadOnly && (
                 <button
@@ -2494,7 +2642,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                   style={{ backgroundColor: 'var(--primary-brand-hex)' }}
                 >
                   <Plus className="w-4 h-4" />
-                  Add Custom Line
+                  Custom Item
                 </button>
               )}
               {quote && (
@@ -2580,12 +2728,17 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                   (qlInfo?.config_snapshot as { style_code?: string; styleCode?: string } | null)?.style_code ??
                   (qlInfo?.config_snapshot as { style_code?: string; styleCode?: string } | null)?.styleCode ??
                   null;
+                const productLineForDrapery = readDraperyProductLine(
+                  snap as { product_line?: string; productLine?: string } | null,
+                  qlInfo?.config_snapshot as { product_line?: string; productLine?: string } | null
+                );
                 const trackOnlyForDrapery =
                   Boolean((snap as { track_only?: boolean } | null)?.track_only) ||
                   Boolean((qlInfo?.config_snapshot as { track_only?: boolean } | null)?.track_only);
                 const draperyTrackDescription = getDraperyTrackDescription({
                   productTypeName: ptNameForOpening ?? null,
                   trackOnly: trackOnlyForDrapery,
+                  productLine: productLineForDrapery,
                   styleCode: styleCodeForDrapery,
                 });
                 const hasSideChannel =
@@ -2610,8 +2763,11 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                 const hasHeadbox = detectHeadbox(snap) || detectHeadbox(qlInfo?.config_snapshot);
                 // Fold style for full drapery curtains (track-only already carries it in the name).
                 const draperyStyleLabel =
-                  isDrapery && !draperyTrackDescription && styleCodeForDrapery
-                    ? normalizeStyleLabel(styleCodeForDrapery)
+                  isDrapery && !draperyTrackDescription
+                    ? formatDraperyStyleLabel({
+                        productLine: productLineForDrapery,
+                        styleCode: styleCodeForDrapery,
+                      }) || null
                     : null;
                 const openingRaw =
                   snap?.opening_direction ??
@@ -2646,14 +2802,30 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                     )}
                   >
                     <td className="py-4 pl-0.5 pr-1 text-center w-11 min-w-[44px] align-middle">
-                      <button
-                        type="button"
-                        onClick={() => setExpandedLineId(isExpanded ? null : line.id)}
-                        className="min-w-[44px] min-h-[44px] rounded hover:bg-gray-100 active:bg-gray-200 inline-flex items-center justify-center touch-manipulation"
-                        aria-label={isExpanded ? 'Collapse installation options' : 'Expand installation options'}
-                      >
-                        {isExpanded ? <ChevronDown className="w-4 h-4 text-gray-500" /> : <ChevronRight className="w-4 h-4 text-gray-500" />}
-                      </button>
+                      {line.line_type === 'custom' ? (
+                        !contentReadOnly ? (
+                          <button
+                            type="button"
+                            onClick={() => openEditCustomModal(line.id)}
+                            className="min-w-[44px] min-h-[44px] rounded hover:bg-gray-100 active:bg-gray-200 inline-flex items-center justify-center touch-manipulation"
+                            aria-label="Edit custom item"
+                            title="Edit custom item"
+                          >
+                            <Pencil className="w-4 h-4 text-gray-500" />
+                          </button>
+                        ) : (
+                          <span className="inline-block w-4 h-4" />
+                        )
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setExpandedLineId(isExpanded ? null : line.id)}
+                          className="min-w-[44px] min-h-[44px] rounded hover:bg-gray-100 active:bg-gray-200 inline-flex items-center justify-center touch-manipulation"
+                          aria-label={isExpanded ? 'Collapse installation options' : 'Expand installation options'}
+                        >
+                          {isExpanded ? <ChevronDown className="w-4 h-4 text-gray-500" /> : <ChevronRight className="w-4 h-4 text-gray-500" />}
+                        </button>
+                      )}
                     </td>
                     <td className="py-4 px-2 text-center text-gray-500 text-sm tabular-nums w-12 align-middle">{index + 1}</td>
                     <td className="py-4 px-4 text-gray-700 text-sm min-w-[8rem] align-middle whitespace-nowrap">
@@ -2716,12 +2888,25 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                             </div>
                           </div>
                         ) : (
-                          <div className="flex flex-col gap-0.5 flex-1 min-w-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!contentReadOnly) openEditCustomModal(line.id);
+                            }}
+                            className={`flex flex-col gap-0.5 flex-1 min-w-0 text-left ${!contentReadOnly ? 'hover:opacity-80' : ''}`}
+                            disabled={contentReadOnly}
+                          >
                             <span className="text-sm text-gray-900">{line.description || '—'}</span>
                             <span className="text-xs text-gray-500">
                               {CUSTOM_CATEGORIES.find((o) => o.value === (line.custom_category ?? 'other'))?.label ?? 'Other'}
                             </span>
-                          </div>
+                            {line.custom_category === MADE_TO_MEASURE_CATEGORY && line.width_m != null && line.height_m != null && (
+                              <span className="text-xs text-gray-500">
+                                {Math.round(Number(line.width_m) * 1000)} × {Math.round(Number(line.height_m) * 1000)}
+                                {line.drive_type === 'motor' ? ' · Motorized' : line.drive_type === 'manual' ? ' · Manual' : ''}
+                              </span>
+                            )}
+                          </button>
                         )}
                     </td>
                     <td className="py-4 px-2 text-gray-700 text-sm align-middle min-w-[120px]">
@@ -2781,120 +2966,6 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                     </td>
                     <td className="py-4 pl-2 pr-5 text-right font-medium text-gray-900 text-sm align-middle min-w-[108px] whitespace-nowrap tabular-nums">{formatCurrency(lineTotal, currency)}</td>
                   </SortableRow>
-                  {line.line_type === 'custom' && isExpanded && (
-                    <tr key={`${line.id}-costs`} className="bg-gray-50/80">
-                      <td colSpan={11} className="py-4 px-6">
-                        <div className="rounded-lg border border-gray-200 bg-white p-4">
-                          <h4 className="text-sm font-semibold text-gray-700 mb-3">Cost & Pricing</h4>
-                          <div className="flex flex-wrap items-end gap-4">
-                            <div>
-                              <Label className="text-xs">Area</Label>
-                              <Input
-                                className="w-24"
-                                value={line.area ?? ''}
-                                onChange={(e) => updateCustomLine(line.id, { area: e.target.value || null })}
-                                disabled={contentReadOnly}
-                                placeholder="Area"
-                              />
-                            </div>
-                            <div>
-                              <Label className="text-xs">Position</Label>
-                              <Input
-                                className="w-24"
-                                value={line.position ?? ''}
-                                onChange={(e) => updateCustomLine(line.id, { position: e.target.value || null })}
-                                disabled={contentReadOnly}
-                                placeholder="Position"
-                              />
-                            </div>
-                            <div>
-                              <Label className="text-xs">Description</Label>
-                              <Input
-                                className="w-48"
-                                value={line.description ?? ''}
-                                onChange={(e) => updateCustomLine(line.id, { description: e.target.value })}
-                                disabled={contentReadOnly}
-                                placeholder="Description"
-                              />
-                            </div>
-                            <div>
-                              <Label className="text-xs">Category</Label>
-                              <SelectShadcn
-                                value={line.custom_category ?? 'other'}
-                                onValueChange={(v) => updateCustomLine(line.id, { custom_category: v as ProposalCustomCategory })}
-                                disabled={contentReadOnly}
-                              >
-                                <SelectTrigger className="w-36">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {CUSTOM_CATEGORIES.map((o) => (
-                                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </SelectShadcn>
-                            </div>
-                            <div>
-                              <Label className="text-xs">Cost</Label>
-                              <Input
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                className="w-24"
-                                placeholder="0"
-                                value={line.unit_cost ?? ''}
-                                onChange={(e) => updateCustomLine(line.id, { unit_cost: e.target.value === '' ? null : parseFloat(e.target.value) })}
-                                disabled={contentReadOnly}
-                              />
-                            </div>
-                            <div>
-                              <Label className="text-xs">Markup %</Label>
-                              <Input
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                className="w-24"
-                                placeholder="0"
-                                value={line.markup_pct ?? ''}
-                                onChange={(e) => updateCustomLine(line.id, { markup_pct: e.target.value === '' ? null : parseFloat(e.target.value) })}
-                                disabled={contentReadOnly}
-                              />
-                            </div>
-                            <div>
-                              <Label className="text-xs">Unit Price</Label>
-                              <span className="block w-24 py-2 text-sm font-medium text-gray-900 tabular-nums">
-                                {formatCurrency(
-                                  (Number(line.unit_cost) || 0) * (1 + (Number(line.markup_pct) || 0) / 100),
-                                  currency
-                                )}
-                              </span>
-                            </div>
-                            <div>
-                              <Label className="text-xs">Qty</Label>
-                              <Input
-                                type="number"
-                                step="1"
-                                min={0}
-                                className="w-20"
-                                placeholder="0"
-                                value={line.qty == null || line.qty === 0 ? '' : line.qty}
-                                onChange={(e) => {
-                                  const raw = e.target.value;
-                                  if (raw === '') {
-                                    updateCustomLine(line.id, { qty: 0 });
-                                    return;
-                                  }
-                                  const n = parseFloat(raw);
-                                  if (!Number.isNaN(n) && n >= 0) updateCustomLine(line.id, { qty: n });
-                                }}
-                                disabled={contentReadOnly}
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
                   {line.line_type === 'from_quote' && isExpanded && (
                     <tr key={`${line.id}-addons`} className="bg-gray-50/80">
                       <td colSpan={11} className="py-4 px-6">
@@ -3219,6 +3290,200 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
       {activeTab === 'timeline' && (
         <TimelineView events={timeline} loading={loading && timeline.length === 0} emptyMessage="No activity yet" />
       )}
+
+      {/* Custom Item modal — same layout as Quote Custom Item (incl. MTM) */}
+      {customModalDraft && (() => {
+        const d = customModalDraft;
+        const isNew = d.id.startsWith('temp-') && !draftLines.some((l) => l.id === d.id);
+        const isMTM = d.category === MADE_TO_MEASURE_CATEGORY;
+        const previewTotal = (Number(d.unit_price) || 0) * Math.max(1, Number(d.qty) || 1);
+        const set = (fields: Partial<CustomItemModalDraft>) => updateCustomModalDraft(fields);
+        const selectablePts = productTypes.filter((pt) => String(pt.code || '').toLowerCase() !== 'service');
+        return (
+          <div className="fixed inset-0 bg-black bg-opacity-40 z-50 flex items-center justify-center p-6">
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between px-6 py-5 border-b">
+                <h3 className="text-base font-semibold text-gray-900">{isNew ? 'New Custom Item' : 'Edit Custom Item'}</h3>
+                <button type="button" onClick={closeCustomModal} className="p-1 hover:bg-gray-100 rounded">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="px-6 py-5 space-y-5">
+                <div>
+                  <Label className="text-xs text-gray-600 mb-1.5">Type</Label>
+                  <SelectShadcn value={d.category} onValueChange={(v) => set({ category: v as ProposalCustomCategory })}>
+                    <SelectTrigger className="!h-10 !rounded-md !border-gray-300">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="!rounded-md">
+                      {CUSTOM_CATEGORIES.map((c) => (
+                        <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </SelectShadcn>
+                  {isMTM && (
+                    <p className="mt-1.5 text-[11px] text-amber-600">
+                      Made-to-measure items require dimensions (width × height).
+                    </p>
+                  )}
+                </div>
+
+                {isMTM && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label className="text-xs text-gray-600 mb-1.5">Product Type</Label>
+                      <SelectShadcn value={d.product_type_id || ''} onValueChange={(v) => set({ product_type_id: v })}>
+                        <SelectTrigger className="!h-10 !rounded-md !border-gray-300">
+                          <SelectValue placeholder="Select…" />
+                        </SelectTrigger>
+                        <SelectContent className="!rounded-md">
+                          {selectablePts.map((pt) => (
+                            <SelectItem key={pt.id} value={pt.id}>{pt.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </SelectShadcn>
+                    </div>
+                    <div>
+                      <Label className="text-xs text-gray-600 mb-1.5">System Drive</Label>
+                      <SelectShadcn value={d.drive || ''} onValueChange={(v) => set({ drive: v })}>
+                        <SelectTrigger className="!h-10 !rounded-md !border-gray-300">
+                          <SelectValue placeholder="Select…" />
+                        </SelectTrigger>
+                        <SelectContent className="!rounded-md">
+                          <SelectItem value="manual">Manual</SelectItem>
+                          <SelectItem value="motor">Motorized</SelectItem>
+                        </SelectContent>
+                      </SelectShadcn>
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <Label className="text-xs text-gray-600 mb-1.5">Description <span className="text-red-500">*</span></Label>
+                  <Input
+                    autoFocus
+                    value={d.name}
+                    onChange={(e) => set({ name: e.target.value })}
+                    placeholder={
+                      d.category === 'shipping' ? 'e.g. Freight to site'
+                        : d.category === 'installation' ? 'e.g. On-site installation'
+                        : d.category === 'delivery' ? 'e.g. Local delivery'
+                        : d.category === 'product' ? 'e.g. Motor remote control'
+                        : isMTM ? 'e.g. Custom blackout panel'
+                        : d.category === 'service' ? 'e.g. Design service'
+                        : 'e.g. Custom line item'
+                    }
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-xs text-gray-600 mb-1.5">Area</Label>
+                    <Input value={d.area} onChange={(e) => set({ area: e.target.value })} placeholder="Optional" />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-600 mb-1.5">Position</Label>
+                    <Input value={d.position} onChange={(e) => set({ position: e.target.value })} placeholder="Optional" />
+                  </div>
+                </div>
+
+                {isMTM && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label className="text-xs text-gray-600 mb-1.5">Width (mm)</Label>
+                      <Input
+                        inputMode="decimal"
+                        value={d.width_mm}
+                        onChange={(e) => set({ width_mm: e.target.value.replace(/[^0-9.]/g, '') })}
+                        placeholder="e.g. 1000"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs text-gray-600 mb-1.5">Height (mm)</Label>
+                      <Input
+                        inputMode="decimal"
+                        value={d.height_mm}
+                        onChange={(e) => set({ height_mm: e.target.value.replace(/[^0-9.]/g, '') })}
+                        placeholder="e.g. 2000"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-xs text-gray-600 mb-1.5">Quantity</Label>
+                    <Input
+                      inputMode="numeric"
+                      value={d.qty}
+                      onChange={(e) => set({ qty: e.target.value.replace(/[^0-9]/g, '') })}
+                      onBlur={(e) => { if (!e.target.value || Number(e.target.value) < 1) set({ qty: '1' }); }}
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-600 mb-1.5">Unit price ($)</Label>
+                    <Input
+                      inputMode="decimal"
+                      value={d.unit_price}
+                      onChange={(e) => set({ unit_price: e.target.value.replace(/[^0-9.]/g, '') })}
+                      placeholder="0.00"
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-md border border-gray-200 bg-gray-50/60 p-4">
+                  <p className="text-[11px] font-medium text-gray-500 mb-3">Internal — not shown to the customer</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label className="text-xs text-gray-600 mb-1.5">Cost ($)</Label>
+                      <Input
+                        inputMode="decimal"
+                        value={d.unit_cost}
+                        onChange={(e) => set({ unit_cost: e.target.value.replace(/[^0-9.]/g, '') })}
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs text-gray-600 mb-1.5">Markup %</Label>
+                      <Input
+                        inputMode="decimal"
+                        value={d.markup_pct}
+                        onChange={(e) => set({ markup_pct: e.target.value.replace(/[^0-9.\-]/g, '') })}
+                        placeholder="e.g. 30"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-1 border-t border-gray-100">
+                  <span className="text-sm text-gray-500">Line total</span>
+                  <span className="text-lg font-semibold text-gray-900 tabular-nums">{formatCurrency(previewTotal, currency)}</span>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 px-6 py-4 border-t bg-gray-50">
+                <button
+                  type="button"
+                  onClick={closeCustomModal}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-md transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={commitCustomModal}
+                  disabled={!d.name.trim() || (isMTM && (!Number(d.width_mm) || !Number(d.height_mm)))}
+                  className="px-4 py-2 text-sm font-medium text-white bg-primary hover:bg-primary/90 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={isMTM && (!Number(d.width_mm) || !Number(d.height_mm)) ? 'Enter width and height' : undefined}
+                >
+                  {isNew ? 'Add Item' : 'Save Changes'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </DetailPageLayout>
   );
 }

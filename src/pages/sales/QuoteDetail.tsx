@@ -21,6 +21,7 @@ import { getAppUsersDisplayNames } from '../../lib/appUsersDisplayNames';
 import QuoteAttachmentsTab from '../../components/sales/QuoteAttachmentsTab';
 import DimensionsStackView from '../../components/DimensionsStackView';
 import QuotePerformanceTab from '../../components/sales/QuotePerformanceTab';
+import { formatDraperyStyleLabel, formatDraperyTrackDescription } from '../../lib/drapery/labels';
 
 const SALES_SUBMODULES = [
   { id: 'quotes', label: 'Quotes', href: '/sales/quotes', icon: FileText },
@@ -64,16 +65,6 @@ function getWindowFilmMeasurementMm(line: QuoteLine): { widthMm: number; lengthM
 
   if (!(widthM > 0) || !(lengthM > 0)) return null;
   return { widthMm: Math.round(widthM * 1000), lengthMm: Math.round(lengthM * 1000) };
-}
-
-function normalizeStyleLabel(styleCode?: string | null): string {
-  const raw = (styleCode || '').trim();
-  if (!raw) return '';
-  return raw
-    .replace(/[_-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function getQuoteIdFromPath(): string | null {
@@ -1184,12 +1175,25 @@ export default function QuoteDetail() {
                   const unitPrice = line.unit_dealer_price_snapshot ?? line.unit_msrp ?? (line.dealer_price_total != null && qty > 0 ? Number(line.dealer_price_total) / qty : (line.msrp != null && qty > 0 ? Number(line.msrp) / qty : null));
                   const lineTotal = line.dealer_price_total ?? line.msrp ?? (unitPrice != null ? unitPrice * qty : null);
                   const isFilmLine = (line.product_type ?? '').toLowerCase() === 'window_film';
+                  const isDrapery = (line.product_type ?? '').toLowerCase() === 'drapery';
                   const isDraperyTrackOnly =
-                    (line.product_type ?? '').toLowerCase() === 'drapery' &&
-                    Boolean(line.config_snapshot?.track_only);
-                  const draperyStyleLabel = normalizeStyleLabel(
-                    line.config_snapshot?.style_code ?? line.config_snapshot?.styleCode ?? null
-                  );
+                    isDrapery && Boolean(line.config_snapshot?.track_only);
+                  const draperyProductLine =
+                    line.config_snapshot?.product_line ?? line.config_snapshot?.productLine ?? null;
+                  const draperyStyleCode =
+                    line.config_snapshot?.style_code ?? line.config_snapshot?.styleCode ?? null;
+                  const draperyStyleLabel = isDrapery
+                    ? formatDraperyStyleLabel({
+                        productLine: draperyProductLine,
+                        styleCode: draperyStyleCode,
+                      })
+                    : '';
+                  const draperyTrackName = isDraperyTrackOnly
+                    ? formatDraperyTrackDescription({
+                        productLine: draperyProductLine,
+                        styleCode: draperyStyleCode,
+                      })
+                    : null;
                   const filmMeasurement = isFilmLine ? getWindowFilmMeasurementMm(line) : null;
                   const cs = line.config_snapshot;
                   const dimSource = cs ? {
@@ -1208,14 +1212,12 @@ export default function QuoteDetail() {
                       <td className="px-4 py-4">{idx + 1}</td>
                       <td className="px-4 py-4">
                         <div>
-                          {isDraperyTrackOnly
-                            ? `Drapery Track${draperyStyleLabel ? ` | ${draperyStyleLabel}` : ''}`
-                            : (line.name ?? '—')}
+                          {draperyTrackName ?? (line.name ?? '—')}
                         </div>
                         {line.sku && <div className="text-xs text-gray-500">{line.sku}</div>}
-                        {isDraperyTrackOnly && (
+                        {isDrapery && !isDraperyTrackOnly && draperyStyleLabel && (
                           <div className="text-xs text-gray-500">
-                            Style: {draperyStyleLabel || '—'}
+                            Style: {draperyStyleLabel}
                           </div>
                         )}
                       </td>

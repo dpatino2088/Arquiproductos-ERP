@@ -4,6 +4,8 @@ export interface ChipBreakdown {
   label: string;
   sku: string;
   value: number;
+  /** Present in the BOM but does not change the cut (delta_mode=info). */
+  info?: boolean;
 }
 
 export interface AxisXData {
@@ -57,6 +59,8 @@ export interface RollerCutDiagramProps {
    */
   panelCount?: number;
   onPanelCountChange?: (count: number) => void;
+  /** When false, hide the in-diagram 1/2/3+ tabs (parent owns Panels dropdown). */
+  showPanelControls?: boolean;
 }
 
 type PanelMode = '1' | '2' | '3+';
@@ -79,7 +83,10 @@ const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
 function buildTooltip(side: string, breakdown: ChipBreakdown[] | undefined, total: number): string {
   if (!breakdown || breakdown.length === 0) return `${side}: ${total} mm`;
-  const lines = breakdown.map(b => `  ${b.label} (${b.sku}): ${b.value} mm`);
+  const lines = breakdown.map((b) => {
+    if (b.info) return `  ${b.label} (${b.sku}): info (no cut)`;
+    return `  ${b.label} (${b.sku}): ${b.value} mm`;
+  });
   return `${side}\n${lines.join('\n')}\n  ─────────\n  TOTAL: ${total} mm`;
 }
 
@@ -126,6 +133,7 @@ export default function RollerCutDiagram({
   headboxMode = 'none',
   panelCount: controlledPanelCount,
   onPanelCountChange,
+  showPanelControls = true,
 }: RollerCutDiagramProps) {
   const isControlled = typeof controlledPanelCount === 'number' && typeof onPanelCountChange === 'function';
   const [internalMode, setInternalMode] = useState<PanelMode>('1');
@@ -318,20 +326,22 @@ export default function RollerCutDiagram({
               {isHeadboxRequired ? 'HEADBOX' : 'HEADBOX · OPTIONAL'}
             </span>
           )}
-          <div className="inline-flex items-center rounded border border-slate-200 overflow-hidden text-[10px]">
-            {(['1', '2', '3+'] as PanelMode[]).map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setMode(m)}
-                className={`px-2 py-0.5 transition-colors ${
-                  mode === m ? 'bg-slate-800 text-white' : 'bg-white text-slate-500 hover:bg-slate-50'
-                }`}
-              >
-                {m === '1' ? '1 Panel' : m === '2' ? '2 Panels' : '3+ Panels'}
-              </button>
-            ))}
-          </div>
+          {showPanelControls && (
+            <div className="inline-flex items-center rounded border border-slate-200 overflow-hidden text-[10px]">
+              {(['1', '2', '3+'] as PanelMode[]).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setMode(m)}
+                  className={`px-2 py-0.5 transition-colors ${
+                    mode === m ? 'bg-slate-800 text-white' : 'bg-white text-slate-500 hover:bg-slate-50'
+                  }`}
+                >
+                  {m === '1' ? '1 Panel' : m === '2' ? '2 Panels' : '3+ Panels'}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

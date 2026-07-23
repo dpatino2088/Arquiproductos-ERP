@@ -94,6 +94,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const [cancelReason, setCancelReason] = useState('');
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [advancingLineId, setAdvancingLineId] = useState<string | null>(null);
+  const [reviewingAll, setReviewingAll] = useState(false);
   const [creatingAllWO, setCreatingAllWO] = useState(false);
   const [taskProgress, setTaskProgress] = useState<{ total: number; completed: number; inProgress: number }>({ total: 0, completed: 0, inProgress: 0 });
   const [woLineIds, setWoLineIds] = useState<Set<string>>(new Set());
@@ -615,6 +616,55 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     setMoLines(prev => prev.map(l => l.id === lineId ? { ...l, status: result.status! } : l));
     refetch();
   }, [addNotification, refetch]);
+
+  /** Bulk draft → reviewed so Material Demand / purchasing can pick up the MO. */
+  const draftLineCount = useMemo(
+    () => moLines.filter((l) => (l.status || 'draft') === 'draft').length,
+    [moLines],
+  );
+
+  const handleReviewAll = useCallback(async () => {
+    const drafts = moLines.filter((l) => (l.status || 'draft') === 'draft');
+    if (drafts.length === 0) return;
+
+    setReviewingAll(true);
+    const okIds: string[] = [];
+    const failures: string[] = [];
+
+    for (const line of drafts) {
+      const { data, error: rpcErr } = await supabase.rpc('advance_mo_line_status', {
+        p_line_id: line.id,
+        p_new_status: 'reviewed',
+      });
+      const result = data as { ok: boolean; error?: string; status?: string } | null;
+      if (rpcErr || !result?.ok) {
+        failures.push(result?.error ?? rpcErr?.message ?? 'Unknown error');
+        continue;
+      }
+      okIds.push(line.id);
+    }
+
+    setReviewingAll(false);
+
+    if (okIds.length > 0) {
+      setMoLines((prev) =>
+        prev.map((l) => (okIds.includes(l.id) ? { ...l, status: 'reviewed' } : l)),
+      );
+      refetch();
+      addNotification({
+        type: 'success',
+        title: 'Reviewed',
+        message: `${okIds.length} line(s) marked Reviewed — available for Material Demand / purchasing.`,
+      });
+    }
+    if (failures.length > 0) {
+      addNotification({
+        type: 'error',
+        title: 'Some lines failed',
+        message: `${failures.length} line(s) could not be reviewed. ${failures[0]}`,
+      });
+    }
+  }, [moLines, addNotification, refetch]);
 
   const handleCreateWO = useCallback(async (line: MOLine) => {
     if (!moId || !line.sales_order_line_id) return;
@@ -1224,24 +1274,44 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       {activeTab === 'lines' && (
         <div className="rounded-lg border border-gray-200 overflow-hidden bg-white">
           {!isTerminal && moLines.length > 0 && (
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50">
+            <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-200 bg-gray-50">
               <span className="text-xs text-gray-500">
-                {eligibleWOCount > 0
-                  ? `${eligibleWOCount} line(s) ready to generate Work Orders`
-                  : 'All material-ready lines already have Work Orders'}
+                {draftLineCount > 0
+                  ? `${draftLineCount} draft line(s) — Review to release demand to purchasing`
+                  : eligibleWOCount > 0
+                    ? `${eligibleWOCount} line(s) ready to generate Work Orders`
+                    : 'All material-ready lines already have Work Orders'}
               </span>
-              <button
-                onClick={(e) => { e.stopPropagation(); handleCreateAllWO(); }}
-                disabled={creatingAllWO || eligibleWOCount === 0}
-                title={eligibleWOCount === 0 ? 'No material-ready lines pending Work Orders' : undefined}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
-                  creatingAllWO || eligibleWOCount === 0
-                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                    : 'bg-primary text-white hover:bg-primary/90'
-                }`}
-              >
-                {creatingAllWO ? 'Creating…' : `Create All WO${eligibleWOCount > 0 ? ` (${eligibleWOCount})` : ''}`}
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                {draftLineCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); handleReviewAll(); }}
+                    disabled={reviewingAll || advancingLineId != null}
+                    title="Mark all draft lines as Reviewed (opens Material Demand)"
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+                      reviewingAll || advancingLineId != null
+                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                        : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                    }`}
+                  >
+                    {reviewingAll ? 'Reviewing…' : `Review All (${draftLineCount})`}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); handleCreateAllWO(); }}
+                  disabled={creatingAllWO || eligibleWOCount === 0 || reviewingAll}
+                  title={eligibleWOCount === 0 ? 'No material-ready lines pending Work Orders' : undefined}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+                    creatingAllWO || eligibleWOCount === 0 || reviewingAll
+                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                      : 'bg-primary text-white hover:bg-primary/90'
+                  }`}
+                >
+                  {creatingAllWO ? 'Creating…' : `Create All WO${eligibleWOCount > 0 ? ` (${eligibleWOCount})` : ''}`}
+                </button>
+              </div>
             </div>
           )}
           <table className="w-full text-sm">

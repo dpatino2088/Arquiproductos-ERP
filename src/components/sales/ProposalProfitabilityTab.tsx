@@ -29,22 +29,59 @@ function fmt(amount: number, currency = 'USD') {
 
 const COLORS = {
   materials: '#3b82f6',
-  otherCosts: '#f59e0b',
+  installation: '#8b5cf6',
+  shipping: '#06b6d4',
+  service: '#f59e0b',
+  other: '#94a3b8',
   profit: '#22c55e',
 };
 
 const CATEGORY_LABELS: Record<string, string> = {
   installation: 'Installation',
   delivery: 'Delivery',
+  shipping: 'Shipping',
   service: 'Service',
+  product: 'Product',
+  made_to_measure: 'Made-to-measure',
   other: 'Other',
 };
+
+type CostBucket = 'materials' | 'installation' | 'shipping' | 'service' | 'other';
+
+function customCategoryBucket(category: string | null | undefined): CostBucket {
+  switch (String(category || '').toLowerCase()) {
+    case 'installation':
+      return 'installation';
+    case 'shipping':
+    case 'delivery':
+      return 'shipping';
+    case 'service':
+      return 'service';
+    case 'product':
+    case 'made_to_measure':
+      return 'materials';
+    default:
+      return 'other';
+  }
+}
+
+function addonBucket(addonType: string | null | undefined): CostBucket {
+  switch (String(addonType || '').toLowerCase()) {
+    case 'installation':
+      return 'installation';
+    case 'delivery':
+      return 'shipping';
+    default:
+      return 'other';
+  }
+}
 
 interface LineDetail {
   id: string;
   name: string;
-  type: 'product' | 'custom';
+  type: 'product' | 'custom' | 'addon';
   category?: string;
+  bucket: CostBucket;
   dealerCost: number;
   salePrice: number;
   profit: number;
@@ -58,12 +95,12 @@ export default function ProposalProfitabilityTab({
   lineTotals,
   globalDiscountPct,
   globalDiscountAmount,
-  globalFeePct,
+  globalFeePct: _globalFeePct,
   installationDiscountPct,
   installationDiscountAmount,
-  installationFeePct,
-  totalProduct,
-  installationTotal,
+  installationFeePct: _installationFeePct,
+  totalProduct: _totalProduct,
+  installationTotal: _installationTotal,
   subtotal,
   taxAmount,
   total,
@@ -71,8 +108,20 @@ export default function ProposalProfitabilityTab({
 }: Props) {
   const analysis = useMemo(() => {
     let materialsCost = 0;
-    let customCost = 0;
+    let installationCost = 0;
+    let shippingCost = 0;
+    let serviceCost = 0;
+    let otherCost = 0;
     const lineDetails: LineDetail[] = [];
+
+    const addToBucket = (bucket: CostBucket, amount: number) => {
+      if (!(amount > 0)) return;
+      if (bucket === 'materials') materialsCost += amount;
+      else if (bucket === 'installation') installationCost += amount;
+      else if (bucket === 'shipping') shippingCost += amount;
+      else if (bucket === 'service') serviceCost += amount;
+      else otherCost += amount;
+    };
 
     lines.forEach((line, idx) => {
       const salePrice = lineTotals[idx] ?? 0;
@@ -81,12 +130,13 @@ export default function ProposalProfitabilityTab({
         const ql = quoteLinesMap.get(line.quote_line_id);
         if (!ql) return;
         const dealerCost = ql.dealer_price_total ?? 0;
-        materialsCost += dealerCost;
+        addToBucket('materials', dealerCost);
 
         lineDetails.push({
           id: line.id,
           name: ql.name || ql.sku || 'Product',
           type: 'product',
+          bucket: 'materials',
           dealerCost,
           salePrice,
           profit: salePrice - dealerCost,
@@ -95,13 +145,15 @@ export default function ProposalProfitabilityTab({
       } else if (line.line_type === 'custom') {
         const qty = Number(line.qty ?? 1) || 1;
         const cost = (Number(line.unit_cost ?? 0) || 0) * qty;
-        customCost += cost;
+        const bucket = customCategoryBucket(line.custom_category);
+        addToBucket(bucket, cost);
 
         lineDetails.push({
           id: line.id,
           name: line.description || CATEGORY_LABELS[line.custom_category ?? ''] || 'Custom',
           type: 'custom',
           category: line.custom_category ?? undefined,
+          bucket,
           dealerCost: cost,
           salePrice,
           profit: salePrice - cost,
@@ -110,29 +162,44 @@ export default function ProposalProfitabilityTab({
       }
     });
 
-    // Installation addons cost
-    let installCost = 0;
+    // Per-product addons: installation separate from shipping/other
     for (const [lineId, addons] of addonsMap) {
       const line = lines.find((l) => l.id === lineId);
       const ql = line?.quote_line_id ? quoteLinesMap.get(line.quote_line_id) : undefined;
       const lineQty = Number(line?.qty ?? ql?.quantity ?? 1) || 1;
+      const hostName = ql?.name || ql?.sku || line?.description || 'Line';
       addons.forEach((a) => {
-        if (a.addon_type === 'installation') {
-          installCost += (Number(a.cost_amount) || 0) * lineQty;
-        }
+        const cost = (Number(a.cost_amount) || 0) * lineQty;
+        if (!(cost > 0)) return;
+        const bucket = addonBucket(a.addon_type);
+        addToBucket(bucket, cost);
+        const sale = (Number(a.sale_amount) || 0);
+        lineDetails.push({
+          id: `${lineId}:${a.id ?? a.addon_type}`,
+          name: `${CATEGORY_LABELS[a.addon_type] || a.addon_type || 'Addon'} — ${hostName}`,
+          type: 'addon',
+          category: a.addon_type ?? undefined,
+          bucket,
+          dealerCost: cost,
+          salePrice: sale,
+          profit: sale - cost,
+          marginPct: sale > 0 ? ((sale - cost) / sale) * 100 : 0,
+        });
       });
     }
-    customCost += installCost;
 
     const totalDiscounts = globalDiscountAmount + installationDiscountAmount;
-    const totalCost = materialsCost + customCost;
+    const totalCost = materialsCost + installationCost + shippingCost + serviceCost + otherCost;
     const saleBeforeTax = subtotal;
     const grossProfit = saleBeforeTax - totalCost;
     const marginPct = saleBeforeTax > 0 ? (grossProfit / saleBeforeTax) * 100 : 0;
 
     return {
       materialsCost,
-      customCost,
+      installationCost,
+      shippingCost,
+      serviceCost,
+      otherCost,
       totalDiscounts,
       totalCost,
       grossProfit,
@@ -143,15 +210,21 @@ export default function ProposalProfitabilityTab({
   }, [lines, quoteLinesMap, addonsMap, lineTotals, globalDiscountAmount, installationDiscountAmount, subtotal]);
 
   const donutData = useMemo(() => {
-    // Donut must reconcile with center "Sale (before tax)" amount.
-    // Since margin is computed on NET sale (subtotal), discounts are shown in
-    // the breakdown table only and are excluded from donut composition.
     const segments = [];
     if (analysis.materialsCost > 0) {
       segments.push({ name: 'Materials', value: analysis.materialsCost, color: COLORS.materials });
     }
-    if (analysis.customCost > 0) {
-      segments.push({ name: 'Other Costs', value: analysis.customCost, color: COLORS.otherCosts });
+    if (analysis.installationCost > 0) {
+      segments.push({ name: 'Installation', value: analysis.installationCost, color: COLORS.installation });
+    }
+    if (analysis.shippingCost > 0) {
+      segments.push({ name: 'Shipping', value: analysis.shippingCost, color: COLORS.shipping });
+    }
+    if (analysis.serviceCost > 0) {
+      segments.push({ name: 'Service', value: analysis.serviceCost, color: COLORS.service });
+    }
+    if (analysis.otherCost > 0) {
+      segments.push({ name: 'Other', value: analysis.otherCost, color: COLORS.other });
     }
     if (analysis.grossProfit > 0) {
       segments.push({ name: 'Profit', value: analysis.grossProfit, color: COLORS.profit });
@@ -219,16 +292,37 @@ export default function ProposalProfitabilityTab({
             <div className="space-y-3">
               <BreakdownRow
                 color={COLORS.materials}
-                label="Materials (Dealer Cost)"
-                sublabel="Product cost from manufacturer"
+                label="Materials"
+                sublabel="Quote products + MTM / Product custom lines"
                 amount={analysis.materialsCost}
                 currency={currency}
               />
               <BreakdownRow
-                color={COLORS.otherCosts}
-                label="Other Costs"
-                sublabel="Installation, Delivery, Service"
-                amount={analysis.customCost}
+                color={COLORS.installation}
+                label="Installation"
+                sublabel="Custom Installation + per-product Install addons"
+                amount={analysis.installationCost}
+                currency={currency}
+              />
+              <BreakdownRow
+                color={COLORS.shipping}
+                label="Shipping / Delivery"
+                sublabel="Custom Shipping/Delivery + delivery addons"
+                amount={analysis.shippingCost}
+                currency={currency}
+              />
+              <BreakdownRow
+                color={COLORS.service}
+                label="Service"
+                sublabel="Custom Service lines"
+                amount={analysis.serviceCost}
+                currency={currency}
+              />
+              <BreakdownRow
+                color={COLORS.other}
+                label="Other"
+                sublabel="Other custom lines and misc addons"
+                amount={analysis.otherCost}
                 currency={currency}
               />
               <div className="border-t border-gray-200 pt-3">
@@ -282,8 +376,8 @@ export default function ProposalProfitabilityTab({
           <div className="overflow-x-auto">
             <table className="w-full text-sm table-fixed">
               <colgroup>
-                <col style={{ width: '35%' }} />
-                <col style={{ width: '11%' }} />
+                <col style={{ width: '32%' }} />
+                <col style={{ width: '14%' }} />
                 <col style={{ width: '14%' }} />
                 <col style={{ width: '14%' }} />
                 <col style={{ width: '14%' }} />
@@ -305,9 +399,17 @@ export default function ProposalProfitabilityTab({
                     <td className="py-2.5 pr-3 text-gray-900 font-medium truncate">{d.name}</td>
                     <td className="py-2.5 px-2 text-gray-500">
                       <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
-                        d.type === 'product' ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'
+                        d.bucket === 'installation' ? 'bg-violet-50 text-violet-700'
+                          : d.bucket === 'shipping' ? 'bg-cyan-50 text-cyan-700'
+                          : d.bucket === 'materials' || d.type === 'product' ? 'bg-blue-50 text-blue-700'
+                          : d.bucket === 'service' ? 'bg-amber-50 text-amber-700'
+                          : 'bg-slate-100 text-slate-700'
                       }`}>
-                        {d.type === 'product' ? 'Product' : CATEGORY_LABELS[d.category ?? ''] || 'Custom'}
+                        {d.type === 'product'
+                          ? 'Product'
+                          : d.type === 'addon'
+                            ? (CATEGORY_LABELS[d.category ?? ''] || 'Addon')
+                            : (CATEGORY_LABELS[d.category ?? ''] || 'Custom')}
                       </span>
                     </td>
                     <td className="py-2.5 px-2 text-right tabular-nums text-gray-700">{fmt(d.dealerCost, currency)}</td>
@@ -346,6 +448,7 @@ export default function ProposalProfitabilityTab({
 function BreakdownRow({ color, label, sublabel, amount, currency, negative, highlight }: {
   color: string; label: string; sublabel: string; amount: number; currency: string; negative?: boolean; highlight?: boolean;
 }) {
+  if (!(amount > 0) && !highlight && !negative) return null;
   return (
     <div className={`flex items-start gap-3 py-2 ${highlight ? 'bg-green-50 -mx-3 px-3 rounded-lg' : ''}`}>
       <span className="w-3 h-3 rounded-full mt-0.5 shrink-0" style={{ backgroundColor: color }} />
@@ -361,4 +464,3 @@ function BreakdownRow({ color, label, sublabel, amount, currency, negative, high
     </div>
   );
 }
-

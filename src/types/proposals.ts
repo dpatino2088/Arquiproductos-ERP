@@ -11,8 +11,16 @@ export type ProposalOverrideMode =
   | 'markup_pct'
   | 'fixed_unit_price'
   | 'fixed_line_total';
-/** DB enum: use only these. Standardized on "delivery" (not "transportation"). */
-export const PROPOSAL_CUSTOM_CATEGORIES = ['installation', 'delivery', 'service', 'other'] as const;
+/** DB enum: aligned with Quote custom line categories. */
+export const PROPOSAL_CUSTOM_CATEGORIES = [
+  'service',
+  'product',
+  'shipping',
+  'made_to_measure',
+  'installation',
+  'delivery',
+  'other',
+] as const;
 export type ProposalCustomCategory = (typeof PROPOSAL_CUSTOM_CATEGORIES)[number];
 
 export interface Proposal {
@@ -91,6 +99,14 @@ export interface ProposalLine {
   unit_cost?: number | null;
   line_total: number | null;
   line_adjustment_pct: number | null;
+  /** MTM custom lines: width in meters (UI enters mm). */
+  width_m?: number | null;
+  /** MTM custom lines: height in meters (UI enters mm). */
+  height_m?: number | null;
+  /** MTM custom lines: product type for manufacturing. */
+  product_type_id?: string | null;
+  /** MTM custom lines: manual | motor. */
+  drive_type?: string | null;
   sort_order: number;
   deleted: boolean;
   created_at: string;

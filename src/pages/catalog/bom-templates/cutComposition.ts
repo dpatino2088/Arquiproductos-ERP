@@ -263,10 +263,13 @@ export function buildCompositionForCuttable(
     if (target) {
       pushPart(target, raw, raw.qty);
     } else {
-      // shared → split into halves on left and right (each gets 1 instance per pair)
-      const halfQty = raw.qty / 2;
-      pushPart(result.left, raw, halfQty);
-      pushPart(result.right, raw, halfQty);
+      // shared (both ends): catalog delta = ONE piece. Distribute whole pieces
+      // across left/right — never half a unit (5 → 2.5).
+      // qty=2 → 1 per side; qty=1 → pair/kit → also 1 full piece per side.
+      const pieces = raw.qty === 1 ? 2 : Math.max(1, raw.qty);
+      const perSide = pieces / 2;
+      pushPart(result.left, raw, perSide);
+      pushPart(result.right, raw, perSide);
     }
   };
 
@@ -275,6 +278,9 @@ export function buildCompositionForCuttable(
     if (top.id === cuttable.id) continue;
 
     const isAffectingCuttable = affectsCuttable(top, role, false);
+    const topMode = String(top.delta_mode || 'subtract').toLowerCase();
+    // info = present in BOM, never changes cut mm
+    if (topMode === 'info') continue;
 
     if (isAffectingCuttable) {
       const delta = getDeltaForAxis(top, axis);
@@ -290,6 +296,7 @@ export function buildCompositionForCuttable(
       }
       const kids = childrenByParent.get(top.id) || [];
       for (const kid of kids) {
+        if (String(kid.delta_mode || 'subtract').toLowerCase() === 'info') continue;
         if (!affectsCuttable(kid, role, true)) continue;
         const kDelta = getDeltaForAxis(kid, axis);
         if (kDelta === 0) continue;
@@ -310,6 +317,7 @@ export function buildCompositionForCuttable(
 
   const ownChildren = childrenByParent.get(cuttable.id) || [];
   for (const oc of ownChildren) {
+    if (String(oc.delta_mode || 'subtract').toLowerCase() === 'info') continue;
     const ocDelta = getDeltaForAxis(oc, axis);
     if (ocDelta === 0) continue;
     const ocQty = Number(oc.qty_value || 1);

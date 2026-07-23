@@ -112,7 +112,7 @@ export function useInventoryMovementDetail(movementId: string | null) {
       if (!movementId) return [];
       const { data, error } = await supabase
         .from('InventoryMovementLines')
-        .select('*, CatalogItems(sku, name)')
+        .select('*, CatalogItems(sku, name, measure_basis, purchase_unit, units_per_purchase_unit, is_roll)')
         .eq('inventory_movement_id', movementId)
         .order('created_at', { ascending: true });
       if (error) throw error;

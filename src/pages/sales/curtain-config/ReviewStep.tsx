@@ -11,6 +11,10 @@ import { computeSelectedSnapshotTotals } from '../../../lib/bom/snapshotSelected
 import { useAccessContext } from '../../../hooks/useAccessContext';
 import { computeLaborBreakdownForRule, type LaborTestBreakdownLine } from '../../../lib/laborRules';
 import type { LaborRuleRow } from '../../../hooks/useCostEngineSettings';
+import {
+  formatDraperySizeLabel,
+  formatDraperySystemLabel,
+} from '../../../lib/drapery/labels';
 
 // ============================================================================
 // BOM Preview Snapshot types (from ConfiguredProducts.bom_preview_snapshot)
@@ -1267,18 +1271,30 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
                       : (bottomHemCm === 0 ? 'Serged (0 cm)' : `${bottomHemCm} cm`);
                   return (
                   <>
-                    {productLine && (
-                      <div className={specRow}>
-                        <span className="font-medium text-gray-700">Product Line:</span>
-                        <span className="ml-2 text-gray-900">{titleCase(productLine)}</span>
-                      </div>
-                    )}
-                    {styleCode && (
-                      <div className={specRow}>
-                        <span className="font-medium text-gray-700">Wave Size:</span>
-                        <span className="ml-2 text-gray-900">{titleCase(styleCode)}</span>
-                      </div>
-                    )}
+                    {(() => {
+                      const systemLabel = formatDraperySystemLabel(productLine);
+                      const sizeLabel = formatDraperySizeLabel(styleCode);
+                      const pinchOnly =
+                        !systemLabel && /pinch/i.test(String(styleCode || ''))
+                          ? 'Pinch Pleat'
+                          : null;
+                      return (
+                        <>
+                          {(systemLabel || pinchOnly) && (
+                            <div className={specRow}>
+                              <span className="font-medium text-gray-700">Product Line:</span>
+                              <span className="ml-2 text-gray-900">{systemLabel || pinchOnly}</span>
+                            </div>
+                          )}
+                          {sizeLabel && (
+                            <div className={specRow}>
+                              <span className="font-medium text-gray-700">Size:</span>
+                              <span className="ml-2 text-gray-900">{sizeLabel.replace(/^Size\s+/i, '')}</span>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                     {systemSize && (
                       <div className={specRow}>
                         <span className="font-medium text-gray-700">System Size:</span>

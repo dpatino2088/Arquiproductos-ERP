@@ -38,7 +38,7 @@ export interface ProposalPDFLine {
   has_bottom_channel?: boolean;
   /** Whether a headbox / cassette is included in the line config */
   has_headbox?: boolean;
-  /** Drapery fold style label (e.g. "Wave 2.8", "Ripple Fold", "Pinch Pleat") for non-track drapery */
+  /** Drapery system + size (e.g. "Ripple Fold | Size 2.8") for non-track drapery */
   style_label?: string | null;
   /** Internal only: accessories string */
   accessories?: string | null;

@@ -69,6 +69,13 @@ interface StockRow {
   onHandM: number | null;
   /** When is_roll and roll length known, estimated number of rolls. */
   estimatedRolls: number | null;
+  /**
+   * For linear tubes/bars purchased as each (unit_packaged): onHandM / units_per_purchase_unit.
+   * Example: 319 m ÷ 5.80 m/ea ≈ 55 pcs.
+   */
+  estimatedPieces: number | null;
+  /** Meters per purchased piece (catalog units_per_purchase_unit), when relevant. */
+  metersPerPiece: number | null;
   /** When linear_m and width known, reference area in m² (length_m × width_m). */
   m2Reference: number | null;
 }
@@ -124,7 +131,7 @@ export default function Warehouse() {
 
       let balanceQuery = supabase
         .from('InventoryBalances')
-        .select('catalog_item_id, quantity, warehouse_id, Warehouses(name), CatalogItems(sku, name, unit_of_measure, measure_basis, is_roll, is_supply_product, roll_length_value, roll_length_uom, roll_width_value, roll_width_uom, roll_width_m, primary_location_id, CatalogCategories(name), WarehouseLocations(location_code))')
+        .select('catalog_item_id, quantity, warehouse_id, Warehouses(name), CatalogItems(sku, name, unit_of_measure, measure_basis, purchase_unit, units_per_purchase_unit, is_roll, is_supply_product, roll_length_value, roll_length_uom, roll_width_value, roll_width_uom, roll_width_m, primary_location_id, CatalogCategories(name), WarehouseLocations(location_code))')
         .eq('organization_id', activeOrganizationId);
 
       if (effectiveWarehouseId) {
@@ -189,6 +196,16 @@ export default function Warehouse() {
           isRoll && isLinearStock && rollLengthM != null && rollLengthM > 0
             ? onHand / rollLengthM
             : null;
+        const purchaseUnit = String(b.CatalogItems?.purchase_unit ?? '').toLowerCase();
+        const uppu = Number(b.CatalogItems?.units_per_purchase_unit ?? 0);
+        const isUnitPackagedLinear =
+          isLinearStock &&
+          !isRoll &&
+          ['each', 'ea', 'pack', 'set', 'box', 'case', 'bag', 'bundle', 'carton', 'kit', 'pair'].includes(purchaseUnit) &&
+          uppu > 0;
+        const estimatedPieces =
+          isUnitPackagedLinear && onHandM != null ? onHandM / uppu : null;
+        const metersPerPiece = isUnitPackagedLinear ? uppu : null;
         const m2Reference =
           isLinearStock && widthM != null && widthM > 0 ? onHand * widthM : null;
         const rawUom = (b.CatalogItems?.unit_of_measure ?? 'ea').toLowerCase();
@@ -215,6 +232,8 @@ export default function Warehouse() {
           balance: Math.round((onHand + (onOrderMap.get(b.catalog_item_id) ?? 0) - (requiredMap.get(b.catalog_item_id) ?? 0)) * 100) / 100,
           onHandM,
           estimatedRolls,
+          estimatedPieces,
+          metersPerPiece,
           m2Reference,
         };
       });
@@ -354,8 +373,8 @@ export default function Warehouse() {
                 <th className="px-4 py-3 text-right font-medium text-gray-700 whitespace-nowrap cursor-pointer min-w-[90px]" onClick={() => handleSort('onHand')}>
                   On Hand <SortIcon col="onHand" />
                 </th>
-                <th className="px-3 py-3 text-right font-medium text-gray-700 w-16" title="Normalized quantity in meters">m</th>
-                <th className="px-3 py-3 text-right font-medium text-gray-700 w-14" title="Estimated roll count">Rolls</th>
+                <th className="px-3 py-3 text-right font-medium text-gray-700 w-16" title="Stock in meters (canonical for linear items)">m</th>
+                <th className="px-3 py-3 text-right font-medium text-gray-700 w-20" title="Estimated pieces (tubes/bars) or rolls">Pcs / Rolls</th>
                 <th className="px-3 py-3 text-right font-medium text-gray-700 w-16" title="Reference area (m²)">m² ref</th>
                 <th className="px-3 py-3 text-right font-medium text-gray-700 whitespace-nowrap">On Order</th>
                 <th className="px-3 py-3 text-right font-medium text-gray-700">Required</th>
@@ -411,13 +430,39 @@ export default function Warehouse() {
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">
                     {row.onHandDisplay != null ? (
-                      <>{Number(row.onHandDisplay).toFixed(2)}<span className="text-[10px] text-gray-400 ml-0.5">{row.displayUom}</span></>
+                      <>
+                        <div>
+                          {Number(row.onHandDisplay).toFixed(2)}
+                          <span className="text-[10px] text-gray-400 ml-0.5">{row.displayUom}</span>
+                        </div>
+                        {row.estimatedPieces != null && row.metersPerPiece != null && (
+                          <div className="text-[10px] text-gray-500" title={`${row.metersPerPiece} m per piece`}>
+                            ≈ {Number(row.estimatedPieces).toFixed(row.estimatedPieces % 1 === 0 ? 0 : 1)} und
+                          </div>
+                        )}
+                      </>
                     ) : (
-                      <>{Number(row.onHand).toFixed(2)}<span className="text-[10px] text-gray-400 ml-0.5">{row.uom === 'm' ? 'm' : 'ea'}</span></>
+                      <>
+                        <div>
+                          {Number(row.onHand).toFixed(2)}
+                          <span className="text-[10px] text-gray-400 ml-0.5">{row.uom === 'm' ? 'm' : 'ea'}</span>
+                        </div>
+                        {row.estimatedPieces != null && row.metersPerPiece != null && (
+                          <div className="text-[10px] text-gray-500" title={`${row.metersPerPiece} m per piece`}>
+                            ≈ {Number(row.estimatedPieces).toFixed(row.estimatedPieces % 1 === 0 ? 0 : 1)} und @ {Number(row.metersPerPiece).toFixed(2)}m
+                          </div>
+                        )}
+                      </>
                     )}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums text-gray-600">{row.onHandM != null ? Number(row.onHandM).toFixed(2) : '—'}</td>
-                  <td className="px-4 py-3 text-right tabular-nums text-gray-600">{row.estimatedRolls != null ? Number(row.estimatedRolls).toFixed(1) : '—'}</td>
+                  <td className="px-4 py-3 text-right tabular-nums text-gray-600">
+                    {row.estimatedRolls != null
+                      ? Number(row.estimatedRolls).toFixed(1)
+                      : row.estimatedPieces != null
+                        ? Number(row.estimatedPieces).toFixed(row.estimatedPieces % 1 === 0 ? 0 : 1)
+                        : '—'}
+                  </td>
                   <td className="px-4 py-3 text-right tabular-nums text-gray-600">{row.m2Reference != null ? Number(row.m2Reference).toFixed(2) : '—'}</td>
                   <td className="px-4 py-3 text-right tabular-nums text-gray-600">{row.onOrder > 0 ? Number(row.onOrder).toFixed(2) : '—'}</td>
                   <td className="px-4 py-3 text-right tabular-nums text-gray-600">{row.required > 0 ? Number(row.required).toFixed(2) : '—'}</td>

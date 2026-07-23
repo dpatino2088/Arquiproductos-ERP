@@ -5,6 +5,7 @@ import { supabase } from '../../../../../lib/supabase/client';
 import { useOrganizationContext } from '../../../../../context/OrganizationContext';
 import Label from '../../../../../components/ui/Label';
 import { prefetchImageUrls } from '../../../../../lib/imagePrefetch';
+import { formatDraperySizeLabel } from '../../../../../lib/drapery/labels';
 
 interface ProductLineStepProps {
   config: any;
@@ -246,7 +247,12 @@ export default function ProductLineStep({ config, onUpdate }: ProductLineStepPro
 
   const styleCards = useMemo(() => {
     return styleRules.map((rule) => {
-      const name = rule.display_name || rule.style_code.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+      // Prefer Size X.Y so "Wave 2.8" display_name is not confused with Wave Drapery system.
+      const sizeLabel = formatDraperySizeLabel(rule.style_code);
+      const name =
+        sizeLabel ||
+        rule.display_name ||
+        rule.style_code.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
       const subtitle = `Fullness ${rule.fullness_factor}x`;
       return { ...rule, name, subtitle };
     });
@@ -361,10 +367,10 @@ export default function ProductLineStep({ config, onUpdate }: ProductLineStepPro
         </div>
       </div>
 
-      {/* Section 2: Wave Size — only when product line has multiple style variants */}
+      {/* Section 2: Size / fullness — only when product line has multiple style variants */}
       {selectedLine && showWaveSizeSection && (
         <div className="bg-white rounded-lg border border-gray-200 p-6">
-          <Label className="text-sm font-medium mb-4 block">WAVE SIZE</Label>
+          <Label className="text-sm font-medium mb-4 block">SIZE</Label>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             {styleCards.map((card) => {
               const isSelected = selectedStyleCode === card.style_code;

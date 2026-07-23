@@ -1220,7 +1220,7 @@ async function cloneProposalAsVersion(
   const { data: srcLines, error: linesErr } = await supabase
     .from('ProposalLines')
     .select(
-      'id, line_type, quote_line_id, override_mode, discount_pct, markup_pct, fixed_unit_price, fixed_line_total, custom_category, area, position, description, qty, uom, unit_price, unit_cost, line_total, line_adjustment_pct, sort_order, quote_line_snapshot'
+      'id, line_type, quote_line_id, override_mode, discount_pct, markup_pct, fixed_unit_price, fixed_line_total, custom_category, area, position, description, qty, uom, unit_price, unit_cost, line_total, line_adjustment_pct, width_m, height_m, product_type_id, drive_type, sort_order, quote_line_snapshot'
     )
     .eq('proposal_id', src.id)
     .eq('deleted', false);

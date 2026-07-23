@@ -10,6 +10,7 @@ import {
   type VariantGroup,
 } from './cutComposition';
 import type { BOMComponentDraft } from './types';
+import { normalizeBothEndsBracketDeduction } from './previewAssemble';
 
 interface CutBreakdownPanelProps {
   components: BOMComponentDraft[];
@@ -29,6 +30,8 @@ interface CutBreakdownPanelProps {
   isDrapery?: boolean;
   /** Master-carrier opening direction (drapery only). */
   openingDirection?: 'left' | 'right' | 'center' | null;
+  /** Hide in-diagram panel tabs when the parent owns the Panels dropdown. */
+  showPanelControls?: boolean;
 }
 
 interface CuttableMeta {
@@ -220,8 +223,12 @@ function splitPreviewSides(
   let center = 0;
   let right = 0;
 
-  for (const d of item.deductions ?? []) {
-    if ((d.mode || 'subtract') === 'info') continue;
+  for (const raw of item.deductions ?? []) {
+    const mode = String(raw.mode || 'subtract').toLowerCase();
+    const isInfo = mode === 'info';
+    // Pair/kit normalization for both-ends brackets (qty=1 → 2 physical pieces).
+    const norm = normalizeBothEndsBracketDeduction(raw);
+    const d = { ...raw, qty: norm.qty, delta: norm.delta, total: norm.total };
     const jointDeduction = usesJointPanelDeduction(d);
     if (jointDeduction && panelCount <= 1) continue; // N-1 rule: one panel => zero intermediates
     const axis = String(item.axis || '').toLowerCase();
@@ -242,12 +249,19 @@ function splitPreviewSides(
             : (panelCount > 1 && total > 0 ? total / Math.max(panelCount - 1, 1) : total);
       total = round2(perJoint * Math.max(panelCount - 1, 0));
     }
-    if (total === 0) continue;
+
+    const roleKey = normalizeRole(d.role || '');
+    // Drive hardware with no cut mm (drapery motor, info adapters) must still
+    // appear on the correct side — but never change totals.
+    const isDrivePresenceRole =
+      roleKey === 'motor' || roleKey === 'drive' || roleKey === 'clutch' || roleKey === 'idler';
+    const treatAsInfo = isInfo || (total === 0 && isDrivePresenceRole);
+    if (!treatAsInfo && total === 0) continue;
 
     // Children of this parent component (looked up by role+sku in BOM).
     // The DB sums them into the parent's delta, so we must split the displayed
     // row into self + per-child contributions to avoid double counting.
-    const childKey = `${normalizeRole(d.role || '')}|${normalizeSkuKey(d.sku)}`;
+    const childKey = `${roleKey}|${normalizeSkuKey(d.sku)}`;
     const childList = childrenByParentRoleSku.get(childKey) || [];
     const childPerInstanceSum = childList.reduce(
       (acc, c) => acc + (isHeight ? c.contribDy : c.contribDx),
@@ -255,20 +269,14 @@ function splitPreviewSides(
     );
     // Number of "parent instances" that produce this row.
     // Joint case → (N−1) joints. Otherwise → d.qty (defaults to 1).
+    // Both-ends brackets: qty is physical pieces (kit qty=1 already expanded to 2).
     const instances = jointDeduction
       ? Math.max(panelCount - 1, 0)
       : Math.max(1, Number(d.qty || 1));
     const parentSelfPerInstance = round2(Math.max(0, baseDelta - childPerInstanceSum));
-    const parentSelfTotal = round2(parentSelfPerInstance * instances);
-    const childTotals = childList.map((c) => ({
-      role: c.role,
-      sku: c.sku,
-      total: round2((isHeight ? c.contribDy : c.contribDx) * instances),
-    }));
     const parentLabel = prettifyRole(d.role);
     const parentSku = d.sku || '?';
 
-    const roleKey = normalizeRole(d.role || '');
     const skuKey = normalizeSkuKey(d.sku);
     const overridePos = mapSectionToPosition(
       sectionByRoleSku.get(`${roleKey}|${skuKey}`) || sectionByRole.get(roleKey) || null,
@@ -277,7 +285,7 @@ function splitPreviewSides(
     let pos = (overridePos || d.position || roleHeuristicPos || 'edge').toLowerCase();
     if (jointDeduction) pos = 'shared';
 
-    // Build the ordered list of (label, sku, totalForRouting) entries for THIS
+    // Build the ordered list of (label, sku, perInstance) entries for THIS
     // deduction. Each entry will then be expanded by `instances` copies and
     // optionally split half/half by the position routing below.
     const entries: { label: string; sku: string; perInstance: number }[] = [];
@@ -291,56 +299,81 @@ function splitPreviewSides(
         entries.push({ label: `↳ ${prettifyRole(c.role)}`, sku: c.sku, perInstance: round2(perInst) });
       }
     }
-    // Edge case: parent had no self-delta and no resolvable children. Fall back
-    // to a single row that represents the whole `total` — never silently drop it.
+    // Always keep a row for info / zero-cut drive presence (motor with no Δ).
     if (entries.length === 0) {
-      entries.push({ label: parentLabel, sku: parentSku, perInstance: round2(total / Math.max(instances, 1)) });
+      const fallback = treatAsInfo
+        ? (catalogPerJoint || baseDelta || 0)
+        : round2(total / Math.max(instances, 1));
+      entries.push({ label: parentLabel, sku: parentSku, perInstance: fallback });
     }
 
-    const pushExpanded = (rows: ChipBreakdown[], factor: number) => {
+    // Expand `count` rows at `scale × perInstance` into a side list.
+    const pushExpanded = (rows: ChipBreakdown[], count: number, scale: number) => {
+      const n = Math.max(0, count);
       for (const e of entries) {
-        const v = round2(e.perInstance * factor);
-        for (let i = 0; i < instances; i++) rows.push({ label: e.label, sku: e.sku, value: v });
+        const v = round2(e.perInstance * scale);
+        if (!treatAsInfo && v === 0) continue;
+        for (let i = 0; i < n; i++) {
+          rows.push({
+            label: e.label,
+            sku: e.sku,
+            value: treatAsInfo ? 0 : v,
+            info: treatAsInfo || undefined,
+          });
+        }
       }
     };
 
-    void parentSelfTotal; // accounted for through entries × instances
-    void childTotals;
+    /**
+     * Both-ends routing (edge / drive=both): GLOBAL total is `delta × qty`
+     * where delta = ONE physical piece. Distribute whole pieces across ends:
+     *   qty=2 → 1 full piece per end
+     *   qty=4 → 2 full pieces per end
+     * Bracket qty=1 is normalized to qty=2 (pair/kit) before this runs, so we
+     * never paint half a catalog unit (5 → 2.5).
+     */
+    const pushBothEnds = (leftTarget: ChipBreakdown[], rightTarget: ChipBreakdown[]) => {
+      const sideShare = instances / 2;
+      const copiesPerSide = Math.max(1, Math.floor(sideShare));
+      const scale = sideShare / copiesPerSide;
+      pushExpanded(leftTarget, copiesPerSide, scale);
+      pushExpanded(rightTarget, copiesPerSide, scale);
+    };
+
+    const addTotal = (mm: number) => (treatAsInfo ? 0 : mm);
 
     if (pos === 'shared') {
-      center = round2(center + total);
-      pushExpanded(centerRows, 1);
+      center = round2(center + addTotal(total));
+      pushExpanded(centerRows, instances, 1);
     } else if (pos === 'edge') {
       const half = round2(total / 2);
-      left = round2(left + half);
-      right = round2(right + half);
-      pushExpanded(leftRows, 0.5);
-      pushExpanded(rightRows, 0.5);
+      left = round2(left + addTotal(half));
+      right = round2(right + addTotal(half));
+      pushBothEnds(leftRows, rightRows);
     } else if (pos === 'drive_side') {
       if (driveSide === 'right') {
-        right = round2(right + total);
-        pushExpanded(rightRows, 1);
+        right = round2(right + addTotal(total));
+        pushExpanded(rightRows, instances, 1);
       } else if (driveSide === 'both') {
         const half = round2(total / 2);
-        left = round2(left + half);
-        right = round2(right + half);
-        pushExpanded(leftRows, 0.5);
-        pushExpanded(rightRows, 0.5);
+        left = round2(left + addTotal(half));
+        right = round2(right + addTotal(half));
+        pushBothEnds(leftRows, rightRows);
       } else {
-        left = round2(left + total);
-        pushExpanded(leftRows, 1);
+        left = round2(left + addTotal(total));
+        pushExpanded(leftRows, instances, 1);
       }
     } else if (pos === 'passive_side') {
       if (driveSide === 'right') {
-        left = round2(left + total);
-        pushExpanded(leftRows, 1);
+        left = round2(left + addTotal(total));
+        pushExpanded(leftRows, instances, 1);
       } else if (driveSide === 'left') {
-        right = round2(right + total);
-        pushExpanded(rightRows, 1);
+        right = round2(right + addTotal(total));
+        pushExpanded(rightRows, instances, 1);
       }
     } else {
-      center = round2(center + total);
-      pushExpanded(centerRows, 1);
+      center = round2(center + addTotal(total));
+      pushExpanded(centerRows, instances, 1);
     }
   }
 
@@ -385,6 +418,7 @@ export default function CutBreakdownPanel({
   headboxMode = 'none',
   isDrapery = false,
   openingDirection = null,
+  showPanelControls = true,
 }: CutBreakdownPanelProps) {
   const [selectedVariants, setSelectedVariants] = useState<Record<string, string>>({});
   const onSelectVariant = (groupKey: string, value: string) => {
@@ -601,6 +635,7 @@ export default function CutBreakdownPanel({
           headboxMode={headboxMode}
           panelCount={panelCount}
           onPanelCountChange={onPreviewPanelCountChange}
+          showPanelControls={showPanelControls}
           tube={
             previewTube && tubeSides
               ? {
@@ -671,8 +706,8 @@ export default function CutBreakdownPanel({
                 <div className="space-y-1 text-[11px]">
                   {tubeSides.leftRows.map((r, idx) => (
                     <div key={`db-l-${idx}`} className="flex items-center justify-between">
-                      <span className="text-slate-600 truncate">{r.label}</span>
-                      <span className="font-mono font-semibold text-slate-800">{r.value}mm</span>
+                      <span className="text-slate-600 truncate">{r.label}{r.info ? ' · info' : ''}</span>
+                      <span className="font-mono font-semibold text-slate-800">{r.info ? '—' : `${r.value}mm`}</span>
                     </div>
                   ))}
                 </div>
@@ -686,8 +721,8 @@ export default function CutBreakdownPanel({
                 <div className="space-y-1 text-[11px]">
                   {tubeSides.centerRows.map((r, idx) => (
                     <div key={`db-c-${idx}`} className="flex items-center justify-between">
-                      <span className="text-slate-600 truncate">{r.label}</span>
-                      <span className="font-mono font-semibold text-slate-800">{r.value}mm</span>
+                      <span className="text-slate-600 truncate">{r.label}{r.info ? ' · info' : ''}</span>
+                      <span className="font-mono font-semibold text-slate-800">{r.info ? '—' : `${r.value}mm`}</span>
                     </div>
                   ))}
                 </div>
@@ -701,8 +736,8 @@ export default function CutBreakdownPanel({
                 <div className="space-y-1 text-[11px]">
                   {tubeSides.rightRows.map((r, idx) => (
                     <div key={`db-r-${idx}`} className="flex items-center justify-between">
-                      <span className="text-slate-600 truncate">{r.label}</span>
-                      <span className="font-mono font-semibold text-slate-800">{r.value}mm</span>
+                      <span className="text-slate-600 truncate">{r.label}{r.info ? ' · info' : ''}</span>
+                      <span className="font-mono font-semibold text-slate-800">{r.info ? '—' : `${r.value}mm`}</span>
                     </div>
                   ))}
                 </div>
@@ -870,6 +905,7 @@ export default function CutBreakdownPanel({
         headboxMode={headboxMode}
         panelCount={previewPanelCount}
         onPanelCountChange={onPreviewPanelCountChange}
+        showPanelControls={showPanelControls}
         tube={
           tube
             ? {

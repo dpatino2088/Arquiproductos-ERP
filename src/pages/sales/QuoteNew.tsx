@@ -43,6 +43,7 @@ import { computeSelectedSnapshotTotals } from '../../lib/bom/snapshotSelectedTot
 import DimensionsStackView from '../../components/DimensionsStackView';
 import QuoteTermsDisplay from '../../components/sales/QuoteTermsDisplay';
 import { resolveDefaultTermsTemplateId, fetchTermsTemplateById } from '../../lib/terms';
+import { formatDraperyStyleLabel } from '../../lib/drapery/labels';
 
 // ====================================================
 // UTILS: Error Serialization (Safe)
@@ -128,16 +129,6 @@ function getEffectiveLinePrices(
   );
 
   return { qty, unitMsrp, unitPrice, lineTotal, isCommercialAdjusted };
-}
-
-function normalizeStyleLabel(styleCode?: string | null): string {
-  const raw = (styleCode || '').trim();
-  if (!raw) return '';
-  return raw
-    .replace(/[_-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/\b\w/g, (c: string) => c.toUpperCase());
 }
 
 // ====================================================
@@ -4321,6 +4312,7 @@ export default function QuoteNew() {
           position: line.position,
           product_type: isServiceLine ? (isMadeToMeasure ? mtmTypeName : 'Service') : (line.ProductType?.name ?? line.product_type ?? '—'),
           style_code: line.config_snapshot?.style_code ?? line.config_snapshot?.styleCode ?? null,
+          product_line: line.config_snapshot?.product_line ?? line.config_snapshot?.productLine ?? null,
           track_only: Boolean(line.config_snapshot?.track_only),
           has_side_channel:
             (typeof line.config_snapshot?.side_channel_item_id === 'string'
@@ -4553,6 +4545,7 @@ export default function QuoteNew() {
           position: line.position,
           product_type: isServiceLine ? (isMadeToMeasure ? mtmTypeName : 'Service') : (line.ProductType?.name ?? line.product_type ?? '—'),
           style_code: line.config_snapshot?.style_code ?? line.config_snapshot?.styleCode ?? null,
+          product_line: line.config_snapshot?.product_line ?? line.config_snapshot?.productLine ?? null,
           track_only: Boolean(line.config_snapshot?.track_only),
           has_side_channel:
             (typeof line.config_snapshot?.side_channel_item_id === 'string'
@@ -5463,15 +5456,25 @@ export default function QuoteNew() {
                     const isCatalogLine = line.product_type === 'catalog';
                     const isFilmLine = line.product_type === 'window_film';
                     const isServiceLine = line.product_type === 'service';
-                    const isDraperyTrackOnly =
+                    const isDrapery =
                       !isCatalogLine &&
                       !isFilmLine &&
                       !isServiceLine &&
-                      String(line.product_type || '').trim().toLowerCase() === 'drapery' &&
-                      Boolean(line.config_snapshot?.track_only);
-                    const draperyStyleLabel = normalizeStyleLabel(
-                      line.config_snapshot?.style_code ?? line.config_snapshot?.styleCode ?? null
-                    );
+                      String(line.product_type || '').trim().toLowerCase() === 'drapery';
+                    const isDraperyTrackOnly =
+                      isDrapery && Boolean(line.config_snapshot?.track_only);
+                    const draperyStyleLabel = isDrapery
+                      ? formatDraperyStyleLabel({
+                          productLine:
+                            line.config_snapshot?.product_line ??
+                            line.config_snapshot?.productLine ??
+                            null,
+                          styleCode:
+                            line.config_snapshot?.style_code ??
+                            line.config_snapshot?.styleCode ??
+                            null,
+                        })
+                      : '';
                     const productTypeName = isCatalogLine
                       ? (line.CatalogItems?.item_role
                           ? String(line.CatalogItems.item_role).replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())
@@ -5568,12 +5571,15 @@ export default function QuoteNew() {
                         <td className="py-4 px-2 text-gray-700 text-sm text-center break-words leading-tight" title={collectionDisplay}>
                           <div>
                             <div>{collectionDisplay}</div>
-                            {(hasSideChannel || hasBottomChannel) && (
+                            {(isDrapery && !isDraperyTrackOnly && draperyStyleLabel) || hasSideChannel || hasBottomChannel ? (
                               <div className="text-[11px] text-gray-500 mt-0.5 flex flex-col gap-0.5">
+                                {isDrapery && !isDraperyTrackOnly && draperyStyleLabel ? (
+                                  <span>Style: {draperyStyleLabel}</span>
+                                ) : null}
                                 {hasSideChannel ? <span>Side Channel: Yes</span> : null}
                                 {hasBottomChannel ? <span>Bottom Channel: Yes</span> : null}
                               </div>
-                            )}
+                            ) : null}
                           </div>
                         </td>
                         <td className="py-4 px-2 text-gray-700 text-sm text-center leading-tight" title={driveDisplay}>

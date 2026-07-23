@@ -320,7 +320,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
   const [lineMoDropdownId, setLineMoDropdownId] = useState<string | null>(null);
   const [soRef, setSoRef] = useState<{ id: string; label: string } | null>(null);
   const [soSearch, setSoSearch] = useState('');
-  const [soOptions, setSoOptions] = useState<{ id: string; sales_order_no: string }[]>([]);
+  const [soOptions, setSoOptions] = useState<{ id: string; sales_order_no: string; dealer_name: string | null }[]>([]);
   const [showSoDropdown, setShowSoDropdown] = useState(false);
   const handleBack = useCallback(() => {
     navigateBackContextual(router, {
@@ -356,15 +356,23 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
     if (!activeOrganizationId) { setSoOptions([]); return; }
     let q = supabase
       .from('SalesOrders')
-      .select('id, sales_order_no')
+      .select('id, sales_order_no, Dealers:dealer_id(dealer_name)')
       .eq('organization_id', activeOrganizationId)
       .eq('deleted', false)
       .order('created_at', { ascending: false })
       .limit(10);
     if (query.trim()) q = q.ilike('sales_order_no', `%${query.trim()}%`);
     const { data } = await q;
-    setSoOptions((data ?? []) as { id: string; sales_order_no: string }[]);
+    const rows = (data ?? []) as { id: string; sales_order_no: string; Dealers?: { dealer_name: string | null } | null }[];
+    setSoOptions(rows.map((r) => ({
+      id: r.id,
+      sales_order_no: r.sales_order_no,
+      dealer_name: r.Dealers?.dealer_name ?? null,
+    })));
   }, [activeOrganizationId]);
+
+  // Build the linked-SO label including the dealer for quick identification.
+  const soLabel = (no: string, dealer: string | null) => (dealer ? `${no} · ${dealer}` : no);
 
   useEffect(() => {
     if (!showSoDropdown) return;
@@ -382,10 +390,11 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
     (async () => {
       const { data } = await supabase
         .from('SalesOrders')
-        .select('id, sales_order_no')
+        .select('id, sales_order_no, Dealers:dealer_id(dealer_name)')
         .eq('id', soId)
         .maybeSingle();
-      if (!cancelled && data) setSoRef({ id: data.id, label: data.sales_order_no });
+      const row = data as { id: string; sales_order_no: string; Dealers?: { dealer_name: string | null } | null } | null;
+      if (!cancelled && row) setSoRef({ id: row.id, label: soLabel(row.sales_order_no, row.Dealers?.dealer_name ?? null) });
     })();
     return () => { cancelled = true; };
   }, [isCreateMode, soRef, activeOrganizationId]);
@@ -399,10 +408,11 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
       (async () => {
         const { data } = await supabase
           .from('SalesOrders')
-          .select('id, sales_order_no')
+          .select('id, sales_order_no, Dealers:dealer_id(dealer_name)')
           .eq('id', anyPo.reference_id as string)
           .maybeSingle();
-        if (!cancelled && data) setSoRef({ id: data.id, label: data.sales_order_no });
+        const row = data as { id: string; sales_order_no: string; Dealers?: { dealer_name: string | null } | null } | null;
+        if (!cancelled && row) setSoRef({ id: row.id, label: soLabel(row.sales_order_no, row.Dealers?.dealer_name ?? null) });
       })();
       return () => { cancelled = true; };
     }
@@ -1693,10 +1703,11 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                               <button
                                 key={s.id}
                                 type="button"
-                                onClick={() => { setSoRef({ id: s.id, label: s.sales_order_no }); setShowSoDropdown(false); setSoSearch(''); }}
-                                className="block w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                                onClick={() => { setSoRef({ id: s.id, label: soLabel(s.sales_order_no, s.dealer_name) }); setShowSoDropdown(false); setSoSearch(''); }}
+                                className="flex w-full items-center justify-between gap-3 px-3 py-2 text-sm hover:bg-gray-50"
                               >
-                                {s.sales_order_no}
+                                <span className="font-medium text-gray-900">{s.sales_order_no}</span>
+                                <span className="truncate text-xs text-gray-500">{s.dealer_name ?? '—'}</span>
                               </button>
                             ))}
                           </div>
