@@ -90,8 +90,10 @@ const MODULE_TABS: Record<string, { label: string; href: string }[]> = {
   ],
   '/inventory': [
     { label: 'Warehouse', href: '/inventory/warehouse' },
+    { label: 'Locations', href: '/inventory/locations' },
     { label: 'Purchase Orders', href: '/inventory/purchase-orders' },
     { label: 'Receipts', href: '/inventory/receipts' },
+    { label: 'Deliveries', href: '/inventory/deliveries' },
     { label: 'Transactions', href: '/inventory/transactions' },
     { label: 'Adjustments', href: '/inventory/adjustments' },
     { label: 'Material Demand', href: '/inventory/material-demand' },

@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { router } from '../../lib/router';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { Package, Warehouse, ShoppingCart, Receipt, ArrowLeftRight, Settings } from 'lucide-react';
+import { Package, Warehouse, ShoppingCart, Receipt, ArrowLeftRight, Settings, Truck } from 'lucide-react';
 import { usePermissions } from '../../hooks/usePermissions';
 
 export default function Inventory() {
@@ -11,6 +11,7 @@ export default function Inventory() {
     { id: 'warehouse', label: 'Warehouse', href: '/inventory/warehouse', icon: Warehouse, allowed: can('inventory.warehouse.read') },
     { id: 'purchase-orders', label: 'Purchase Orders', href: '/inventory/purchase-orders', icon: ShoppingCart, allowed: can('inventory.purchase_orders.read') },
     { id: 'receipts', label: 'Receipts', href: '/inventory/receipts', icon: Receipt, allowed: can('inventory.receipts.read') },
+    { id: 'deliveries', label: 'Deliveries', href: '/inventory/deliveries', icon: Truck, allowed: can('inventory.deliveries.read') },
     { id: 'transactions', label: 'Transactions', href: '/inventory/transactions', icon: ArrowLeftRight, allowed: can('inventory.transactions.read') },
     { id: 'adjustments', label: 'Adjustments', href: '/inventory/adjustments', icon: Settings, allowed: can('inventory.adjustments.read') },
     { id: 'material-demand', label: 'Material Demand', href: '/inventory/material-demand', icon: Package, allowed: can('inventory.material_demand.read') },

@@ -65,7 +65,18 @@ interface CatalogItemLookupRow {
 // Keep legacy export for backward compatibility
 export type FinishedGoodsGroup = FinishedGoodsSOGroup;
 
-export function useFinishedGoods() {
+export interface UseFinishedGoodsOptions {
+  /**
+   * When true, supply / MTM lines (bought or stocked products with no
+   * Manufacturing Order) are folded into the groups so a single outbound
+   * queue can dispatch every origin. Finished Goods (manufactured only)
+   * leaves this off; the Inventory > Deliveries queue turns it on.
+   */
+  includeSupply?: boolean;
+}
+
+export function useFinishedGoods(options?: UseFinishedGoodsOptions) {
+  const includeSupply = options?.includeSupply ?? false;
   const { activeOrganizationId } = useOrganizationContext();
   const [groups, setGroups] = useState<FinishedGoodsSOGroup[]>([]);
   const [loading, setLoading] = useState(false);
@@ -216,6 +227,87 @@ export function useFinishedGoods() {
         throw new Error(err.message);
       }
 
+      // Supply / MTM lines (bought or stocked products, no Manufacturing Order).
+      // Once reserved/received they are "ready" and must be deliverable with the
+      // same rules as manufactured (CP) products. Only folded in for the unified
+      // Deliveries queue; Finished Goods stays manufactured-only.
+      if (includeSupply) try {
+        const { data: ptRows } = await supabase
+          .from('ProductTypes')
+          .select('code')
+          .eq('organization_id', activeOrganizationId)
+          .eq('fulfillment_type', 'supply_only');
+        const supplyCodes = (ptRows ?? []).map((p: { code: string }) => p.code);
+        if (supplyCodes.length > 0) {
+          const { data: solRows } = await supabase
+            .from('SaleOrderLines')
+            .select('id, sales_order_id, description, product_type, area, position, catalog_item_id, quantity, delivered_qty, delivery_status')
+            .eq('organization_id', activeOrganizationId)
+            .eq('deleted', false)
+            .in('product_type', supplyCodes)
+            .not('catalog_item_id', 'is', null)
+            .in('delivery_status', ['ready', 'delivered']);
+
+          const supplyRows = (solRows ?? []) as {
+            id: string; sales_order_id: string; description: string | null; product_type: string | null;
+            area: string | null; position: string | null; catalog_item_id: string | null;
+            quantity: number; delivered_qty: number | null; delivery_status: string;
+          }[];
+          const existingIds = new Set(linesData.map((l) => l.line_id));
+          const newSupply = supplyRows.filter((r) => !existingIds.has(r.id));
+
+          if (newSupply.length > 0) {
+            const soIds2 = [...new Set(newSupply.map((r) => r.sales_order_id))];
+            const catIds2 = [...new Set(newSupply.map((r) => r.catalog_item_id).filter(Boolean))] as string[];
+            const { data: soRows2 } = await supabase
+              .from('SalesOrders').select('id, sales_order_no, dealer_id, customer_id').in('id', soIds2);
+            const soRowsT = (soRows2 ?? []) as SalesOrderLookupRow[];
+            const dealerIds2 = [...new Set(soRowsT.map((s) => s.dealer_id).filter(Boolean))] as string[];
+            const custIds2 = [...new Set(soRowsT.map((s) => s.customer_id).filter(Boolean))] as string[];
+            const [{ data: dealerRows2 }, { data: custRows2 }, { data: catRows2 }] = await Promise.all([
+              dealerIds2.length ? supabase.from('Dealers').select('id, dealer_name').in('id', dealerIds2) : Promise.resolve({ data: [] as any[] }),
+              custIds2.length ? supabase.from('DirectoryCustomers').select('id, customer_name').in('id', custIds2) : Promise.resolve({ data: [] as any[] }),
+              catIds2.length ? supabase.from('CatalogItems').select('id, name, sku').in('id', catIds2) : Promise.resolve({ data: [] as any[] }),
+            ]);
+            const soMap2 = new Map(soRowsT.map((s) => [s.id, s]));
+            const dealerMap2 = new Map<string, string>((dealerRows2 ?? []).map((d: any) => [String(d.id), String(d.dealer_name ?? '')]));
+            const custMap2 = new Map<string, string>((custRows2 ?? []).map((c: any) => [String(c.id), String(c.customer_name ?? '')]));
+            const catMap2 = new Map(((catRows2 ?? []) as CatalogItemLookupRow[]).map((c) => [c.id, c]));
+
+            for (const r of newSupply) {
+              const so = soMap2.get(r.sales_order_id);
+              const ci = r.catalog_item_id ? catMap2.get(r.catalog_item_id) : undefined;
+              linesData.push({
+                line_type: 'product',
+                line_id: r.id,
+                sales_order_id: r.sales_order_id,
+                manufacturing_order_id: `supply:${r.sales_order_id}`,
+                manufacturing_order_no: 'Supply',
+                mo_status: 'supply',
+                organization_id: activeOrganizationId,
+                delivery_status: r.delivery_status,
+                quantity: Number(r.quantity ?? 0),
+                delivered_qty: Number(r.delivered_qty ?? 0),
+                delivered_at: null,
+                sales_order_no: so?.sales_order_no ?? null,
+                dealer_name: so?.dealer_id ? (dealerMap2.get(so.dealer_id) ?? null) : null,
+                customer_name: so?.customer_id ? (custMap2.get(so.customer_id) ?? null) : null,
+                line_description: r.description ?? null,
+                product_type: r.product_type ?? null,
+                area: r.area ?? null,
+                position: r.position ?? null,
+                catalog_item_name: ci?.name ?? null,
+                catalog_item_sku: ci?.sku ?? null,
+                released_at: null,
+                claim_id: null,
+              });
+            }
+          }
+        }
+      } catch {
+        // Best-effort: supply lines are additive; never block manufactured goods.
+      }
+
       const bySO = new Map<string, FinishedGoodLine[]>();
       for (const row of linesData) {
         const key = row.sales_order_id ?? '__no_so';
@@ -268,7 +360,7 @@ export function useFinishedGoods() {
     } finally {
       setLoading(false);
     }
-  }, [activeOrganizationId]);
+  }, [activeOrganizationId, includeSupply]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 

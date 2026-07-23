@@ -45,6 +45,7 @@ export interface PurchaseOrderLine {
   allocation_type: 'stock' | 'manufacturing_order';
   allocation_mo_id: string | null;
   allocation_notes: string | null;
+  sales_order_line_id?: string | null;
   sku_snapshot?: string | null;
   item_name_snapshot?: string | null;
   purchase_unit_snapshot?: string | null;
@@ -230,6 +231,7 @@ export interface CreatePOLineInput {
   notes?: string | null;
   allocation_type?: 'stock' | 'manufacturing_order';
   allocation_mo_id?: string | null;
+  sales_order_line_id?: string | null;
   sku_snapshot?: string | null;
   item_name_snapshot?: string | null;
   purchase_unit_snapshot?: string | null;
@@ -261,6 +263,8 @@ export function useCreatePurchaseOrder() {
     notes?: string | null;
     currency?: string;
     status?: PurchaseOrderStatus;
+    reference_type?: string | null;
+    reference_id?: string | null;
     lines?: CreatePOLineInput[];
     manufacturing_order_ids?: string[];
   }) => {
@@ -288,6 +292,8 @@ export function useCreatePurchaseOrder() {
           status: params.status ?? 'DRAFT',
           notes: params.notes ?? null,
           currency: params.currency ?? 'USD',
+          reference_type: params.reference_type ?? null,
+          reference_id: params.reference_id ?? null,
           subtotal,
           total,
         })
@@ -342,6 +348,7 @@ export function useCreatePurchaseOrder() {
           notes: l.notes ?? null,
           allocation_type: l.allocation_type ?? 'stock',
           allocation_mo_id: l.allocation_mo_id ?? null,
+          sales_order_line_id: l.sales_order_line_id ?? null,
           sku_snapshot: l.sku_snapshot ?? null,
           item_name_snapshot: l.item_name_snapshot ?? null,
           purchase_unit_snapshot: l.purchase_unit_snapshot ?? null,
@@ -414,6 +421,7 @@ export interface UpdatePOLineInput {
   notes?: string | null;
   allocation_type?: 'stock' | 'manufacturing_order';
   allocation_mo_id?: string | null;
+  sales_order_line_id?: string | null;
   sku_snapshot?: string | null;
   item_name_snapshot?: string | null;
   purchase_unit_snapshot?: string | null;
@@ -443,6 +451,8 @@ export function useUpdatePurchaseOrder() {
     expected_date?: string | null;
     notes?: string | null;
     currency?: string;
+    reference_type?: string | null;
+    reference_id?: string | null;
     lines?: UpdatePOLineInput[];
   }) => {
     if (!activeOrganizationId) throw new Error('No organization selected');
@@ -465,6 +475,8 @@ export function useUpdatePurchaseOrder() {
       if (params.expected_date !== undefined) updates.expected_date = params.expected_date;
       if (params.notes !== undefined) updates.notes = params.notes;
       if (params.currency !== undefined) updates.currency = params.currency;
+      if (params.reference_type !== undefined) updates.reference_type = params.reference_type;
+      if (params.reference_id !== undefined) updates.reference_id = params.reference_id;
       if (params.lines || params.vendor_id !== undefined) {
         const vendorIdForTax = params.vendor_id !== undefined ? params.vendor_id : undefined;
         const taxPct = await resolvePurchaseTaxPct({
@@ -512,6 +524,7 @@ export function useUpdatePurchaseOrder() {
               notes: l.notes ?? null,
               allocation_type: l.allocation_type ?? 'stock',
               allocation_mo_id: l.allocation_mo_id ?? null,
+              sales_order_line_id: l.sales_order_line_id ?? null,
               sku_snapshot: l.sku_snapshot ?? null,
               item_name_snapshot: l.item_name_snapshot ?? null,
               purchase_unit_snapshot: l.purchase_unit_snapshot ?? null,
@@ -543,6 +556,7 @@ export function useUpdatePurchaseOrder() {
             notes: l.notes ?? null,
             allocation_type: l.allocation_type ?? 'stock',
             allocation_mo_id: l.allocation_mo_id ?? null,
+            sales_order_line_id: l.sales_order_line_id ?? null,
             sku_snapshot: l.sku_snapshot ?? null,
             item_name_snapshot: l.item_name_snapshot ?? null,
             purchase_unit_snapshot: l.purchase_unit_snapshot ?? null,
@@ -626,6 +640,17 @@ export function useReceivePurchaseOrder() {
       void (async () => {
         try {
           await supabase.rpc('check_mo_readiness_after_po_receive', { p_po_id: purchaseOrderId });
+        } catch {
+          // Best-effort side effect; receipt success should not be blocked.
+        }
+      })();
+
+      // If this PO fulfills a Sales Order (supply/MTM purchase-to-order), reserve the
+      // received quantities to that SO so they are ready to be delivered.
+      void (async () => {
+        try {
+          await supabase.rpc('allocate_received_po_to_sales_order', { p_po_id: purchaseOrderId });
+          queryClient.invalidateQueries({ queryKey: ['inventory-allocations'] });
         } catch {
           // Best-effort side effect; receipt success should not be blocked.
         }

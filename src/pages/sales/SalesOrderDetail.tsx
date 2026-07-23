@@ -11,7 +11,7 @@ import { router } from '../../lib/router';
 import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
 import { formatCurrency, formatDate } from '../../lib/utils';
 import { useSOActions } from '../../hooks/useSOActions';
-import { ChevronDown, FileText, ShoppingBag, CreditCard, Factory, Package, CheckCircle2, AlertTriangle, XCircle, ArrowLeft, Eye, Loader2, Truck, CalendarDays } from 'lucide-react';
+import { ChevronDown, FileText, ShoppingBag, CreditCard, Factory, Package, CheckCircle2, AlertTriangle, XCircle, ArrowLeft, Eye, Loader2, CalendarDays } from 'lucide-react';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useSOFulfillmentSummary } from '../../hooks/useInventoryAllocations';
 import { usePayments } from '../../hooks/usePayments';
@@ -19,6 +19,7 @@ import { generateInvoicePDF } from '../../lib/pdf/generateInvoicePDF';
 import type { InvoicePDFData, InvoicePDFDealer, InvoicePDFLine, GenerateInvoicePDFOptions } from '../../lib/pdf/generateInvoicePDF';
 import SOAttachmentsTab from '../../components/sales/SOAttachmentsTab';
 import SOPerformanceTab from '../../components/sales/SOPerformanceTab';
+import SupplyProcurementPanel from '../../components/sales/SupplyProcurementPanel';
 
 const SALES_SUBMODULES = [
   { id: 'quotes', label: 'Quotes', href: '/sales/quotes', icon: FileText },
@@ -58,6 +59,7 @@ interface FinancialSummary {
   invoice_status: string;
   latest_invoice_id: string | null;
   latest_invoice_number: string | null;
+  delivery_financials_ok: boolean | null;
 }
 
 interface SalesOrderLine {
@@ -73,6 +75,7 @@ interface SalesOrderLine {
   quantity: number;
   unit_price: number | null;
   line_total: number | null;
+  catalog_item_id?: string | null;
   CatalogItems?: { name: string; sku: string } | null;
 }
 
@@ -264,7 +267,7 @@ export default function SalesOrderDetail() {
           .select(`
             id, sales_order_id, line_number, description, collection_name, variant_name,
             product_type, width_m, height_m,
-            quantity, unit_price, line_total,
+            quantity, unit_price, line_total, catalog_item_id,
             CatalogItems:catalog_item_id (name, sku)
           `)
           .eq('sales_order_id', salesOrderId)
@@ -285,7 +288,7 @@ export default function SalesOrderDetail() {
           .order('created_at', { ascending: false }),
         supabase
           .from('sales_order_financial_summary')
-          .select('invoice_count, total_invoiced, total_paid, balance_due, invoice_status, latest_invoice_id, latest_invoice_number')
+          .select('invoice_count, total_invoiced, total_paid, balance_due, invoice_status, latest_invoice_id, latest_invoice_number, delivery_financials_ok')
           .eq('sales_order_id', salesOrderId)
           .maybeSingle(),
         supabase
@@ -528,11 +531,14 @@ export default function SalesOrderDetail() {
   const hasManufactureLines = lines.some(
     (l) => !supplyOnlyCodes.has(l.product_type ?? '')
   );
+  const hasSupplyLines = lines.some(
+    (l) => supplyOnlyCodes.has(l.product_type ?? '')
+  );
 
   const actionButtons = useMemo(() => {
     if (!so) return [];
     const status = (so.status || 'draft').toLowerCase();
-    const btns: { label: string; onClick: () => void; status?: string }[] = [];
+    const btns: { label: string; onClick: () => void; status?: string; disabled?: boolean; title?: string }[] = [];
     if (status === 'confirmed') {
       btns.push({ label: 'Put On Hold', onClick: () => handleTransition('on_hold'), status: 'on_hold' });
       btns.push({ label: 'Mark Completed', onClick: () => handleTransition('delivered'), status: 'delivered' });
@@ -543,12 +549,8 @@ export default function SalesOrderDetail() {
     if (status === 'delivered') {
       btns.push({ label: 'Close Order', onClick: () => handleTransition('closed'), status: 'closed' });
     }
-    if (isInternal && isSupplyOnlyOrder && ['confirmed', 'draft', 'on_hold'].includes(status)) {
-      btns.push({
-        label: 'Create Delivery Note',
-        onClick: () => router.navigate(`/manufacturing/delivery-notes/new?so_id=${so.id}`),
-      });
-    }
+    // Delivery Notes are created from Inventory › Deliveries (unified outbound
+    // queue), not from the Sales Order. No delivery action is exposed here.
     if (isInternal) {
       if (['draft', 'confirmed', 'on_hold'].includes(status)) {
         btns.push({ label: 'Cancel', onClick: () => handleTransition('cancelled'), status: 'cancelled' });
@@ -561,7 +563,7 @@ export default function SalesOrderDetail() {
       }
     }
     return btns;
-  }, [so, isInternal, handleTransition, handleCreateMO, isSupplyOnlyOrder]);
+  }, [so, isInternal, handleTransition, handleCreateMO, isSupplyOnlyOrder, financialSummary]);
 
   const currentMfgStepIndex = useMemo(() => {
     if (mos.length === 0) return -1;
@@ -967,7 +969,9 @@ export default function SalesOrderDetail() {
                         key={btn.label}
                         type="button"
                         onClick={btn.onClick}
-                        className="block w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 first:rounded-t-md last:rounded-b-md"
+                        disabled={btn.disabled}
+                        title={btn.title}
+                        className="block w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 first:rounded-t-md last:rounded-b-md disabled:cursor-not-allowed disabled:text-gray-400 disabled:hover:bg-transparent"
                       >
                         {btn.label}
                       </button>
@@ -1286,6 +1290,25 @@ export default function SalesOrderDetail() {
               </tbody>
             </table>
           </div>
+
+          {isInternal && hasSupplyLines && so && activeOrganizationId && (
+            <SupplyProcurementPanel
+              salesOrderId={so.id}
+              organizationId={activeOrganizationId}
+              currency={currency}
+              isMixedOrder={hasManufactureLines}
+              supplyLines={lines
+                .filter((l) => supplyOnlyCodes.has(l.product_type ?? ''))
+                .map((l) => ({
+                  id: l.id,
+                  description: l.description,
+                  quantity: l.quantity,
+                  unit_price: l.unit_price,
+                  catalog_item_id: l.catalog_item_id ?? null,
+                }))}
+              onChanged={refetch}
+            />
+          )}
         </div>
       )}
 
@@ -1354,18 +1377,19 @@ export default function SalesOrderDetail() {
               {isInternal && ['confirmed', 'draft', 'on_hold'].includes(soStatus) && (() => {
                 if (isSupplyOnlyOrder) {
                   return (
-                    <div className="mt-4 pt-3 border-t border-gray-100 space-y-3">
+                    <div className="mt-4 pt-3 border-t border-gray-100 space-y-2">
                       <p className="text-xs text-gray-500 flex items-center gap-1.5">
                         <Package className="w-3.5 h-3.5" />
-                        Supply only — no manufacturing required.
+                        Supply only — no manufacturing required. Dispatch from Inventory › Deliveries.
                       </p>
                       <button
                         type="button"
-                        onClick={() => router.navigate(`/manufacturing/delivery-notes/new?so_id=${so.id}`)}
-                        className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+                        disabled
+                        title="This order has no manufactured products, so there is nothing to fabricate."
+                        className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-400 bg-gray-100 rounded-lg cursor-not-allowed"
                       >
-                        <Truck className="w-4 h-4" />
-                        Create Delivery Note
+                        <Factory className="w-4 h-4" />
+                        Create Manufacturing Order
                       </button>
                     </div>
                   );

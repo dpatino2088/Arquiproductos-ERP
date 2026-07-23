@@ -74,10 +74,6 @@ export function useCreateDeliveryNote() {
     if (!moId && !salesOrderId) throw new Error('moId or salesOrderId required');
     setIsCreating(true);
     try {
-      const deliveryNumber = await generateNextSequentialNumber(
-        'DN', 'DeliveryNotes', 'delivery_number', activeOrganizationId,
-      );
-
       let resolvedSoId = salesOrderId ?? null;
 
       if (!resolvedSoId && moId) {
@@ -87,6 +83,53 @@ export function useCreateDeliveryNote() {
           .eq('id', moId)
           .single();
         resolvedSoId = mo?.sales_order_id ?? null;
+      }
+
+      // Idempotency: never create a second draft for the same order. If a
+      // pending Delivery Note already exists (e.g. the create screen mounted
+      // twice, or the user re-entered the flow), reuse it instead of spawning
+      // a duplicate with a colliding number.
+      {
+        let existingQuery = supabase
+          .from('DeliveryNotes')
+          .select('id, delivery_number')
+          .eq('organization_id', activeOrganizationId)
+          .eq('status', 'pending')
+          .eq('deleted', false)
+          .order('created_at', { ascending: true })
+          .limit(1);
+        existingQuery = resolvedSoId
+          ? existingQuery.eq('sales_order_id', resolvedSoId)
+          : existingQuery.eq('manufacturing_order_id', moId ?? '');
+        const { data: existing } = await existingQuery;
+        const found = Array.isArray(existing) ? existing[0] : null;
+        if (found) {
+          return { id: found.id as string, delivery_number: found.delivery_number as string };
+        }
+      }
+
+      const deliveryNumber = await generateNextSequentialNumber(
+        'DN', 'DeliveryNotes', 'delivery_number', activeOrganizationId,
+      );
+
+      // Enforce the delivery gate at creation time: a Delivery Note cannot even be
+      // started unless the Sales Order is fully invoiced and settled (or has an
+      // active override). This mirrors complete_delivery_note so the invoice/payment
+      // rules apply before any dispatch is prepared.
+      if (resolvedSoId) {
+        const { data: gateRows } = await supabase.rpc('get_sales_order_delivery_gate', {
+          p_sales_order_id: resolvedSoId,
+        });
+        const gate = Array.isArray(gateRows) ? gateRows[0] : gateRows;
+        if (gate && gate.delivery_allowed === false) {
+          const balance = Number(gate.balance_due ?? 0);
+          const fully = Boolean(gate.fully_invoiced);
+          throw new Error(
+            !fully
+              ? 'Cannot create a Delivery Note: the sales order is not fully invoiced yet.'
+              : `Cannot create a Delivery Note: balance due is $${balance.toFixed(2)}. The order must be fully paid or have a delivery override.`,
+          );
+        }
       }
 
       const { data: dn, error: dnErr } = await supabase
@@ -151,22 +194,40 @@ export function useCreateDeliveryNote() {
         if (supplyOnlyCodes.size > 0) {
           const { data: supplyLines } = await supabase
             .from('SaleOrderLines')
-            .select('id, quantity, product_type')
+            .select('id, quantity, product_type, catalog_item_id')
             .eq('sales_order_id', salesOrderId)
             .eq('deleted', false)
             .in('delivery_status', ['pending', 'ready']);
 
+          // Physical readiness: a supply line linked to a product can only be
+          // delivered once it is physically available (reserved from stock or
+          // received against the SO). Service-style lines without a linked product
+          // (e.g. Shipping) are non-physical and always deliverable.
+          const { data: allocRows } = await supabase
+            .from('InventoryAllocations')
+            .select('catalog_item_id, allocated_qty, status')
+            .eq('sales_order_id', salesOrderId)
+            .eq('status', 'reserved');
+          const reservedByItem = new Map<string, number>();
+          for (const a of (allocRows ?? []) as { catalog_item_id: string; allocated_qty: number }[]) {
+            reservedByItem.set(a.catalog_item_id, (reservedByItem.get(a.catalog_item_id) ?? 0) + Number(a.allocated_qty ?? 0));
+          }
+
           if (supplyLines) {
-            for (const sl of supplyLines) {
-              if (supplyOnlyCodes.has(sl.product_type ?? '')) {
-                dnLines.push({
-                  delivery_note_id: dn.id,
-                  sale_order_line_id: sl.id,
-                  quantity_delivered: sl.quantity,
-                  checked: false,
-                  line_type: 'supply',
-                });
+            for (const sl of supplyLines as { id: string; quantity: number; product_type: string | null; catalog_item_id: string | null }[]) {
+              if (!supplyOnlyCodes.has(sl.product_type ?? '')) continue;
+              // Gate physical goods on availability; allow non-physical/service lines.
+              if (sl.catalog_item_id) {
+                const reserved = reservedByItem.get(sl.catalog_item_id) ?? 0;
+                if (reserved < Number(sl.quantity ?? 0) - 1e-6) continue; // not yet available -> backorder
               }
+              dnLines.push({
+                delivery_note_id: dn.id,
+                sale_order_line_id: sl.id,
+                quantity_delivered: sl.quantity,
+                checked: false,
+                line_type: 'supply',
+              });
             }
           }
         }
@@ -188,6 +249,12 @@ export function useCreateDeliveryNote() {
             });
           }
         }
+      }
+
+      // Nothing physically ready to deliver: don't leave an empty delivery note behind.
+      if (salesOrderId && dnLines.length === 0) {
+        await supabase.from('DeliveryNotes').delete().eq('id', dn.id);
+        throw new Error('Nothing is ready to deliver yet: no manufactured or received items are available for this order.');
       }
 
       if (dnLines.length > 0) {

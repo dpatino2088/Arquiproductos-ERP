@@ -30,15 +30,7 @@ import { Select as SelectShadcn, SelectContent, SelectItem, SelectTrigger, Selec
 import { normalizeUUID } from '../../utils/uuid';
 import { formatDate } from '../../lib/utils';
 
-const INVENTORY_SUBMODULES = [
-  { id: 'warehouse', label: 'Warehouse', href: '/inventory/warehouse' },
-  { id: 'locations', label: 'Locations', href: '/inventory/locations' },
-  { id: 'purchase-orders', label: 'Purchase Orders', href: '/inventory/purchase-orders' },
-  { id: 'receipts', label: 'Receipts', href: '/inventory/receipts' },
-  { id: 'transactions', label: 'Transactions', href: '/inventory/transactions' },
-  { id: 'adjustments', label: 'Adjustments', href: '/inventory/adjustments' },
-  { id: 'material-demand', label: 'Material Demand', href: '/inventory/material-demand' },
-];
+import { INVENTORY_SUBMODULES } from './inventorySubmodules';
 
 const STATUS_COLORS: Record<string, string> = {
   DRAFT: 'bg-gray-100 text-gray-600',
@@ -64,6 +56,7 @@ interface DraftLine {
   allocation_type: 'stock' | 'manufacturing_order';
   allocation_mo_id: string | null;
   allocation_mo_label: string | null;
+  sales_order_line_id: string | null;
   purchase_unit_snapshot: string | null;
   purchase_mode_snapshot: 'unit_packaged' | 'linear_direct' | 'roll' | null;
   stock_basis_snapshot: 'ea' | 'linear_m' | null;
@@ -110,6 +103,35 @@ interface PurchaseOrderDetailProps {
 
 function fmtCurrency(v: number, currency = 'USD'): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(v);
+}
+
+interface SOSupplyLine {
+  id: string;
+  description: string | null;
+  product_type: string | null;
+  width_m: number | null;
+  height_m: number | null;
+  area: string | null;
+  position: string | null;
+  collection_name: string | null;
+  variant_name: string | null;
+  quantity: number;
+  catalog_item_id: string | null;
+}
+
+/** Compose a rich "what to buy" description from a supply sales-order line. */
+function buildSupplyLineDescription(l: SOSupplyLine): string {
+  const parts: string[] = [];
+  const title = l.description
+    ?? [l.collection_name, l.variant_name].filter(Boolean).join(' - ')
+    ?? '';
+  if (title) parts.push(title);
+  const w = l.width_m != null ? Math.round(Number(l.width_m) * 1000) : null;
+  const h = l.height_m != null ? Math.round(Number(l.height_m) * 1000) : null;
+  if (w && h) parts.push(`${w}\u00d7${h} mm`);
+  if (l.area) parts.push(`Area: ${l.area}`);
+  if (l.position) parts.push(`Pos: ${l.position}`);
+  return parts.join(' | ');
 }
 
 function formatPurchaseUnitSuffix(line: DraftLine): string | null {
@@ -296,6 +318,10 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
   const [lineMoSearch, setLineMoSearch] = useState('');
   const [lineMoOptions, setLineMoOptions] = useState<MOSearchResult[]>([]);
   const [lineMoDropdownId, setLineMoDropdownId] = useState<string | null>(null);
+  const [soRef, setSoRef] = useState<{ id: string; label: string } | null>(null);
+  const [soSearch, setSoSearch] = useState('');
+  const [soOptions, setSoOptions] = useState<{ id: string; sales_order_no: string }[]>([]);
+  const [showSoDropdown, setShowSoDropdown] = useState(false);
   const handleBack = useCallback(() => {
     navigateBackContextual(router, {
       queryReturnTo: getReturnToFromCurrentQuery(),
@@ -324,6 +350,63 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
     const timer = setTimeout(() => { if (lineMoSearch.length >= 2) searchLineMOs(lineMoSearch); else setLineMoOptions([]); }, 300);
     return () => clearTimeout(timer);
   }, [lineMoSearch, searchLineMOs]);
+
+  // Search sales orders for the "link to Sales Order" selector.
+  const searchSOs = useCallback(async (query: string) => {
+    if (!activeOrganizationId) { setSoOptions([]); return; }
+    let q = supabase
+      .from('SalesOrders')
+      .select('id, sales_order_no')
+      .eq('organization_id', activeOrganizationId)
+      .eq('deleted', false)
+      .order('created_at', { ascending: false })
+      .limit(10);
+    if (query.trim()) q = q.ilike('sales_order_no', `%${query.trim()}%`);
+    const { data } = await q;
+    setSoOptions((data ?? []) as { id: string; sales_order_no: string }[]);
+  }, [activeOrganizationId]);
+
+  useEffect(() => {
+    if (!showSoDropdown) return;
+    const timer = setTimeout(() => searchSOs(soSearch), 250);
+    return () => clearTimeout(timer);
+  }, [soSearch, showSoDropdown, searchSOs]);
+
+  // Prefill the Sales Order link on create from ?so_id= (e.g. from the SO screen).
+  useEffect(() => {
+    if (!isCreateMode || soRef || !activeOrganizationId) return;
+    const params = new URLSearchParams(window.location.search);
+    const soId = params.get('so_id');
+    if (!soId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('SalesOrders')
+        .select('id, sales_order_no')
+        .eq('id', soId)
+        .maybeSingle();
+      if (!cancelled && data) setSoRef({ id: data.id, label: data.sales_order_no });
+    })();
+    return () => { cancelled = true; };
+  }, [isCreateMode, soRef, activeOrganizationId]);
+
+  // Prefill the Sales Order link from the loaded PO (edit mode).
+  useEffect(() => {
+    if (isCreateMode || !purchaseOrder) return;
+    const anyPo = purchaseOrder as unknown as { reference_type?: string | null; reference_id?: string | null };
+    if (anyPo.reference_type === 'sales_order' && anyPo.reference_id) {
+      let cancelled = false;
+      (async () => {
+        const { data } = await supabase
+          .from('SalesOrders')
+          .select('id, sales_order_no')
+          .eq('id', anyPo.reference_id as string)
+          .maybeSingle();
+        if (!cancelled && data) setSoRef({ id: data.id, label: data.sales_order_no });
+      })();
+      return () => { cancelled = true; };
+    }
+  }, [isCreateMode, purchaseOrder]);
 
   useEffect(() => {
     if (!poId && !isCreateMode) {
@@ -354,6 +437,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
     notes: l.notes ?? '',
     allocation_type: l.allocation_type ?? 'stock',
     allocation_mo_id: l.allocation_mo_id ?? null,
+    sales_order_line_id: (l as { sales_order_line_id?: string | null }).sales_order_line_id ?? null,
     allocation_mo_label: l.allocation_mo_id
       ? (moLabelMap?.get(l.allocation_mo_id) ?? l.allocation_mo_id.slice(0, 8))
       : null,
@@ -493,6 +577,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                   allocation_type: p.manufacturing_order_id ? 'manufacturing_order' as const : 'stock' as const,
                   allocation_mo_id: p.manufacturing_order_id ?? null,
                   allocation_mo_label: p.manufacturing_order_no ?? null,
+                  sales_order_line_id: null,
                   purchase_unit_snapshot: pUnit,
                   purchase_mode_snapshot: purchaseMode,
                   stock_basis_snapshot: stockBasis,
@@ -683,6 +768,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
       allocation_type: 'stock',
       allocation_mo_id: null,
       allocation_mo_label: null,
+      sales_order_line_id: null,
       purchase_unit_snapshot: pUnit,
       purchase_mode_snapshot: purchaseMode,
       stock_basis_snapshot: stockBasis,
@@ -717,6 +803,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
       allocation_type: 'stock',
       allocation_mo_id: null,
       allocation_mo_label: null,
+      sales_order_line_id: null,
       purchase_unit_snapshot: null,
       purchase_mode_snapshot: null,
       stock_basis_snapshot: null,
@@ -731,6 +818,142 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
       roll_length_uom_snapshot: null,
     }]);
   };
+
+  // Load the supply / custom-item lines of a sales order into the PO draft, with a
+  // rich description (measurements, area, position) so the buyer knows what to buy.
+  const loadSupplyLinesFromSO = useCallback(async (soId: string, opts?: { silent?: boolean }) => {
+    if (!activeOrganizationId) return;
+    setLoadingRef(true);
+    try {
+      const [ptsRes, solRes] = await Promise.all([
+        supabase
+          .from('ProductTypes')
+          .select('code')
+          .eq('organization_id', activeOrganizationId)
+          .eq('fulfillment_type', 'supply_only'),
+        supabase
+          .from('SaleOrderLines')
+          .select('id, description, product_type, width_m, height_m, area, position, collection_name, variant_name, quantity, catalog_item_id')
+          .eq('sales_order_id', soId)
+          .eq('deleted', false)
+          .order('line_number', { ascending: true, nullsFirst: false }),
+      ]);
+      const supplyCodes = new Set((ptsRes.data ?? []).map((p: { code: string }) => p.code));
+      const soLines = ((solRes.data ?? []) as SOSupplyLine[]).filter((l) => supplyCodes.has(l.product_type ?? ''));
+      if (soLines.length === 0) {
+        if (!opts?.silent) addNotification({ type: 'info', title: 'No supply lines', message: 'This sales order has no supply / custom lines to purchase.' });
+        return;
+      }
+
+      // Batch-fetch catalog info for any already-linked supply products.
+      const catalogIds = [...new Set(soLines.map((l) => l.catalog_item_id).filter(Boolean))] as string[];
+      const catalogMap = new Map<string, { sku: string; name: string; cost_exw: number | null }>();
+      if (catalogIds.length > 0) {
+        const { data: cats } = await supabase
+          .from('CatalogItems')
+          .select('id, sku, name, cost_exw')
+          .in('id', catalogIds);
+        for (const c of (cats ?? []) as { id: string; sku: string; name: string; cost_exw: number | null }[]) {
+          catalogMap.set(c.id, { sku: c.sku, name: c.name, cost_exw: c.cost_exw });
+        }
+      }
+
+      // For lines with no linked product, auto-create a supply product (special
+      // purchase catalog) and link it to the SO line. This gives the item an
+      // identity so the receipt stocks it into the warehouse and it can be
+      // reserved and delivered against the order. Without this, a one-off line
+      // receives nothing (no inventory record).
+      const linkedByLine = new Map<string, { catalog_item_id: string; sku: string; name: string; cost_exw: number }>();
+      for (const l of soLines) {
+        if (l.catalog_item_id) continue;
+        const displayName = (l.description && l.description.trim())
+          ? l.description.trim()
+          : (buildSupplyLineDescription(l) || 'Supply item');
+        const finalSku = `SUP-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 1000)}`;
+        const { data: created, error: createErr } = await supabase
+          .from('CatalogItems')
+          .insert({
+            organization_id: activeOrganizationId,
+            name: displayName,
+            sku: finalSku,
+            unit_of_measure: 'ea',
+            measure_basis: 'unit',
+            is_supply_product: true,
+            is_active: true,
+            cost_exw: 0,
+          })
+          .select('id, sku, name, cost_exw')
+          .single();
+        if (createErr) throw createErr;
+        await supabase
+          .from('SaleOrderLines')
+          .update({ catalog_item_id: created.id, updated_at: new Date().toISOString() })
+          .eq('id', l.id);
+        linkedByLine.set(l.id, { catalog_item_id: created.id, sku: created.sku, name: created.name, cost_exw: Number(created.cost_exw ?? 0) });
+      }
+
+      let added = 0;
+      setDraftLines((prev) => {
+        const existing = new Set(prev.map((p) => p.sales_order_line_id).filter(Boolean));
+        const additions: DraftLine[] = soLines
+          .filter((l) => !existing.has(l.id))
+          .map((l) => {
+            const linked = l.catalog_item_id
+              ? catalogMap.get(l.catalog_item_id)
+              : linkedByLine.get(l.id);
+            const linkedId = l.catalog_item_id ?? linkedByLine.get(l.id)?.catalog_item_id ?? null;
+            return {
+              tempId: crypto.randomUUID(),
+              catalog_item_id: linkedId,
+              sku: linked?.sku ?? '',
+              name: linked?.name ?? '',
+              ordered_qty: Number(l.quantity ?? 1),
+              received_qty: 0,
+              unit_cost: Number(linked?.cost_exw ?? 0),
+              unit: 'ea',
+              description: buildSupplyLineDescription(l),
+              is_one_off: !linkedId,
+              notes: '',
+              allocation_type: 'stock' as const,
+              allocation_mo_id: null,
+              allocation_mo_label: null,
+              sales_order_line_id: l.id,
+              purchase_unit_snapshot: null,
+              purchase_mode_snapshot: null,
+              stock_basis_snapshot: null,
+              purchase_uom_snapshot: null,
+              units_per_purchase_unit_snapshot: null,
+              moq_snapshot: null,
+              unit_of_measure_snapshot: null,
+              is_roll_snapshot: false,
+              roll_width_value_snapshot: null,
+              roll_width_uom_snapshot: null,
+              roll_length_value_snapshot: null,
+              roll_length_uom_snapshot: null,
+            };
+          });
+        added = additions.length;
+        if (additions.length === 0) return prev;
+        return [...prev, ...additions];
+      });
+
+      if (!opts?.silent) {
+        addNotification(
+          added > 0
+            ? { type: 'success', title: 'Lines loaded', message: `${added} supply line(s) added from the sales order.` }
+            : { type: 'info', title: 'Already added', message: 'All supply lines from this order are already on the PO.' },
+        );
+      }
+    } finally {
+      setLoadingRef(false);
+    }
+  }, [activeOrganizationId, addNotification]);
+
+  // In create mode, auto-load the SO's supply lines when a sales order is linked.
+  useEffect(() => {
+    if (!isCreateMode || !soRef?.id) return;
+    loadSupplyLinesFromSO(soRef.id, { silent: true });
+  }, [isCreateMode, soRef?.id, loadSupplyLinesFromSO]);
 
   const updateLine = (tempId: string, field: keyof DraftLine, value: string | number | boolean) => {
     setDraftLines(prev => prev.map(l => l.tempId === tempId ? { ...l, [field]: value } : l));
@@ -768,6 +991,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
           is_one_off: l.is_one_off,
           allocation_type: l.allocation_type,
           allocation_mo_id: l.allocation_mo_id,
+          sales_order_line_id: l.sales_order_line_id ?? null,
           sku_snapshot: l.sku || null,
           item_name_snapshot: l.name || null,
           purchase_unit_snapshot: l.purchase_unit_snapshot,
@@ -791,6 +1015,8 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
           expected_date: expectedDate || null,
           notes: poNotes || null,
           currency,
+          reference_type: soRef ? 'sales_order' : null,
+          reference_id: soRef?.id ?? null,
           lines: poLines,
         });
         addNotification({ type: 'success', title: 'Created', message: 'Purchase order created.' });
@@ -807,6 +1033,7 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
           is_one_off: l.is_one_off,
           allocation_type: l.allocation_type,
           allocation_mo_id: l.allocation_mo_id,
+          sales_order_line_id: l.sales_order_line_id ?? null,
           sku_snapshot: l.sku || null,
           item_name_snapshot: l.name || null,
           purchase_unit_snapshot: l.purchase_unit_snapshot,
@@ -830,6 +1057,8 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
           expected_date: expectedDate || null,
           notes: poNotes || null,
           currency,
+          reference_type: soRef ? 'sales_order' : null,
+          reference_id: soRef?.id ?? null,
           lines: updateLines,
         });
         addNotification({ type: 'success', title: 'Saved', message: 'Purchase order updated.' });
@@ -1426,6 +1655,56 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                       </SelectContent>
                     </SelectShadcn>
                   </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Sales Order (optional)</label>
+                    {soRef ? (
+                      <div className="flex items-center justify-between px-3 py-2 border border-gray-200 rounded-lg bg-gray-50">
+                        <span className="text-sm font-medium text-gray-900">{soRef.label}</span>
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => loadSupplyLinesFromSO(soRef.id)}
+                            disabled={loadingRef}
+                            className="text-xs font-medium text-primary hover:underline disabled:opacity-50"
+                          >
+                            {loadingRef ? 'Loading…' : 'Load lines from SO'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { setSoRef(null); setSoSearch(''); }}
+                            className="text-xs text-gray-500 hover:text-gray-700"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="relative">
+                        <input
+                          value={soSearch}
+                          onChange={(e) => { setSoSearch(e.target.value); setShowSoDropdown(true); }}
+                          onFocus={() => { setShowSoDropdown(true); searchSOs(soSearch); }}
+                          placeholder="Search sales order # to link…"
+                          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                        />
+                        {showSoDropdown && soOptions.length > 0 && (
+                          <div className="absolute z-20 mt-1 w-full max-h-56 overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+                            {soOptions.map((s) => (
+                              <button
+                                key={s.id}
+                                type="button"
+                                onClick={() => { setSoRef({ id: s.id, label: s.sales_order_no }); setShowSoDropdown(false); setSoSearch(''); }}
+                                className="block w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                              >
+                                {s.sales_order_no}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <p className="mt-1 text-xs text-gray-400">Link this PO to a sales order so received items are reserved to it for delivery.</p>
+                  </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Expected Date</label>
@@ -1485,6 +1764,20 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                     <dt className="text-gray-500">Warehouse</dt>
                     <dd className="text-gray-900">{purchaseOrder?.Warehouses?.name ?? '—'}</dd>
                   </div>
+                  {soRef && (
+                    <div className="flex justify-between">
+                      <dt className="text-gray-500">Sales Order</dt>
+                      <dd>
+                        <button
+                          type="button"
+                          onClick={() => router.navigate(withReturnTo(`/sales/orders/${soRef.id}`))}
+                          className="text-primary hover:underline font-medium"
+                        >
+                          {soRef.label}
+                        </button>
+                      </dd>
+                    </div>
+                  )}
                   {purchaseOrder?.expected_date && (
                     <div className="flex justify-between">
                       <dt className="text-gray-500">Expected Date</dt>
@@ -1656,15 +1949,15 @@ export default function PurchaseOrderDetail({ poId: propPoId }: PurchaseOrderDet
                       </td>
                       <td className="px-4 py-3">
                         {line.is_one_off && canEdit ? (
-                          <input
-                            type="text"
+                          <textarea
                             value={line.description}
                             onChange={e => updateLine(line.tempId, 'description', e.target.value)}
                             placeholder="Item description..."
-                            className="w-full px-2 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                            rows={2}
+                            className="w-full min-w-[240px] px-2 py-1 border border-gray-200 rounded text-sm leading-snug resize-y focus:outline-none focus:ring-2 focus:ring-primary/20"
                           />
                         ) : (
-                          <span className="text-gray-700">
+                          <span className="text-gray-700 whitespace-pre-wrap break-words">
                             {line.is_one_off ? line.description : (line.description?.trim() || line.name)}
                             {!line.is_one_off && purchaseSuffix && (
                               <span className="text-gray-400 ml-1 text-xs">{purchaseSuffix}</span>

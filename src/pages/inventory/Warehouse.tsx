@@ -17,15 +17,7 @@ import {
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/SelectShadcn';
 
-const INVENTORY_SUBMODULES = [
-  { id: 'warehouse', label: 'Warehouse', href: '/inventory/warehouse' },
-  { id: 'locations', label: 'Locations', href: '/inventory/locations' },
-  { id: 'purchase-orders', label: 'Purchase Orders', href: '/inventory/purchase-orders' },
-  { id: 'receipts', label: 'Receipts', href: '/inventory/receipts' },
-  { id: 'transactions', label: 'Transactions', href: '/inventory/transactions' },
-  { id: 'adjustments', label: 'Adjustments', href: '/inventory/adjustments' },
-  { id: 'material-demand', label: 'Material Demand', href: '/inventory/material-demand' },
-];
+import { INVENTORY_SUBMODULES } from './inventorySubmodules';
 
 /** Convert length/width value + UOM to meters (for roll length/width). */
 function toMeters(value: number | null | undefined, uom: string | null | undefined): number | null {
@@ -59,6 +51,7 @@ interface StockRow {
   itemName: string;
   uom: string;
   category: string | null;
+  isSupply: boolean;
   onHand: number;
   /** On hand in the manufacturer's UOM (e.g. yd) for linear/roll items, null for ea items. */
   onHandDisplay: number | null;
@@ -95,6 +88,7 @@ export default function Warehouse() {
   const { userType } = useAccessContext();
   const { warehouses, defaultWarehouse } = useWarehouses(activeOrganizationId);
   const [searchTerm, setSearchTerm] = useState('');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'supply' | 'materials'>('all');
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>('');
   const [sortBy, setSortBy] = useState<'sku' | 'itemName' | 'onHand' | 'available' | 'balance'>('sku');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
@@ -130,7 +124,7 @@ export default function Warehouse() {
 
       let balanceQuery = supabase
         .from('InventoryBalances')
-        .select('catalog_item_id, quantity, warehouse_id, Warehouses(name), CatalogItems(sku, name, unit_of_measure, measure_basis, is_roll, roll_length_value, roll_length_uom, roll_width_value, roll_width_uom, roll_width_m, primary_location_id, CatalogCategories(name), WarehouseLocations(location_code))')
+        .select('catalog_item_id, quantity, warehouse_id, Warehouses(name), CatalogItems(sku, name, unit_of_measure, measure_basis, is_roll, is_supply_product, roll_length_value, roll_length_uom, roll_width_value, roll_width_uom, roll_width_m, primary_location_id, CatalogCategories(name), WarehouseLocations(location_code))')
         .eq('organization_id', activeOrganizationId);
 
       if (effectiveWarehouseId) {
@@ -208,6 +202,7 @@ export default function Warehouse() {
           itemName: b.CatalogItems?.name ?? '—',
           uom: b.CatalogItems?.is_roll ? 'm' : (b.CatalogItems?.unit_of_measure ?? 'ea'),
           category: b.CatalogItems?.CatalogCategories?.name ?? null,
+          isSupply: !!b.CatalogItems?.is_supply_product,
           onHand,
           onHandDisplay,
           displayUom,
@@ -233,6 +228,8 @@ export default function Warehouse() {
 
   const filtered = useMemo(() => {
     let rows = stockRows ?? [];
+    if (typeFilter === 'supply') rows = rows.filter(r => r.isSupply);
+    else if (typeFilter === 'materials') rows = rows.filter(r => !r.isSupply);
     if (searchTerm) {
       const q = searchTerm.toLowerCase();
       rows = rows.filter(r =>
@@ -251,7 +248,7 @@ export default function Warehouse() {
       return sortOrder === 'asc' ? cmp : -cmp;
     });
     return rows;
-  }, [stockRows, searchTerm, sortBy, sortOrder]);
+  }, [stockRows, searchTerm, typeFilter, sortBy, sortOrder]);
 
   const totalPages = Math.ceil(filtered.length / itemsPerPage);
   const paginated = filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
@@ -296,6 +293,21 @@ export default function Warehouse() {
                 className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
                 aria-label="Search warehouse inventory"
               />
+            </div>
+            <div className="w-[200px] shrink-0">
+              <Select
+                value={typeFilter}
+                onValueChange={(v) => { setTypeFilter(v as 'all' | 'supply' | 'materials'); setCurrentPage(1); }}
+              >
+                <SelectTrigger className="px-3 py-1 border border-gray-200 rounded text-sm bg-white min-h-[32px]">
+                  <SelectValue placeholder="All items" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All items</SelectItem>
+                  <SelectItem value="supply">Supply / purchased products</SelectItem>
+                  <SelectItem value="materials">Manufacturing materials</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             {warehouses.length > 1 && (
               <div className="w-[190px] shrink-0">
@@ -380,7 +392,12 @@ export default function Warehouse() {
                   }}
                 >
                   <td className="px-4 py-3 font-medium text-gray-900">{row.sku}</td>
-                  <td className="px-4 py-3 text-gray-700">{row.itemName}</td>
+                  <td className="px-4 py-3 text-gray-700">
+                    {row.itemName}
+                    {row.isSupply && (
+                      <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700 align-middle">Supply</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-gray-600">{row.category ?? '—'}</td>
                   <td className="px-4 py-3 text-gray-600">{row.warehouseName}</td>
                   <td className="px-4 py-3 text-gray-600 whitespace-nowrap">

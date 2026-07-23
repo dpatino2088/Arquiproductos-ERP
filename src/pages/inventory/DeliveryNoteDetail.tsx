@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { router } from '../../lib/router';
 import { supabase } from '../../lib/supabase/client';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
-import { useFilteredMfgSubmodules } from './manufacturingSubmodules';
+import { INVENTORY_SUBMODULES } from './inventorySubmodules';
 import { useAuth } from '../../hooks/useAuth';
 import { useUIStore } from '../../stores/ui-store';
 import { useOrganizationContext } from '../../context/OrganizationContext';
@@ -14,11 +14,11 @@ import { formatDate } from '../../lib/utils';
 import { generateDeliveryNotePDF } from '../../lib/pdf/generateDeliveryNotePDF';
 import type { DeliveryNotePDFLine, DeliveryNotePDFData, DeliveryNotePDFOptions } from '../../lib/pdf/generateDeliveryNotePDF';
 import { getAppUsersDisplayNames } from '../../lib/appUsersDisplayNames';
+import { getReturnToFromCurrentQuery } from '../../lib/navigation/returnTo';
 
 const STORAGE_BUCKET = 'mo-attachments';
 
 export default function DeliveryNoteDetail() {
-  const filteredSubmodules = useFilteredMfgSubmodules();
   const { registerSubmodules } = useSubmoduleNav();
   const { user } = useAuth();
   const { activeOrganizationId } = useOrganizationContext();
@@ -101,8 +101,8 @@ export default function DeliveryNoteDetail() {
   }, [mo, deliveryNote?.sales_order_id, soIdParam]);
 
   useEffect(() => {
-    registerSubmodules('Manufacturing', filteredSubmodules);
-  }, [registerSubmodules, filteredSubmodules]);
+    registerSubmodules('Inventory', INVENTORY_SUBMODULES);
+  }, [registerSubmodules]);
 
   const creatingRef = useRef(false);
   useEffect(() => {
@@ -361,7 +361,7 @@ export default function DeliveryNoteDetail() {
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => router.navigate('/manufacturing/finished-goods')}
+            onClick={() => router.navigate(getReturnToFromCurrentQuery() ?? '/inventory/deliveries')}
             className="p-1 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded"
           >
             <ArrowLeft className="w-5 h-5" />
@@ -623,7 +623,7 @@ export default function DeliveryNoteDetail() {
             </button>
             <button
               type="button"
-              onClick={() => router.navigate('/manufacturing/finished-goods')}
+              onClick={() => router.navigate(getReturnToFromCurrentQuery() ?? '/inventory/deliveries')}
               className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
             >
               Cancel

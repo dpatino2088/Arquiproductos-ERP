@@ -12,15 +12,7 @@ interface TransactionsProps {
   title?: string;
 }
 
-const INVENTORY_SUBMODULES = [
-  { id: 'warehouse', label: 'Warehouse', href: '/inventory/warehouse' },
-  { id: 'locations', label: 'Locations', href: '/inventory/locations' },
-  { id: 'purchase-orders', label: 'Purchase Orders', href: '/inventory/purchase-orders' },
-  { id: 'receipts', label: 'Receipts', href: '/inventory/receipts' },
-  { id: 'transactions', label: 'Transactions', href: '/inventory/transactions' },
-  { id: 'adjustments', label: 'Adjustments', href: '/inventory/adjustments' },
-  { id: 'material-demand', label: 'Material Demand', href: '/inventory/material-demand' },
-];
+import { INVENTORY_SUBMODULES } from './inventorySubmodules';
 
 const TYPE_LABELS: Record<string, string> = {
   receipt: 'Receipt',

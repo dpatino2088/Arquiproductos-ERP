@@ -5,7 +5,7 @@ import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useFinishedGoods, type FinishedGoodsSOGroup } from '../../hooks/useFinishedGoods';
 import { useFilteredMfgSubmodules } from './manufacturingSubmodules';
 import StatusBadge from '../../components/shared/StatusBadge';
-import { Package, ChevronDown, ChevronRight, Truck, Search, FileText, Lock } from 'lucide-react';
+import { Package, ChevronDown, ChevronRight, Truck, Search } from 'lucide-react';
 import { formatDate } from '../../lib/utils';
 import { withReturnTo } from '../../lib/navigation/returnTo';
 
@@ -210,16 +210,8 @@ function FinishedGoodsSOCard({
   financial?: FinancialInfo;
 }) {
   const balanceDue = Number(financial?.balance_due ?? 0);
-  const fullyInvoiced = Boolean(financial?.fully_invoiced);
-  const deliveryFinancialsOk = Boolean(financial?.delivery_financials_ok);
   const paymentComplete = balanceDue <= 0;
   const hasDeliveryOverride = Boolean(financial?.has_delivery_override);
-  const deliveryBlocked = group.hasServiceMOOnly
-    ? false
-    : !!financial && !deliveryFinancialsOk && !hasDeliveryOverride;
-  const deliveryBlockedTitle = !fullyInvoiced
-    ? 'Delivery blocked: the sales order is not fully invoiced.'
-    : `Delivery blocked: balance due is $${balanceDue.toFixed(2)}. The sales order must be fully paid or issue an override.`;
   const paymentLabel = financial
     ? paymentComplete ? 'Paid'
     : financial.total_paid > 0 ? 'Partial Payment'
@@ -282,21 +274,15 @@ function FinishedGoodsSOCard({
           {group.readyProductLines > 0 && (
             <button
               type="button"
-              disabled={deliveryBlocked}
               onClick={(e) => {
                 e.stopPropagation();
-                if (deliveryBlocked) return;
-                router.navigate(withReturnTo(`/manufacturing/delivery-notes/new?so_id=${group.sales_order_id}`));
+                router.navigate(withReturnTo(`/inventory/deliveries/new?so_id=${group.sales_order_id}`));
               }}
-              title={deliveryBlocked ? deliveryBlockedTitle : undefined}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg ${
-                deliveryBlocked
-                  ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                  : 'text-white bg-primary hover:bg-primary/90'
-              }`}
+              title="Dispatch this order from Inventory › Deliveries"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-primary bg-primary/10 hover:bg-primary/20"
             >
-              {deliveryBlocked ? <Lock className="w-3.5 h-3.5" /> : <Truck className="w-3.5 h-3.5" />}
-              {deliveryBlocked ? 'Payment Required' : 'Create Delivery'}
+              <Truck className="w-3.5 h-3.5" />
+              Go to Deliveries
             </button>
           )}
         </div>
@@ -433,7 +419,7 @@ function DeliveryNotesSection({ soId }: { soId: string }) {
         <button
           key={dn.id}
           type="button"
-          onClick={() => router.navigate(withReturnTo(`/manufacturing/delivery-notes/${dn.id}`))}
+          onClick={() => router.navigate(withReturnTo(`/inventory/deliveries/${dn.id}`))}
           className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-gray-700 bg-white border border-gray-200 hover:bg-gray-50 rounded transition"
         >
           <Truck className="w-3 h-3" />

@@ -73,7 +73,7 @@ const WorkOrderDetail = lazy(() => import('./pages/manufacturing/WorkOrderDetail
 const ProductionCalendar = lazy(() => import('./pages/manufacturing/ProductionCalendar'));
 const FinishedGoods = lazy(() => import('./pages/manufacturing/FinishedGoods'));
 const CutOptimization = lazy(() => import('./pages/manufacturing/CutOptimization'));
-const DeliveryNoteDetail = lazy(() => import('./pages/manufacturing/DeliveryNoteDetail'));
+const DeliveryNoteDetail = lazy(() => import('./pages/inventory/DeliveryNoteDetail'));
 
 // Variants component removed - use CollectionsCatalog instead
 
@@ -85,6 +85,7 @@ const InventoryItemDetail = lazy(() => import('./pages/inventory/InventoryItemDe
 const PurchaseOrders = lazy(() => import('./pages/inventory/PurchaseOrders'));
 const PurchaseOrderDetail = lazy(() => import('./pages/inventory/PurchaseOrderDetail'));
 const Receipts = lazy(() => import('./pages/inventory/Receipts'));
+const Deliveries = lazy(() => import('./pages/inventory/Deliveries'));
 const Transactions = lazy(() => import('./pages/inventory/Transactions'));
 const TransactionDetail = lazy(() => import('./pages/inventory/TransactionDetail'));
 const Adjustments = lazy(() => import('./pages/inventory/Adjustments'));
@@ -652,6 +653,27 @@ function App() {
         setCurrentPage('login');
       }
     });
+    router.addRoute('/inventory/deliveries', () => {
+      if (isAuthenticated) {
+        setCurrentPage('inventory-deliveries');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/inventory/deliveries/new', () => {
+      if (isAuthenticated) {
+        setCurrentPage('delivery-note-new');
+      } else {
+        setCurrentPage('login');
+      }
+    });
+    router.addRoute('/inventory/deliveries/:id', () => {
+      if (isAuthenticated) {
+        setCurrentPage('delivery-note-detail');
+      } else {
+        setCurrentPage('login');
+      }
+    });
     router.addRoute('/inventory/transactions', () => {
       if (isAuthenticated) {
         setCurrentPage('transactions');
@@ -862,16 +884,21 @@ function App() {
         setCurrentPage('login');
       }
     });
+    // Legacy delivery-note routes moved to Inventory > Deliveries. Redirect,
+    // preserving any query string (e.g. ?so_id= / ?returnTo=).
     router.addRoute('/manufacturing/delivery-notes/new', () => {
       if (isAuthenticated) {
-        setCurrentPage('delivery-note-new');
+        router.navigate(`/inventory/deliveries/new${window.location.search}`, false);
       } else {
         setCurrentPage('login');
       }
     });
     router.addRoute('/manufacturing/delivery-notes/:id', () => {
       if (isAuthenticated) {
-        setCurrentPage('delivery-note-detail');
+        const path = window.location.pathname;
+        const match = path.match(/\/manufacturing\/delivery-notes\/([^/]+)/);
+        const id = match?.[1] ?? '';
+        router.navigate(`/inventory/deliveries/${id}${window.location.search}`, false);
       } else {
         setCurrentPage('login');
       }
@@ -1400,6 +1427,8 @@ function App() {
       }
       case 'inventory-receipts':
         return <Receipts />;
+      case 'inventory-deliveries':
+        return <RequireModule module="inventory"><Deliveries /></RequireModule>;
       case 'transactions':
         return <Transactions />;
       case 'inventory-adjustments':
@@ -1446,7 +1475,7 @@ function App() {
         return <RequireModule module="manufacturing"><CutOptimization /></RequireModule>;
       case 'delivery-note-new':
       case 'delivery-note-detail':
-        return <RequireModule module="manufacturing"><DeliveryNoteDetail /></RequireModule>;
+        return <RequireModule module="inventory"><DeliveryNoteDetail /></RequireModule>;
       case 'workstation-detail': {
         const wcId = sessionStorage.getItem('currentWorkCenterId');
         return <RequireModule module="manufacturing"><WorkstationView workCenterId={wcId ?? undefined} /></RequireModule>;
