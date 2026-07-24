@@ -376,14 +376,14 @@ export default function Proposals() {
 
   const renderOlderProposalRow = useCallback((o: (typeof list)[number]) => (
     <tr key={o.id} className="bg-gray-50/60 text-gray-400">
-      <td className="py-3 px-4 text-center"><span className="inline-block w-4" /></td>
-      <td className="py-3 px-4 text-sm font-medium text-center">
-        <span className="inline-flex items-center justify-center gap-1.5 max-w-full pl-5">
-          <span className="text-gray-300 text-xs select-none">└</span>
+      <td className="py-3 px-3 text-center"><span className="inline-block w-4" /></td>
+      <td className="py-3 px-4 text-sm font-medium text-left">
+        <div className="flex items-center gap-1.5 min-w-0 pl-4">
+          <span className="text-gray-300 text-xs select-none shrink-0">└</span>
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); router.navigate(withReturnTo(`/sales/proposals/${o.id}`)); }}
-            className="text-gray-500 hover:text-gray-700 hover:underline truncate"
+            className="text-gray-500 hover:text-gray-700 hover:underline whitespace-nowrap font-mono text-[13px]"
           >
             {o.proposal_no || `Proposal ${o.id.slice(0, 8)}`}
           </button>
@@ -392,17 +392,17 @@ export default function Proposals() {
               v{proposalVersionNo(o)}
             </span>
           )}
-        </span>
+        </div>
       </td>
-      <td className="py-3 px-4 text-center"><span className="opacity-70"><StatusBadge status={o.status} type="proposal" size="sm" /></span></td>
+      <td className="py-3 px-3 text-center"><span className="opacity-70"><StatusBadge status={o.status} type="proposal" size="sm" /></span></td>
       <td className="py-3 px-4 text-sm text-left text-gray-400" title={o.customer_name ?? ''}><span className="block truncate">{o.customer_name ?? '—'}</span></td>
       <td className="py-3 px-4 text-sm text-left text-gray-400"><span className="block truncate">{o.proposal_created_by ?? '—'}</span></td>
       <td className="py-3 px-4 text-sm text-left text-gray-400"><span className="block truncate">{o.quote_created_by ?? '—'}</span></td>
-      <td className="py-3 px-4 text-sm text-center text-gray-400">{formatDate(o.updated_at)}</td>
-      <td className="py-3 px-4 text-sm text-right text-gray-400 whitespace-nowrap">{formatCurrency(o.quote_total_amount)}</td>
-      <td className="py-3 px-4 text-sm text-right text-gray-400 whitespace-nowrap">{formatCurrency(o.total_amount)}</td>
-      <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center gap-1 justify-end flex-nowrap">
+      <td className="py-3 px-3 text-sm text-center text-gray-400 whitespace-nowrap">{formatDate(o.updated_at)}</td>
+      <td className="py-3 px-4 text-sm text-right text-gray-400 whitespace-nowrap tabular-nums">{formatCurrency(o.quote_total_amount)}</td>
+      <td className="py-3 px-4 text-sm text-right text-gray-400 whitespace-nowrap tabular-nums">{formatCurrency(o.total_amount)}</td>
+      <td className="py-3 px-3 text-right" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-0.5 justify-end flex-nowrap">
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); router.navigate(withReturnTo(`/sales/proposals/${o.id}`)); }}
@@ -640,22 +640,22 @@ export default function Proposals() {
           </div>
         )}
         <div className="table-fit-wrapper overflow-x-auto">
-          <table className="table-fit w-full min-w-[1320px]">
+          <table className="table-fit w-full min-w-[1480px]" style={{ tableLayout: 'fixed' }}>
             <colgroup>
               <col style={{ width: '44px' }} />
-              <col style={{ width: '140px' }} />
-              <col style={{ width: '100px' }} />
-              <col style={{ width: '180px' }} />
-              <col style={{ width: '150px' }} />
-              <col style={{ width: '150px' }} />
+              <col style={{ width: '240px' }} />
               <col style={{ width: '110px' }} />
+              <col style={{ width: '200px' }} />
+              <col style={{ width: '160px' }} />
+              <col style={{ width: '160px' }} />
               <col style={{ width: '110px' }} />
               <col style={{ width: '120px' }} />
-              <col style={{ width: '110px' }} />
+              <col style={{ width: '120px' }} />
+              <col style={{ width: '156px' }} />
             </colgroup>
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="py-3 px-4 text-center">
+                <th className="py-3 px-3 text-center">
                   <input
                     type="checkbox"
                     checked={paginatedList.length > 0 && paginatedList.every((p) => selectedIds.has(p.id))}
@@ -663,17 +663,17 @@ export default function Proposals() {
                     className="rounded border-gray-300"
                   />
                 </th>
-                <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">
+                <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs">
                   <button
                     onClick={() => handleSort('proposal_no')}
-                    className="flex items-center gap-1 hover:text-gray-900 justify-center w-full"
+                    className="flex items-center gap-1 hover:text-gray-900"
                   >
                     Proposal / Quote
                     {sortBy === 'proposal_no' &&
                       (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                   </button>
                 </th>
-                <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">
+                <th className="text-center py-3 px-3 font-medium text-gray-700 text-xs">
                   <button
                     onClick={() => handleSort('status')}
                     className="flex items-center gap-1 hover:text-gray-900 justify-center w-full"
@@ -695,7 +695,7 @@ export default function Proposals() {
                 </th>
                 <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs">Created by</th>
                 <th className="text-left py-3 px-4 font-medium text-gray-700 text-xs">Quote created by</th>
-                <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">
+                <th className="text-center py-3 px-3 font-medium text-gray-700 text-xs">
                   <button
                     onClick={() => handleSort('updated_at')}
                     className="flex items-center gap-1 hover:text-gray-900 justify-center w-full"
@@ -716,7 +716,7 @@ export default function Proposals() {
                       (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                   </button>
                 </th>
-                <th className="text-right py-3 px-4 font-medium text-gray-700 text-xs">Actions</th>
+                <th className="text-right py-3 px-3 font-medium text-gray-700 text-xs">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -745,7 +745,7 @@ export default function Proposals() {
                     ref={rowRefForViewport(p.id)}
                     className="hover:bg-gray-50"
                   >
-                    <td className="py-4 px-4 text-center" onClick={(e) => e.stopPropagation()}>
+                    <td className="py-3.5 px-3 text-center" onClick={(e) => e.stopPropagation()}>
                       <input
                         type="checkbox"
                         checked={selectedIds.has(p.id)}
@@ -753,9 +753,9 @@ export default function Proposals() {
                         className="rounded border-gray-300"
                       />
                     </td>
-                    <td className="py-4 px-4 text-gray-900 text-sm font-medium text-center">
-                      <span className="inline-flex items-center justify-center gap-1.5 max-w-full">
-                        {statusTab !== 'archived' && olderVersionsByRowId.has(p.id) && (
+                    <td className="py-3.5 px-4 text-gray-900 text-sm font-medium text-left">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        {statusTab !== 'archived' && olderVersionsByRowId.has(p.id) ? (
                           <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); toggleFamily(p.id); }}
@@ -764,33 +764,45 @@ export default function Proposals() {
                           >
                             {expandedFamilies.has(p.id) ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
                           </button>
+                        ) : (
+                          <span className="w-4 shrink-0" aria-hidden />
                         )}
-                        <span className="block truncate">{p.proposal_no || `Proposal ${p.id.slice(0, 8)}`}</span>
-                        {Number(p.version_no ?? 1) > 1 && (
-                          <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-                            v{Number(p.version_no)}
-                          </span>
-                        )}
-                      </span>
-                      {p.quote_no && (
-                        <span className="text-xs text-gray-500 font-normal block truncate">Quote: {p.quote_no}</span>
-                      )}
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="whitespace-nowrap font-mono text-[13px]">
+                              {p.proposal_no || `Proposal ${p.id.slice(0, 8)}`}
+                            </span>
+                            {Number(p.version_no ?? 1) > 1 && (
+                              <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                                v{Number(p.version_no)}
+                              </span>
+                            )}
+                          </div>
+                          {p.quote_no ? (
+                            <span className="text-xs text-gray-500 font-normal block whitespace-nowrap mt-0.5">
+                              Quote: {p.quote_no}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-400 font-normal block mt-0.5">Standalone</span>
+                          )}
+                        </div>
+                      </div>
                     </td>
-                    <td className="py-4 px-4 text-center">
+                    <td className="py-3.5 px-3 text-center">
                       <StatusBadge status={p.status} type="proposal" size="sm" />
                     </td>
-                    <td className="py-4 px-4 text-gray-700 text-sm text-left" title={p.customer_name ?? ''}><span className="block truncate">{p.customer_name ?? '—'}</span></td>
-                    <td className="py-4 px-4 text-gray-600 text-sm text-left" title={p.proposal_created_by ?? ''}><span className="block truncate">{p.proposal_created_by ?? '—'}</span></td>
-                    <td className="py-4 px-4 text-gray-600 text-sm text-left" title={p.quote_created_by ?? ''}><span className="block truncate">{p.quote_created_by ?? '—'}</span></td>
-                    <td className="py-4 px-4 text-gray-600 text-sm text-center">{formatDate(p.updated_at)}</td>
-                    <td className="py-4 px-4 text-gray-700 text-sm text-right whitespace-nowrap">
+                    <td className="py-3.5 px-4 text-gray-700 text-sm text-left" title={p.customer_name ?? ''}><span className="block truncate">{p.customer_name ?? '—'}</span></td>
+                    <td className="py-3.5 px-4 text-gray-600 text-sm text-left" title={p.proposal_created_by ?? ''}><span className="block truncate">{p.proposal_created_by ?? '—'}</span></td>
+                    <td className="py-3.5 px-4 text-gray-600 text-sm text-left" title={p.quote_created_by ?? ''}><span className="block truncate">{p.quote_created_by ?? '—'}</span></td>
+                    <td className="py-3.5 px-3 text-gray-600 text-sm text-center whitespace-nowrap">{formatDate(p.updated_at)}</td>
+                    <td className="py-3.5 px-4 text-gray-700 text-sm text-right whitespace-nowrap tabular-nums">
                       {formatCurrency(p.quote_total_amount)}
                     </td>
-                    <td className="py-4 px-4 text-gray-900 text-sm font-semibold text-right whitespace-nowrap">
+                    <td className="py-3.5 px-4 text-gray-900 text-sm font-semibold text-right whitespace-nowrap tabular-nums">
                       {formatCurrency(p.total_amount)}
                     </td>
-                    <td className="py-4 px-4 text-right" onClick={(e) => e.stopPropagation()}>
-                      <div className="flex items-center gap-1 justify-end flex-nowrap">
+                    <td className="py-3.5 px-3 text-right" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center gap-0.5 justify-end flex-nowrap">
                         {statusTab === 'archived' ? (
                           <>
                             <button
