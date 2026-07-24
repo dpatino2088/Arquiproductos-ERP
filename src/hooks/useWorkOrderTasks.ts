@@ -527,7 +527,9 @@ export function useWorkOrderTasks(moId: string | null | undefined) {
     }
 
     if (status === 'in_progress' && effectiveMoId) {
-      await advanceMOOnTaskStart(effectiveMoId);
+      await advanceMOOnTaskStart(effectiveMoId, (msg) => {
+        addNotification({ type: 'warning', title: 'Task Started', message: msg });
+      });
     }
 
     if (status === 'completed' && effectiveMoId) {

@@ -232,11 +232,9 @@ export default function CutOptimization() {
 
       const moMap: Record<string, string> = {};
       const moToSoId: Record<string, string | null> = {};
-      const inProductionMoIds = new Set<string>();
       (mos ?? []).forEach((m: any) => {
         moMap[m.id] = m.manufacturing_order_no;
         moToSoId[m.id] = m.sales_order_id ?? null;
-        if (m.status === 'in_production') inProductionMoIds.add(m.id);
       });
 
       const soIds = [...new Set((mos ?? []).map((m: any) => m.sales_order_id).filter(Boolean))];
@@ -258,20 +256,21 @@ export default function CutOptimization() {
         dealerMap[d.id] = d.dealer_name ?? null;
       });
 
-      // Only keep tasks eligible to be listed in Cut Optimization:
-      // - MO must be in production
-      // Calendar date and operator are optional and no longer required to list.
+      // Keep every STARTED/COMPLETED cut-station task whose MO is still live.
+      // Do NOT require MO.status === 'in_production': Start can succeed while
+      // material gates keep the MO at materials_ready (or similar). Those cuts
+      // must still appear in Cut Optimization — the queue source of truth is
+      // the WorkOrderTask status at CUT-PROFILE / CUT-ROLL.
+      const liveMoIds = new Set((mos ?? []).map((m: any) => m.id as string));
       const taskToMo: Record<string, string> = {};
       const taskToSol: Record<string, string | null> = {};
       const taskToLineLabel: Record<string, string | null> = {};
       matchedTasks.forEach((t: any) => {
-        const isMoEligible = inProductionMoIds.has(t.manufacturing_order_id);
-        if (isMoEligible) {
-          taskToMo[t.id] = t.manufacturing_order_id;
-          taskToSol[t.id] = t.sales_order_line_id ?? null;
-          const idx = t.sales_order_line_id ? lineIndexByMoSol[`${t.manufacturing_order_id}::${t.sales_order_line_id}`] : null;
-          taskToLineLabel[t.id] = idx ? `L${idx}` : null;
-        }
+        if (!liveMoIds.has(t.manufacturing_order_id)) return;
+        taskToMo[t.id] = t.manufacturing_order_id;
+        taskToSol[t.id] = t.sales_order_line_id ?? null;
+        const idx = t.sales_order_line_id ? lineIndexByMoSol[`${t.manufacturing_order_id}::${t.sales_order_line_id}`] : null;
+        taskToLineLabel[t.id] = idx ? `L${idx}` : null;
       });
 
       const catalogIds = [...new Set((lines ?? []).map((l: any) => l.catalog_item_id).filter(Boolean))];

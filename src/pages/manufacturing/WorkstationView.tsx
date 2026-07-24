@@ -813,7 +813,12 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
     }
 
     if (task) {
-      await advanceMOOnTaskStart(task.manufacturing_order_id);
+      await advanceMOOnTaskStart(task.manufacturing_order_id, (msg) => {
+        // Cut Optimization lists Started cut tasks even if the MO stays at
+        // materials_ready; still warn so the floor knows production status
+        // did not advance (usually material readiness).
+        addNotification({ type: 'warning', title: 'Task Started', message: msg });
+      });
     }
     syncCutCache();
   };
@@ -960,14 +965,16 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
         addNotification({ type: 'error', title: 'Start Failed', message: error.message });
         return;
       }
-      await advanceMOOnTaskStart(moId);
+      await advanceMOOnTaskStart(moId, (msg) => {
+        addNotification({ type: 'warning', title: 'Tasks Started', message: msg });
+      });
       addNotification({ type: 'success', title: 'Tasks Started', message: `${ids.length} task(s) started.` });
       await refetchTasks();
       syncCutCache();
     } finally {
       setStartingMO(null);
     }
-  }, [filteredTasks, addNotification, refetchTasks]);
+  }, [filteredTasks, addNotification, refetchTasks, syncCutCache]);
 
   // Group tasks by Manufacturing Order so long, multi-project queues stay compact.
   const moGroups = useMemo(() => {
