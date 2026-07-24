@@ -32,6 +32,8 @@ export interface Proposal {
   customer_id: string | null;
   contact_id: string | null;
   status: ProposalStatus;
+  /** True when superseded by a newer version (_V<n>); historical / read-only. */
+  archived?: boolean;
   proposal_no: string | null;
   version_no: number;
   currency: string | null;
