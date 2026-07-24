@@ -860,6 +860,11 @@ export interface CreateProposalFromQuoteOptions {
    * When provided, the per-quote auto numbering and PR sequence consumption are skipped.
    */
   versionOf?: { baseProposalNo: string; versionNo: number } | null;
+  /**
+   * Allocate a brand-new PR-XXXXX (version 1), ignoring any existing proposals for
+   * this quote. Used by "Duplicar → Nuevo desde Quote". Existing proposals are left alone.
+   */
+  forceNewNumber?: boolean;
 }
 
 function getProposalBaseNo(proposalNo: string | null | undefined): string | null {
@@ -977,6 +982,10 @@ export async function createProposalFromQuote(
       newVersion <= 1
         ? options.versionOf.baseProposalNo
         : `${options.versionOf.baseProposalNo}_V${newVersion}`;
+  } else if (options?.forceNewNumber) {
+    // Fresh proposal number, even if this quote already has PR-xxxx / _V<n> siblings.
+    newVersion = 1;
+    proposalNo = await generateNextProposalNumber(orgId, dealerId);
   } else {
     newVersion = Math.max(maxVersionNoFromColumn, maxVersionNoFromSuffix, 0) + 1;
 
@@ -1169,22 +1178,27 @@ export async function createProposalVersion(
   };
 }
 
+type ProposalCloneSource = {
+  id: string;
+  organization_id: string;
+  dealer_id: string;
+  quote_id: string | null;
+  currency: string | null;
+  customer_id: string | null;
+  contact_id: string | null;
+};
+
 /**
- * Clone a proposal as a new draft version: header + ALL lines (from_quote + custom,
- * with their adjustments and snapshots) + add-ons. The original `quote_id` is preserved.
+ * Shared clone of proposal header + ALL lines (from_quote + custom, with adjustments /
+ * snapshots) + add-ons. Used by both "nueva versión" and "nueva propuesta (copy)".
  */
-async function cloneProposalAsVersion(
-  src: {
-    id: string;
-    organization_id: string;
-    dealer_id: string;
-    quote_id: string | null;
-    currency: string | null;
-    customer_id: string | null;
-    contact_id: string | null;
-  },
-  baseProposalNo: string | null,
-  nextVersion: number
+async function cloneProposalContent(
+  src: ProposalCloneSource,
+  opts: {
+    proposalNo: string | null;
+    versionNo: number;
+    quoteId: string | null;
+  }
 ): Promise<{ proposalId: string } | { error: string }> {
   const { data: sessionData } = await supabase.auth.getSession();
   const userId = sessionData?.session?.user?.id ?? null;
@@ -1198,29 +1212,25 @@ async function cloneProposalAsVersion(
     .single();
   if (fullErr || !full) return { error: fullErr?.message || 'Failed to load proposal header' };
 
-  const proposalNo = baseProposalNo
-    ? (nextVersion <= 1 ? baseProposalNo : `${baseProposalNo}_V${nextVersion}`)
-    : null;
-
   const { data: created, error: insErr } = await supabase
     .from('Proposals')
     .insert({
       ...full,
       organization_id: src.organization_id,
       dealer_id: src.dealer_id,
-      quote_id: src.quote_id ?? null,
+      quote_id: opts.quoteId,
       customer_id: src.customer_id ?? null,
       contact_id: src.contact_id ?? null,
       status: 'draft',
       archived: false,
-      proposal_no: proposalNo,
-      version_no: nextVersion,
+      proposal_no: opts.proposalNo,
+      version_no: opts.versionNo,
       currency: src.currency ?? 'USD',
       created_by_user_id: userId,
     })
     .select('id')
     .single();
-  if (insErr || !created) return { error: insErr?.message || 'Error creating proposal version' };
+  if (insErr || !created) return { error: insErr?.message || 'Error creating proposal copy' };
   const newId = created.id;
 
   const { data: srcLines, error: linesErr } = await supabase
@@ -1272,6 +1282,62 @@ async function cloneProposalAsVersion(
   }
 
   return { proposalId: newId };
+}
+
+/**
+ * Clone a proposal as a new draft version: header + ALL lines (from_quote + custom,
+ * with their adjustments and snapshots) + add-ons. The original `quote_id` is preserved.
+ */
+async function cloneProposalAsVersion(
+  src: ProposalCloneSource,
+  baseProposalNo: string | null,
+  nextVersion: number
+): Promise<{ proposalId: string } | { error: string }> {
+  const proposalNo = baseProposalNo
+    ? (nextVersion <= 1 ? baseProposalNo : `${baseProposalNo}_V${nextVersion}`)
+    : null;
+  return cloneProposalContent(src, {
+    proposalNo,
+    versionNo: nextVersion,
+    quoteId: src.quote_id ?? null,
+  });
+}
+
+/**
+ * Duplicate a proposal as an independent copy (Quote-style `copy` mode):
+ * brand-new PR-XXXXX, full clone of header/lines/add-ons. The source is NOT archived.
+ * Works for quote-linked and standalone proposals.
+ */
+export async function duplicateProposalAsCopy(
+  proposalId: string
+): Promise<CreateProposalVersionResult | { error: string }> {
+  const { data: src, error: srcErr } = await supabase
+    .from('Proposals')
+    .select('id, organization_id, dealer_id, quote_id, proposal_no, currency, customer_id, contact_id')
+    .eq('id', proposalId)
+    .eq('deleted', false)
+    .single();
+  if (srcErr || !src) return { error: srcErr?.message || 'Proposal not found' };
+
+  let proposalNo: string;
+  try {
+    proposalNo = await generateNextProposalNumber(src.organization_id, src.dealer_id);
+  } catch (e: any) {
+    return { error: e?.message || 'Failed to allocate proposal number' };
+  }
+
+  const cloned = await cloneProposalContent(src, {
+    proposalNo,
+    versionNo: 1,
+    quoteId: src.quote_id ?? null,
+  });
+  if ('error' in cloned) return cloned;
+
+  return {
+    proposalId: cloned.proposalId,
+    quoteId: src.quote_id ?? null,
+    proposalNo,
+  };
 }
 
 export interface CreateStandaloneProposalOptions {

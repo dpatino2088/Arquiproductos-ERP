@@ -3,7 +3,18 @@ import { useQueryClient } from '@tanstack/react-query';
 import { router } from '../../lib/router';
 import { withReturnTo } from '../../lib/navigation/returnTo';
 
-import { useProposalsList, fetchProposalDetailData, createStandaloneProposal, createProposalVersion } from '../../hooks/useProposals';
+import {
+  useProposalsList,
+  fetchProposalDetailData,
+  createStandaloneProposal,
+  createProposalVersion,
+  createProposalFromQuote,
+  duplicateProposalAsCopy,
+  type ProposalListItem,
+} from '../../hooks/useProposals';
+import DuplicateProposalModal, {
+  type DuplicateProposalMode,
+} from '../../components/sales/DuplicateProposalModal';
 import { useUIStore } from '../../stores/ui-store';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useActiveDealer } from '../../hooks/useActiveDealer';
@@ -416,39 +427,90 @@ export default function Proposals() {
   ), [router, proposalVersionNo, handleRestore]);
 
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
-  const handleDuplicate = useCallback(
-    async (p: (typeof list)[0], e: React.MouseEvent) => {
-      e.stopPropagation();
-      const label = p.proposal_no || p.id.slice(0, 8);
-      const confirmed = await showConfirm({
-        title: 'Crear nueva versión',
-        message: `Se creará una nueva versión en borrador a partir de ${label} (copia sus líneas, ajustes y add-ons). La actual quedará archivada como histórico. ¿Continuar?`,
-        variant: 'info',
-        confirmText: 'Crear versión',
-        cancelText: 'Cancelar',
-      });
-      if (!confirmed) return;
+  const [duplicateTarget, setDuplicateTarget] = useState<ProposalListItem | null>(null);
+  const [duplicatingLoading, setDuplicatingLoading] = useState(false);
+
+  const openDuplicateModal = useCallback((p: ProposalListItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDuplicateTarget(p);
+  }, []);
+
+  const handleDuplicateConfirm = useCallback(
+    async (mode: DuplicateProposalMode) => {
+      if (!duplicateTarget) return;
+      setDuplicatingLoading(true);
+      setDialogLoading(true);
+      setDuplicatingId(duplicateTarget.id);
       try {
-        setDialogLoading(true);
-        setDuplicatingId(p.id);
-        const res = await createProposalVersion(p.id);
+        if (mode === 'version') {
+          const res = await createProposalVersion(duplicateTarget.id);
+          if ('error' in res) {
+            addNotification({ type: 'error', title: 'Error', message: res.error });
+            return;
+          }
+          addNotification({
+            type: 'success',
+            title: 'Nueva versión creada',
+            message: res.proposalNo
+              ? `Versión ${res.proposalNo} en borrador.`
+              : 'Versión creada en borrador.',
+          });
+          setDuplicateTarget(null);
+          await refetch();
+          router.navigate(withReturnTo(`/sales/proposals/${res.proposalId}`));
+          return;
+        }
+
+        if (mode === 'copy') {
+          const res = await duplicateProposalAsCopy(duplicateTarget.id);
+          if ('error' in res) {
+            addNotification({ type: 'error', title: 'Error', message: res.error });
+            return;
+          }
+          addNotification({
+            type: 'success',
+            title: 'Nueva propuesta',
+            message: res.proposalNo
+              ? `Copia creada como ${res.proposalNo}.`
+              : 'Copia creada con nuevo número PR.',
+          });
+          setDuplicateTarget(null);
+          await refetch();
+          router.navigate(withReturnTo(`/sales/proposals/${res.proposalId}`));
+          return;
+        }
+
+        if (!duplicateTarget.quote_id) {
+          addNotification({
+            type: 'error',
+            title: 'Sin Quote',
+            message: 'Esta propuesta no tiene Quote vinculado; no se puede crear de cero desde Quote.',
+          });
+          return;
+        }
+        const res = await createProposalFromQuote(duplicateTarget.quote_id, {
+          forceNewNumber: true,
+          actingDealerId: activeDealerId ?? null,
+        });
         if ('error' in res) {
           addNotification({ type: 'error', title: 'Error', message: res.error });
           return;
         }
         addNotification({
           type: 'success',
-          title: 'Nueva versión creada',
-          message: res.proposalNo ? `Versión ${res.proposalNo} en borrador.` : 'Versión creada en borrador.',
+          title: 'Nueva propuesta',
+          message: 'Propuesta creada de cero desde el Quote (nuevo número PR).',
         });
+        setDuplicateTarget(null);
         await refetch();
         router.navigate(withReturnTo(`/sales/proposals/${res.proposalId}`));
       } finally {
+        setDuplicatingLoading(false);
         setDialogLoading(false);
         setDuplicatingId(null);
       }
     },
-    [showConfirm, setDialogLoading, addNotification, refetch]
+    [duplicateTarget, setDialogLoading, addNotification, refetch, activeDealerId]
   );
 
   const handleDeleteSelected = useCallback(async () => {
@@ -780,10 +842,10 @@ export default function Proposals() {
                             {canCreateProp && (
                               <button
                                 type="button"
-                                onClick={(e) => handleDuplicate(p, e)}
+                                onClick={(e) => openDuplicateModal(p, e)}
                                 disabled={duplicatingId === p.id}
                                 className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                title="Nueva versión / Duplicar"
+                                title="Duplicar propuesta"
                               >
                                 <Copy style={{ width: 14, height: 14 }} />
                               </button>
@@ -878,6 +940,16 @@ export default function Proposals() {
         confirmText={dialogState.confirmText}
         cancelText={dialogState.cancelText}
         isLoading={dialogState.isLoading}
+      />
+
+      <DuplicateProposalModal
+        isOpen={!!duplicateTarget}
+        onClose={() => !duplicatingLoading && setDuplicateTarget(null)}
+        onConfirm={handleDuplicateConfirm}
+        sourceProposalNo={duplicateTarget?.proposal_no ?? null}
+        sourceQuoteNo={duplicateTarget?.quote_no ?? null}
+        hasQuote={!!duplicateTarget?.quote_id}
+        isLoading={duplicatingLoading}
       />
     </div>
   );

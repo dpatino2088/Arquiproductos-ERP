@@ -53,7 +53,13 @@ export default function ProposalsWithDetail() {
         <Proposals />
       </div>
       <div hidden={!showDetail} aria-hidden={!showDetail}>
-        <ProposalDetail proposalIdOverride={effectiveProposalId ?? undefined} />
+        {/* Remount when the proposal id changes. Keep-alive would otherwise retain
+            draft/dirty state from the previous proposal — after "create version"
+            saves then write into the archived original instead of the new _V<n>. */}
+        <ProposalDetail
+          key={effectiveProposalId ?? 'none'}
+          proposalIdOverride={effectiveProposalId ?? undefined}
+        />
       </div>
     </>
   );

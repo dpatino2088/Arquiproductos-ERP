@@ -10,7 +10,16 @@ import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } fro
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
 import { getSupabaseErrorMessage, isRLSError } from '../../lib/supabase-error-utils';
-import { useProposalDetail, createProposalVersion } from '../../hooks/useProposals';
+import {
+  useProposalDetail,
+  createProposalVersion,
+  createProposalFromQuote,
+  duplicateProposalAsCopy,
+} from '../../hooks/useProposals';
+import DuplicateProposalModal, {
+  type DuplicateProposalMode,
+} from '../../components/sales/DuplicateProposalModal';
+import { useActiveDealer } from '../../hooks/useActiveDealer';
 import type { Proposal, ProposalLine, ProposalCustomCategory, ProposalLineAddOn, ProposalLineAddOnPricingMode } from '../../types/proposals';
 import { generateProposalPDF, type ProposalPDFLine } from '../../lib/pdf/generateProposalPDF';
 import { generateMeasurementFormPDF, type MeasurementFormLine } from '../../lib/pdf/generateMeasurementFormPDF';
@@ -279,8 +288,40 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
   const [customModalDraft, setCustomModalDraft] = useState<CustomItemModalDraft | null>(null);
   const lastLinesRef = useRef<ProposalLine[]>([]);
   const lastAddonsMapRef = useRef<Map<string, ProposalLineAddOn[]>>(new Map());
+  const boundProposalIdRef = useRef<string | null>(proposalId);
+  const displayLines = draftLines;
+  const displayAddonsMap = draftAddonsMap;
+  type AddonDraft = { cost_amount: number; markup_pct: number; sale_amount: number; pricing_mode: ProposalLineAddOnPricingMode; taxable: boolean };
+  const [addonDraft, setAddonDraft] = useState<Record<string, AddonDraft>>({});
+  const addonDraftRef = useRef<Record<string, AddonDraft>>({});
+  addonDraftRef.current = addonDraft;
+
+  const [saving, setSaving] = useState(false);
+  const saveInFlightRef = useRef(false);
+  const [headerDirty, setHeaderDirty] = useState(false);
+
+  // If the kept-alive detail ever receives a different proposal id without remounting,
+  // drop every draft/dirty flag so Save cannot write into the previous (often archived) row.
+  useEffect(() => {
+    if (boundProposalIdRef.current === proposalId) return;
+    boundProposalIdRef.current = proposalId;
+    setExpandedLineId(null);
+    setDraftLines([]);
+    setDraftAddonsMap(new Map());
+    setInstallationFieldDraft({});
+    setRemovedCustomLineIds([]);
+    setLinesDirty(false);
+    setAddonsDirty(false);
+    setCustomModalDraft(null);
+    setHeaderDirty(false);
+    setAddonDraft({});
+    lastLinesRef.current = [];
+    lastAddonsMapRef.current = new Map();
+  }, [proposalId]);
+
   useEffect(() => {
     if (!proposal || loading) return;
+    if (proposal.id !== proposalId) return; // ignore stale query payload while switching
     if (!linesDirty && !addonsDirty) {
       lastLinesRef.current = lines;
       lastAddonsMapRef.current = addonsMap;
@@ -297,17 +338,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
       setInstallationFieldDraft({});
       setRemovedCustomLineIds([]);
     }
-  }, [proposal, loading, lines, addonsMap, linesDirty, addonsDirty]);
-  const displayLines = draftLines;
-  const displayAddonsMap = draftAddonsMap;
-  type AddonDraft = { cost_amount: number; markup_pct: number; sale_amount: number; pricing_mode: ProposalLineAddOnPricingMode; taxable: boolean };
-  const [addonDraft, setAddonDraft] = useState<Record<string, AddonDraft>>({});
-  const addonDraftRef = useRef<Record<string, AddonDraft>>({});
-  addonDraftRef.current = addonDraft;
-
-  const [saving, setSaving] = useState(false);
-  const saveInFlightRef = useRef(false);
-  const [headerDirty, setHeaderDirty] = useState(false);
+  }, [proposal, proposalId, loading, lines, addonsMap, linesDirty, addonsDirty]);
   const [printDropdownOpen, setPrintDropdownOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
   const [timeline, setTimeline] = useState<{ id: string; action: string; description: string; user_name?: string | null; created_at: string; metadata?: Record<string, unknown> | null }[]>([]);
@@ -377,6 +408,8 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
   }, [proposalId, proposal?.quote_id]);
 
   const [creatingVersion, setCreatingVersion] = useState(false);
+  const [duplicateModalOpen, setDuplicateModalOpen] = useState(false);
+  const { activeDealerId } = useActiveDealer();
   const [headerForm, setHeaderForm] = useState<{
     proposal_no: string;
     status: Proposal['status'];
@@ -443,6 +476,9 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
 
   useEffect(() => {
     if (!proposal) return;
+    if (proposal.id !== proposalId) return;
+    // Don't clobber in-progress header edits when a background refetch arrives.
+    if (headerDirty) return;
     setHeaderForm({
       proposal_no: proposal.proposal_no ?? '',
       status: proposal.status,
@@ -459,7 +495,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
       customer_id: proposal.customer_id ?? '',
       contact_id: proposal.contact_id ?? '',
     });
-  }, [proposal]);
+  }, [proposal, proposalId, headerDirty]);
 
   // Load contacts for the currently selected customer (mirrors QuoteNew pattern).
   useEffect(() => {
@@ -529,6 +565,14 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
 
   const saveHeader = useCallback(async (): Promise<boolean> => {
     if (!proposal || !headerDirty || saving || !canWrite) return false;
+    if (proposal.archived || proposal.id !== proposalId) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Cannot save',
+        message: 'This proposal is archived or outdated. Open the latest version to edit.',
+      });
+      return false;
+    }
     setSaving(true);
     try {
       const parsePct = (v: string) => { const n = parseFloat(v); return Number.isNaN(n) ? 0 : n; };
@@ -666,11 +710,11 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     } finally {
       setSaving(false);
     }
-  }, [proposal, headerForm, headerDirty, saving, canWrite, setCanWrite]);
+  }, [proposal, proposalId, headerForm, headerDirty, saving, canWrite, setCanWrite]);
 
   const setStatus = useCallback(
     (status: Proposal['status']) => {
-      if (!proposal || !canWrite) return;
+      if (!proposal || !canWrite || proposal.archived) return;
       setHeaderForm((f) => ({ ...f, status }));
       setHeaderDirty(true);
     },
@@ -679,6 +723,14 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
 
   const handleSave = useCallback(async () => {
     if (!proposal || !canWrite) return;
+    if (proposal.archived || proposal.id !== proposalId) {
+      useUIStore.getState().addNotification({
+        type: 'error',
+        title: 'Cannot save',
+        message: 'This proposal is archived or outdated. Open the latest version to edit.',
+      });
+      return;
+    }
     if (saveInFlightRef.current) return;
     if (!headerDirty && !linesDirty && !addonsDirty && removedCustomLineIds.length === 0) {
       return;
@@ -866,7 +918,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
       saveInFlightRef.current = false;
       setSaving(false);
     }
-  }, [proposal, canWrite, headerDirty, linesDirty, addonsDirty, removedCustomLineIds, draftLines, draftAddonsMap, addonsMap, saveHeader, refetch, setCanWrite, headerForm.status, authUser, refetchTimeline]);
+  }, [proposal, proposalId, canWrite, headerDirty, linesDirty, addonsDirty, removedCustomLineIds, draftLines, draftAddonsMap, addonsMap, saveHeader, refetch, setCanWrite, headerForm.status, authUser, refetchTimeline]);
 
   const handleSaveAndClose = useCallback(async () => {
     await handleSave();
@@ -876,28 +928,86 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     });
   }, [handleSave]);
 
-  const handleCreateVersion = useCallback(async () => {
-    if (!proposal || creatingVersion) return;
-    const confirmMsg =
-      'Esto creará una NUEVA VERSIÓN a partir de esta propuesta (copia sus líneas, ajustes y add-ons) en borrador. La propuesta actual quedará archivada como histórico. ¿Continuar?';
-    if (!window.confirm(confirmMsg)) return;
-    setCreatingVersion(true);
-    try {
-      const res = await createProposalVersion(proposal.id);
-      if ('error' in res) {
-        useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: res.error });
-        return;
+  const clearDraftsBeforeNavigate = useCallback(() => {
+    setHeaderDirty(false);
+    setLinesDirty(false);
+    setAddonsDirty(false);
+    setRemovedCustomLineIds([]);
+    setCustomModalDraft(null);
+    setDuplicateModalOpen(false);
+  }, []);
+
+  const handleDuplicateConfirm = useCallback(
+    async (mode: DuplicateProposalMode) => {
+      if (!proposal || creatingVersion || proposal.archived) return;
+      setCreatingVersion(true);
+      try {
+        if (mode === 'version') {
+          const res = await createProposalVersion(proposal.id);
+          if ('error' in res) {
+            useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: res.error });
+            return;
+          }
+          clearDraftsBeforeNavigate();
+          useUIStore.getState().addNotification({
+            type: 'success',
+            title: 'Nueva versión creada',
+            message: res.proposalNo
+              ? `Versión ${res.proposalNo} en borrador.`
+              : 'Versión creada en borrador.',
+          });
+          router.navigate(`/sales/proposals/${res.proposalId}`);
+          return;
+        }
+
+        if (mode === 'copy') {
+          const res = await duplicateProposalAsCopy(proposal.id);
+          if ('error' in res) {
+            useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: res.error });
+            return;
+          }
+          clearDraftsBeforeNavigate();
+          useUIStore.getState().addNotification({
+            type: 'success',
+            title: 'Nueva propuesta',
+            message: res.proposalNo
+              ? `Copia creada como ${res.proposalNo}.`
+              : 'Copia creada con nuevo número PR.',
+          });
+          router.navigate(`/sales/proposals/${res.proposalId}`);
+          return;
+        }
+
+        const quoteId = proposal.quote_id ?? quote?.id ?? null;
+        if (!quoteId) {
+          useUIStore.getState().addNotification({
+            type: 'error',
+            title: 'Sin Quote',
+            message: 'Esta propuesta no tiene Quote vinculado; no se puede crear de cero desde Quote.',
+          });
+          return;
+        }
+        const res = await createProposalFromQuote(quoteId, {
+          forceNewNumber: true,
+          actingDealerId: activeDealerId ?? null,
+        });
+        if ('error' in res) {
+          useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: res.error });
+          return;
+        }
+        clearDraftsBeforeNavigate();
+        useUIStore.getState().addNotification({
+          type: 'success',
+          title: 'Nueva propuesta',
+          message: 'Propuesta creada de cero desde el Quote (nuevo número PR).',
+        });
+        router.navigate(`/sales/proposals/${res.proposalId}`);
+      } finally {
+        setCreatingVersion(false);
       }
-      useUIStore.getState().addNotification({
-        type: 'success',
-        title: 'Nueva versión creada',
-        message: res.proposalNo ? `Versión ${res.proposalNo} en borrador.` : 'Versión creada en borrador.',
-      });
-      router.navigate(`/sales/proposals/${res.proposalId}`);
-    } finally {
-      setCreatingVersion(false);
-    }
-  }, [proposal, creatingVersion]);
+    },
+    [proposal, creatingVersion, quote?.id, activeDealerId, clearDraftsBeforeNavigate]
+  );
 
   const listPath = '/sales/proposals';
   const queryReturnTo = getReturnToFromCurrentQuery();
@@ -2072,12 +2182,13 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     return <div className="p-6">Loading...</div>;
   }
 
-  const readOnly = !canWrite;
+  // Archived = historical version after "create version"; never edit it (edits belong on the new _V<n>).
+  const readOnly = !canWrite || !!proposal?.archived;
   const isAccepted = proposal?.status === 'accepted';
   // Who can reopen an accepted proposal: portal Dealer Manager (Admin Dealer) or
   // any internal user with write access. Blocked if a Sales Order already exists.
   const isAdminDealer = userType === 'portal' && portalRole === 'dealer_manager';
-  const canRevertStatus = isAccepted && (isAdminDealer || userType === 'internal') && !hasDownstreamSO;
+  const canRevertStatus = isAccepted && !proposal?.archived && (isAdminDealer || userType === 'internal') && !hasDownstreamSO;
   const contentReadOnly = readOnly || !!isAccepted;
   const statusDropdownDisabled = contentReadOnly && !canRevertStatus;
 
@@ -2197,16 +2308,16 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           Back
         </button>
       )}
-      {(proposal?.status === 'accepted' || proposal?.status === 'sent') && (
+      {!proposal?.archived && (
         <button
           type="button"
-          onClick={handleCreateVersion}
+          onClick={() => setDuplicateModalOpen(true)}
           disabled={creatingVersion}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-          title="Crear una nueva versión (revisión) de esta propuesta"
+          title="Duplicar propuesta (versión o nuevo desde Quote)"
         >
           <Plus className="w-4 h-4" />
-          {creatingVersion ? 'Creando...' : 'New version'}
+          {creatingVersion ? 'Creando...' : 'Duplicate'}
         </button>
       )}
       <button
@@ -2248,6 +2359,11 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     >
       {activeTab === 'overview' && (
         <div className="space-y-6 w-full max-w-full">
+          {proposal.archived && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              This is an archived historical version. It is read-only — open the latest version to make changes.
+            </div>
+          )}
           {/* Header cards (2 columns: Left = names/details, Right = discounts + summary) */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
             {/* LEFT CARD: Customer Info + Proposal Details (mirrors QuoteNew layout) */}
@@ -3542,6 +3658,15 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           </div>
         );
       })()}
+      <DuplicateProposalModal
+        isOpen={duplicateModalOpen}
+        onClose={() => !creatingVersion && setDuplicateModalOpen(false)}
+        onConfirm={handleDuplicateConfirm}
+        sourceProposalNo={proposal.proposal_no ?? null}
+        sourceQuoteNo={quote?.quote_no ?? null}
+        hasQuote={!!(proposal.quote_id || quote?.id)}
+        isLoading={creatingVersion}
+      />
     </DetailPageLayout>
   );
 }
