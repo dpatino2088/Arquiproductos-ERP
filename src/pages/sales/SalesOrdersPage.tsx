@@ -329,7 +329,7 @@ export default function SalesOrdersPage() {
                   <th className={TH_CENTER}>Status</th>
                   {!isPortal && <th className={TH_CENTER}>Collection</th>}
                   {!isPortal && <th className={TH_CENTER}>MOs</th>}
-                  <th className={TH_CENTER}>Date</th>
+                  <th className={TH_CENTER}>Updated</th>
                   <th className={TH_CENTER}>Total</th>
                   <th className="text-right py-3 px-4 font-medium text-gray-700 text-xs">Actions</th>
                 </tr>
@@ -411,7 +411,7 @@ export default function SalesOrdersPage() {
                         </td>
                       )}
                       <td className={`${TD_CENTER} text-gray-600 text-sm`}>
-                        {formatDate(order.created_at)}
+                        {formatDate(order.updated_at || order.created_at)}
                       </td>
                       <td className={`${TD_CENTER} text-gray-900 text-sm font-medium`}>
                         {formatCurrency(order.total_amount)}

@@ -638,7 +638,7 @@ export default function Proposals() {
                     onClick={() => handleSort('updated_at')}
                     className="flex items-center gap-1 hover:text-gray-900 justify-center w-full"
                   >
-                    Date
+                    Updated
                     {sortBy === 'updated_at' &&
                       (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                   </button>

@@ -34,6 +34,8 @@ export interface QuoteListItem {
   /** Number of quote lines (server-side count). */
   line_count?: number;
   created_at: string;
+  /** Last activity — list default sort uses this (DESC). */
+  updated_at?: string | null;
   organization_id: string;
   dealer_id: string | null;
   /** coalesce(AppUsers.display_name, 'Legacy / Imported') */
@@ -147,11 +149,14 @@ export function useQuotes(dealerId?: string | null) {
         (from, to) => {
           let query = supabase
             .from('Quotes')
-            .select('id, quote_no, status, priority, created_at, created_by_user_id, customer_id, contact_id, dealer_id, organization_id, description, archived, parent_quote_id, root_quote_id, version_no, is_version')
+            .select('id, quote_no, status, priority, created_at, updated_at, created_by_user_id, customer_id, contact_id, dealer_id, organization_id, description, archived, parent_quote_id, root_quote_id, version_no, is_version')
             .eq('organization_id', activeOrganizationId)
             .or('deleted.is.false,deleted.is.null');
           if (effectiveDealerId) query = query.eq('dealer_id', effectiveDealerId);
-          return query.order('created_at', { ascending: false }).range(from, to);
+          return query
+            .order('updated_at', { ascending: false, nullsFirst: false })
+            .order('created_at', { ascending: false })
+            .range(from, to);
         },
         signal,
       );

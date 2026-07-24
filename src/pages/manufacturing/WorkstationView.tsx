@@ -12,6 +12,7 @@ import StatusBadge from '../../components/shared/StatusBadge';
 import StatusTabs from '../../components/shared/StatusTabs';
 import PanelCutDetail from '../../components/manufacturing/PanelCutDetail';
 import AssemblyDetail from '../../components/manufacturing/assembly/AssemblyDetail';
+import CompletedAuditViewer from '../../components/manufacturing/CompletedAuditViewer';
 import { router } from '../../lib/router';
 import { advanceMOOnTaskStart, advanceMOOnAllTasksComplete } from '../../lib/moLifecycle';
 import {
@@ -24,7 +25,11 @@ import {
   Scissors,
   Box,
   User,
+  RotateCcw,
 } from 'lucide-react';
+
+/** Global Completed queue (not a work center) — MOs whose Assembly work is done. */
+const COMPLETED_TAB = '__completed__';
 
 interface FabricRuleInfo {
   product_type_code: string;
@@ -82,6 +87,19 @@ interface TaskWithMO {
   line_position: string | null;
   lines: TaskLine[];
   siblingStatuses?: { code: string; status: string }[];
+  station_code?: string | null;
+  station_name?: string | null;
+}
+
+interface CompletedMoGroup {
+  moId: string;
+  moNumber: string;
+  customerName: string;
+  productName: string;
+  moStatus: string;
+  completedAt: string | null;
+  stations: { code: string; name: string; taskCount: number; completedAt: string | null }[];
+  assemblyTaskIds: string[];
 }
 
 interface WorkstationViewProps {
@@ -101,11 +119,19 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
   const { registerSubmodules, clearSubmoduleNav } = useSubmoduleNav();
   const filteredSubmodules = useFilteredMfgSubmodules();
   const [selectedCenter, setSelectedCenter] = useState<string | null>(workCenterId ?? null);
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    const qp = new URLSearchParams(window.location.search);
+    return qp.get('view') === 'completed' ? COMPLETED_TAB : (workCenterId ?? '');
+  });
+  const isCompletedView = activeTab === COMPLETED_TAB;
   const queryClient = useQueryClient();
   // Cut Optimization reads the same WorkOrderTaskLines; drop its cache so it
   // reflects completions/starts made here (refetchOnMount is disabled globally).
   const syncCutCache = useCallback(() => {
     queryClient.removeQueries({ queryKey: ['cut-pending'] });
+    queryClient.invalidateQueries({ queryKey: ['workstation-completed-mos'] });
+    queryClient.invalidateQueries({ queryKey: ['workstation-open-counts'] });
+    queryClient.invalidateQueries({ queryKey: ['workstation-completed-count'] });
   }, [queryClient]);
 
   const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
@@ -120,6 +146,7 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
   const [fabricRules, setFabricRules] = useState<FabricRuleInfo[]>([]);
   const [selectedFabricLineId, setSelectedFabricLineId] = useState<string | null>(null);
   const [startingMO, setStartingMO] = useState<string | null>(null);
+  const [reactivatingMO, setReactivatingMO] = useState<string | null>(null);
   const addNotification = useUIStore((s) => s.addNotification);
 
   useEffect(() => {
@@ -132,14 +159,20 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
   }, [registerSubmodules, clearSubmoduleNav, filteredSubmodules]);
 
   useEffect(() => {
-    if (workCenterId) setSelectedCenter(workCenterId);
+    if (workCenterId) {
+      setSelectedCenter(workCenterId);
+      setActiveTab(workCenterId);
+    }
   }, [workCenterId]);
 
   useEffect(() => {
-    if (centers.length > 0 && !selectedCenter) {
-      setSelectedCenter(centers[0].id);
+    if (centers.length === 0) return;
+    if (!selectedCenter) setSelectedCenter(centers[0].id);
+    if (!activeTab) {
+      const qp = new URLSearchParams(window.location.search);
+      setActiveTab(qp.get('view') === 'completed' ? COMPLETED_TAB : (workCenterId || centers[0].id));
     }
-  }, [centers, selectedCenter]);
+  }, [centers, selectedCenter, activeTab, workCenterId]);
 
   const fetchTasks = useCallback(async (): Promise<TaskWithMO[]> => {
     if (!selectedCenter || !activeOrganizationId) return [];
@@ -350,12 +383,220 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
   } = useQuery({
     queryKey: tasksQueryKey,
     queryFn: fetchTasks,
-    enabled: !!selectedCenter && !!activeOrganizationId,
+    enabled: !!selectedCenter && !!activeOrganizationId && !isCompletedView,
   });
 
   const refetchTasks = useCallback(async () => {
     await refetchTasksQuery();
   }, [refetchTasksQuery]);
+
+  // MOs that finished Assembly → global Completed audit queue (all stations shown per MO).
+  const fetchCompletedMos = useCallback(async (): Promise<CompletedMoGroup[]> => {
+    if (!activeOrganizationId) return [];
+    const assemblyCenterIds = centers.filter((c) => c.code === 'ASSEMBLY').map((c) => c.id);
+    if (assemblyCenterIds.length === 0) return [];
+
+    const { data: assemblyDone, error } = await supabase
+      .from('WorkOrderTasks')
+      .select('id, manufacturing_order_id, completed_at, work_center_id')
+      .eq('organization_id', activeOrganizationId)
+      .eq('deleted', false)
+      .eq('status', 'completed')
+      .in('work_center_id', assemblyCenterIds)
+      .order('completed_at', { ascending: false })
+      .limit(500);
+    if (error) throw new Error(error.message);
+    if (!assemblyDone?.length) return [];
+
+    type TaskRow = {
+      id: string;
+      manufacturing_order_id: string;
+      completed_at: string | null;
+      work_center_id: string;
+      status?: string;
+    };
+    type MoRow = {
+      id: string;
+      manufacturing_order_no: string;
+      product_name: string | null;
+      status: string;
+      sales_order_id: string | null;
+    };
+
+    const doneRows = assemblyDone as TaskRow[];
+    // Only MOs whose Assembly tasks are all completed (none still open at Assembly).
+    const moIds = [...new Set(doneRows.map((t) => t.manufacturing_order_id))];
+    const { data: openAssembly } = await supabase
+      .from('WorkOrderTasks')
+      .select('manufacturing_order_id')
+      .eq('organization_id', activeOrganizationId)
+      .eq('deleted', false)
+      .in('work_center_id', assemblyCenterIds)
+      .in('manufacturing_order_id', moIds)
+      .in('status', ['pending', 'in_progress']);
+    const stillOpen = new Set(
+      ((openAssembly ?? []) as { manufacturing_order_id: string }[]).map((r) => r.manufacturing_order_id),
+    );
+    const closedMoIds = moIds.filter((id) => !stillOpen.has(id));
+    if (closedMoIds.length === 0) return [];
+
+    const [{ data: moData }, { data: allCompletedTasks }] = await Promise.all([
+      supabase
+        .from('ManufacturingOrders')
+        .select('id, manufacturing_order_no, product_name, status, sales_order_id')
+        .in('id', closedMoIds),
+      supabase
+        .from('WorkOrderTasks')
+        .select('id, manufacturing_order_id, completed_at, work_center_id, status')
+        .eq('organization_id', activeOrganizationId)
+        .eq('deleted', false)
+        .eq('status', 'completed')
+        .in('manufacturing_order_id', closedMoIds),
+    ]);
+
+    const moRows = (moData ?? []) as MoRow[];
+    const completedRows = (allCompletedTasks ?? []) as TaskRow[];
+    const moMap = new Map(moRows.map((m) => [m.id, m]));
+    const soIds = [...new Set(moRows.map((m) => m.sales_order_id).filter(Boolean))] as string[];
+    const customerBySo: Record<string, string> = {};
+    if (soIds.length > 0) {
+      const { data: soData } = await supabase.from('SalesOrders').select('id, customer_id').in('id', soIds);
+      const soRows = (soData ?? []) as { id: string; customer_id: string | null }[];
+      const custIds = [...new Set(soRows.map((s) => s.customer_id).filter(Boolean))] as string[];
+      const custLookup: Record<string, string> = {};
+      if (custIds.length > 0) {
+        const { data: custData } = await supabase.from('DirectoryCustomers').select('id, customer_name').in('id', custIds);
+        for (const c of (custData ?? []) as { id: string; customer_name: string }[]) {
+          custLookup[c.id] = c.customer_name;
+        }
+      }
+      for (const so of soRows) {
+        if (so.customer_id) customerBySo[so.id] = custLookup[so.customer_id] ?? 'N/A';
+      }
+    }
+
+    const centerById = new Map(centers.map((c) => [c.id, c]));
+    const assemblyIdsByMo = new Map<string, string[]>();
+    for (const t of doneRows) {
+      if (!closedMoIds.includes(t.manufacturing_order_id)) continue;
+      const list = assemblyIdsByMo.get(t.manufacturing_order_id) ?? [];
+      list.push(t.id);
+      assemblyIdsByMo.set(t.manufacturing_order_id, list);
+    }
+
+    const groups: CompletedMoGroup[] = closedMoIds.map((moId) => {
+      const mo = moMap.get(moId);
+      const moTasks = completedRows.filter((t) => t.manufacturing_order_id === moId);
+      const byStation = new Map<string, { code: string; name: string; taskCount: number; completedAt: string | null }>();
+      let latest: string | null = null;
+      for (const t of moTasks) {
+        const wc = centerById.get(t.work_center_id);
+        const code = wc?.code ?? '—';
+        const name = wc?.name ?? code;
+        const cur = byStation.get(code) ?? { code, name, taskCount: 0, completedAt: null };
+        cur.taskCount += 1;
+        if (t.completed_at && (!cur.completedAt || t.completed_at > cur.completedAt)) {
+          cur.completedAt = t.completed_at;
+        }
+        byStation.set(code, cur);
+        if (t.completed_at && (!latest || t.completed_at > latest)) latest = t.completed_at;
+      }
+      const stationOrder = ['CUT-ROLL', 'CUT-PROFILE', 'PICK', 'ASSEMBLY'];
+      const stations = [...byStation.values()].sort(
+        (a, b) => stationOrder.indexOf(a.code) - stationOrder.indexOf(b.code),
+      );
+      return {
+        moId,
+        moNumber: mo?.manufacturing_order_no ?? '—',
+        customerName: mo?.sales_order_id ? (customerBySo[mo.sales_order_id] ?? 'N/A') : 'N/A',
+        productName: mo?.product_name ?? '—',
+        moStatus: mo?.status ?? '—',
+        completedAt: latest,
+        stations,
+        assemblyTaskIds: assemblyIdsByMo.get(moId) ?? [],
+      };
+    });
+
+    groups.sort((a, b) => String(b.completedAt ?? '').localeCompare(String(a.completedAt ?? '')));
+    return groups;
+  }, [activeOrganizationId, centers]);
+
+  const {
+    data: completedMos = [],
+    isLoading: loadingCompleted,
+    refetch: refetchCompleted,
+  } = useQuery({
+    queryKey: ['workstation-completed-mos', activeOrganizationId],
+    queryFn: fetchCompletedMos,
+    enabled: !!activeOrganizationId && centers.length > 0 && isCompletedView,
+    refetchOnMount: true,
+  });
+
+  const { data: completedCount = 0 } = useQuery({
+    queryKey: ['workstation-completed-count', activeOrganizationId],
+    queryFn: async () => {
+      const groups = await fetchCompletedMos();
+      return groups.length;
+    },
+    enabled: !!activeOrganizationId && centers.length > 0,
+    refetchOnMount: true,
+  });
+
+  const reactivateMO = useCallback(async (group: CompletedMoGroup) => {
+    if (group.assemblyTaskIds.length === 0) return;
+    setReactivatingMO(group.moId);
+    try {
+      const now = new Date().toISOString();
+      const { error } = await supabase
+        .from('WorkOrderTasks')
+        .update({
+          status: 'in_progress',
+          completed_at: null,
+          completed_by_user_id: null,
+          updated_at: now,
+        })
+        .in('id', group.assemblyTaskIds);
+      if (error) {
+        addNotification({ type: 'error', title: 'Reactivate failed', message: error.message });
+        return;
+      }
+
+      if (group.moStatus === 'quality_check') {
+        const { data, error: moErr } = await supabase.rpc('transition_mo_status', {
+          p_mo_id: group.moId,
+          p_new_status: 'in_production',
+          p_user_id: user?.id ?? '00000000-0000-0000-0000-000000000000',
+          p_user_name: user?.email ?? 'Workstation reopen',
+        });
+        if (moErr || !(data as { ok?: boolean } | null)?.ok) {
+          addNotification({
+            type: 'warning',
+            title: 'Tasks reopened',
+            message: (data as { error?: string } | null)?.error
+              ?? moErr?.message
+              ?? 'Assembly reopened; MO status could not be moved back to In Production.',
+          });
+        }
+      }
+
+      addNotification({
+        type: 'success',
+        title: 'Returned to Active',
+        message: `${group.moNumber} Assembly is active again.`,
+      });
+      await refetchCompleted();
+      syncCutCache();
+      // Jump to Assembly station so the operator sees it in the active queue.
+      const assembly = centers.find((c) => c.code === 'ASSEMBLY');
+      if (assembly) {
+        setSelectedCenter(assembly.id);
+        setActiveTab(assembly.id);
+        router.navigate(`/manufacturing/workstations/${assembly.id}`, false);
+      }
+    } finally {
+      setReactivatingMO(null);
+    }
+  }, [addNotification, centers, refetchCompleted, syncCutCache, user?.email, user?.id]);
 
   // Optimistically flip line/task state in the cache so the UI responds
   // instantly; the DB write happens in the background and reverts on error.
@@ -654,14 +895,30 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
   });
 
   const stationTabs = useMemo(
-    () =>
-      centers.map((wc) => ({
+    () => [
+      ...centers.map((wc) => ({
         label: wc.name,
         value: wc.id,
         count: stationOpenCounts[wc.id] || 0,
       })),
-    [centers, stationOpenCounts]
+      {
+        label: 'Completed',
+        value: COMPLETED_TAB,
+        count: completedCount || 0,
+      },
+    ],
+    [centers, stationOpenCounts, completedCount],
   );
+
+  const handleTabChange = useCallback((value: string) => {
+    setActiveTab(value);
+    if (value === COMPLETED_TAB) {
+      router.navigate('/manufacturing/workstations?view=completed', false);
+      return;
+    }
+    setSelectedCenter(value);
+    router.navigate(`/manufacturing/workstations/${value}`, false);
+  }, []);
 
   const filteredTasks = useMemo(() => {
     if (isOperator && user?.id) {
@@ -754,14 +1011,112 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
       {stationTabs.length > 0 && (
         <StatusTabs
           tabs={stationTabs}
-          activeTab={selectedCenter ?? stationTabs[0]?.value ?? ''}
-          onChange={(value) => {
-            setSelectedCenter(value);
-            router.navigate(`/manufacturing/workstations/${value}`, false);
-          }}
+          activeTab={activeTab || selectedCenter || stationTabs[0]?.value || ''}
+          onChange={handleTabChange}
         />
       )}
 
+      {isCompletedView ? (
+        <>
+          <div className="flex items-center gap-4 text-sm text-gray-500">
+            <span className="font-medium text-gray-900">Completed</span>
+            <span>{completedMos.length} MO{completedMos.length === 1 ? '' : 's'} past Assembly</span>
+            <span className="text-gray-400">Audit / reopen</span>
+          </div>
+          {loadingCompleted ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+            </div>
+          ) : completedMos.length === 0 ? (
+            <div className="rounded-lg border border-gray-200 bg-white p-8 text-center">
+              <CheckCircle2 className="h-10 w-10 text-green-400 mx-auto mb-3" />
+              <p className="text-sm text-gray-500">No completed Assembly work yet.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {completedMos.map((group) => {
+                const moExpanded = expandedMOs.has(group.moId);
+                return (
+                  <div
+                    key={group.moId}
+                    className="border border-gray-200 border-l-4 border-l-green-500 rounded-xl bg-white overflow-hidden"
+                  >
+                    <div
+                      className="flex items-center justify-between gap-4 px-5 py-3.5 hover:bg-gray-50/70 cursor-pointer"
+                      onClick={() => toggleMO(group.moId)}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        {moExpanded
+                          ? <ChevronDown className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                          : <ChevronRight className="h-4 w-4 text-gray-400 flex-shrink-0" />}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            router.navigate(`/manufacturing/manufacturing-orders/${group.moId}?tab=work-orders`);
+                          }}
+                          className="font-semibold text-sm text-primary hover:underline flex-shrink-0"
+                        >
+                          {group.moNumber}
+                        </button>
+                        <StatusBadge status={group.moStatus} type="manufacturing" size="sm" />
+                        {group.customerName && group.customerName !== 'N/A' && (
+                          <span className="text-xs text-gray-400 truncate">{group.customerName}</span>
+                        )}
+                        <span className="text-xs text-gray-500 truncate max-w-[220px]">{group.productName}</span>
+                      </div>
+                      <div className="flex items-center gap-3 flex-shrink-0">
+                        {group.completedAt && (
+                          <span className="text-[11px] text-gray-400">
+                            Done {new Date(group.completedAt).toLocaleString()}
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          disabled={reactivatingMO === group.moId}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void reactivateMO(group);
+                          }}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-amber-800 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100 disabled:opacity-60"
+                          title="Reopen Assembly and return this MO to the active queue"
+                        >
+                          {reactivatingMO === group.moId
+                            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            : <RotateCcw className="h-3.5 w-3.5" />}
+                          Return to Active
+                        </button>
+                      </div>
+                    </div>
+                    {moExpanded && (
+                      <div className="border-t border-gray-100 px-5 py-4 space-y-3 bg-gray-50/40">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-[11px] uppercase tracking-wider text-gray-400">
+                            Production history (audit viewer)
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => router.navigate(`/manufacturing/manufacturing-orders/${group.moId}?tab=work-orders`)}
+                            className="text-xs text-primary hover:underline"
+                          >
+                            Open MO Work Orders →
+                          </button>
+                        </div>
+                        <CompletedAuditViewer
+                          moId={group.moId}
+                          moNumber={group.moNumber}
+                          productName={group.productName}
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      ) : (
+      <>
       {currentCenter && (
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-4 text-sm text-gray-500">
@@ -1033,6 +1388,8 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
             );
           })}
         </div>
+      )}
+      </>
       )}
     </div>
   );

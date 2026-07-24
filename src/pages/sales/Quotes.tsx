@@ -83,7 +83,7 @@ export default function Quotes() {
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(25);
-  const [sortBy, setSortBy] = useState<'quote_no' | 'status' | 'customer_name' | 'total' | 'created_at'>('created_at');
+  const [sortBy, setSortBy] = useState<'quote_no' | 'status' | 'customer_name' | 'total' | 'updated_at' | 'created_at'>('updated_at');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [statusTab, setStatusTab] = useState(() => {
@@ -527,6 +527,11 @@ export default function Quotes() {
     result = [...result].sort((a, b) => {
       const factor = sortOrder === 'asc' ? 1 : -1;
       
+      if (sortBy === 'updated_at') {
+        const aTs = new Date(a.updated_at || a.created_at).getTime();
+        const bTs = new Date(b.updated_at || b.created_at).getTime();
+        return (aTs - bTs) * factor;
+      }
       if (sortBy === 'created_at') {
         return (new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) * factor;
       }
@@ -570,6 +575,11 @@ export default function Quotes() {
     // Sort groups using the same sortBy/sortOrder applied to the latest row.
     const factor = sortOrder === 'asc' ? 1 : -1;
     groups.sort((a, b) => {
+      if (sortBy === 'updated_at') {
+        const aTs = new Date(a.latest.updated_at || a.latest.created_at).getTime();
+        const bTs = new Date(b.latest.updated_at || b.latest.created_at).getTime();
+        return (aTs - bTs) * factor;
+      }
       if (sortBy === 'created_at') {
         return (new Date(a.latest.created_at).getTime() - new Date(b.latest.created_at).getTime()) * factor;
       }
@@ -756,9 +766,9 @@ export default function Quotes() {
                 <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">Proposal</th>
                 <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">SO #</th>
                 <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">
-                  <button onClick={() => handleSort('created_at')} className="flex items-center gap-1 hover:text-gray-900 justify-center w-full">
-                    Date
-                    {sortBy === 'created_at' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
+                  <button onClick={() => handleSort('updated_at')} className="flex items-center gap-1 hover:text-gray-900 justify-center w-full">
+                    Updated
+                    {sortBy === 'updated_at' && (sortOrder === 'asc' ? <SortAsc className="w-3 h-3" /> : <SortDesc className="w-3 h-3" />)}
                   </button>
                 </th>
                 <th className="text-center py-3 px-4 font-medium text-gray-700 text-xs">
@@ -880,7 +890,7 @@ export default function Quotes() {
                         : <span className="text-gray-400">—</span>}
                     </td>
                     <td className={`py-3 px-4 text-sm text-center ${opts.isOlder ? 'text-gray-400' : 'text-gray-600'}`}>
-                      {formatDate(quote.created_at)}
+                      {formatDate(quote.updated_at || quote.created_at)}
                     </td>
                     <td className={`py-3 px-4 text-sm font-medium text-center ${opts.isOlder ? 'text-gray-400' : 'text-gray-900'}`}>
                       {formatCurrency(quote.total)}

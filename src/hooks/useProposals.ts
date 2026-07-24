@@ -141,6 +141,7 @@ export function useProposalsList() {
           .select('id, proposal_no, version_no, status, quote_id, dealer_id, customer_id, updated_at, created_at, total_amount, subtotal_amount, discount_amount, tax_amount, created_by_user_id, archived')
           .eq('organization_id', activeOrganizationId)
           .or('deleted.is.false,deleted.is.null')
+          .order('updated_at', { ascending: false, nullsFirst: false })
           .order('created_at', { ascending: false })
           .range(from, to);
         if (effectiveDealerId) {

@@ -21,6 +21,12 @@ import {
   getCascadeOrder,
   getDefaultDependsOn,
 } from './types';
+import {
+  suggestQtyForRole,
+  getSharedRoleFamily,
+  SHARED_FAMILY_ORDER,
+  SHARED_FAMILY_LABELS,
+} from './roleQtyHints';
 
 type PlacementSection = 'cuttable' | 'drive' | 'passive' | 'shared' | 'consumable';
 
@@ -168,7 +174,18 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
       groups.push({ category_id: '__section_passive', category_name: 'PASSIVE', category_code: '__section', components: passive });
     }
     if (shared.length > 0) {
-      groups.push({ category_id: '__section_shared', category_name: 'SHARED', category_code: '__section', components: shared });
+      // Keep placement_section = shared for cut geometry, but split the table
+      // so edge brackets / intermediates / mounting clips are not one confusing bucket.
+      for (const family of SHARED_FAMILY_ORDER) {
+        const familyComps = shared.filter((c) => getSharedRoleFamily(c.component_role) === family);
+        if (familyComps.length === 0) continue;
+        groups.push({
+          category_id: `__section_shared_${family}`,
+          category_name: SHARED_FAMILY_LABELS[family],
+          category_code: '__section',
+          components: familyComps,
+        });
+      }
     }
     if (consumable.length > 0) {
       groups.push({ category_id: '__section_consumable', category_name: 'CONSUMIBLES', category_code: '__section', components: consumable });
@@ -464,12 +481,22 @@ export function useBOMTemplateForm(editingTemplateId: string | null) {
       catalogUom === 'm' ||
       catalogUom === 'm2';
     const inferredSection = inferPlacementSection(autoRole, isCuttableItem);
+    const roleForSuggest = autoRole || '';
+    const qtySuggest = suggestQtyForRole(roleForSuggest, sel);
     setFormData(prev => ({
       ...prev,
       component_item_id: itemId,
       component_role: autoRole || prev.component_role,
       uom: catalogUom,
       placement_section: inferredSection,
+      ...(qtySuggest
+        ? {
+            qty_type: qtySuggest.qty_type,
+            qty_value: qtySuggest.qty_value,
+            qty_spacing_mm: qtySuggest.qty_spacing_mm,
+            qty_min: qtySuggest.qty_min,
+          }
+        : {}),
     }));
     setComponentSearchTerm(sel.sku || '');
     setShowComponentDropdown(false);

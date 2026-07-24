@@ -747,9 +747,12 @@ function App() {
         setCurrentPage('login');
       }
     });
+    // Legacy: standalone Work Orders list is retired. WO management lives on the MO
+    // "Work Orders" tab; shop-floor execution is Workstation.
     router.addRoute('/manufacturing/work-orders', () => {
       if (isAuthenticated) {
-        setCurrentPage('manufacturing');
+        window.history.replaceState({}, '', '/manufacturing/workstations');
+        setCurrentPage('workstations');
       } else {
         setCurrentPage('login');
       }
@@ -819,23 +822,19 @@ function App() {
         setCurrentPage('login');
       }
     });
-    router.addRoute('/manufacturing/work-orders', () => {
-      if (isAuthenticated) {
-        setCurrentPage('work-orders-list');
-      } else {
-        setCurrentPage('login');
-      }
-    });
     router.addRoute('/manufacturing/work-orders/:id', () => {
       if (isAuthenticated) {
         const path = window.location.pathname;
         const match = path.match(/\/manufacturing\/work-orders\/([^/]+)/);
         const moId = match ? match[1] : null;
         if (moId) {
-          sessionStorage.setItem('currentWorkOrderMoId', moId);
-          setCurrentPage('work-order-detail');
+          // Deep link to the MO Work Orders tab (operators / progress), not a separate module.
+          window.history.replaceState({}, '', `/manufacturing/manufacturing-orders/${moId}?tab=work-orders`);
+          sessionStorage.setItem('currentManufacturingOrderId', moId);
+          setCurrentPage('manufacturing-order-detail');
         } else {
-          setCurrentPage('work-orders-list');
+          window.history.replaceState({}, '', '/manufacturing/workstations');
+          setCurrentPage('workstations');
         }
       } else {
         setCurrentPage('login');

@@ -22,7 +22,7 @@ export default function Manufacturing() {
       
       if (currentPath === '/manufacturing' || currentPath === '/manufacturing/') {
         const firstTab = filteredSubmodules[0];
-        router.navigate(firstTab?.href ?? '/manufacturing/work-orders');
+        router.navigate(firstTab?.href ?? '/manufacturing/manufacturing-orders');
       }
     }
     

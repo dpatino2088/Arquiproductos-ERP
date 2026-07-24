@@ -120,6 +120,7 @@ export function useSalesOrders(dealerId?: string | null) {
       }
 
       const { data, error: queryError } = await query
+        .order('updated_at', { ascending: false, nullsFirst: false })
         .order('created_at', { ascending: false });
 
       if (queryError) throw queryError;

@@ -755,10 +755,10 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
           </div>
           <button
             type="button"
-            onClick={() => router.navigate(`/manufacturing/work-orders/${moId}`)}
+            onClick={() => router.navigate('/manufacturing/workstations')}
             className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline flex-shrink-0"
           >
-            Open in Work Orders <ArrowUpRight className="w-3 h-3" />
+            Open in Workstation <ArrowUpRight className="w-3 h-3" />
           </button>
         </div>
 

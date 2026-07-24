@@ -131,12 +131,14 @@ export default function CutOptimization() {
   const [focusedSku, setFocusedSku] = useState<string | null>(null);
   const addNotification = useUIStore((s) => s.addNotification);
   const returnToWo = getReturnToFromCurrentQuery();
-  const backToWoDetail = !!returnToWo?.match(/^\/manufacturing\/work-orders\/[^/]+/);
+  const backToWoDetail = !!returnToWo?.match(
+    /^\/manufacturing\/(work-orders|manufacturing-orders)\/[^/]+/,
+  );
 
   const handleBack = useCallback(() => {
     navigateBackContextual(router, {
       queryReturnTo: getReturnToFromCurrentQuery(),
-      fallback: '/manufacturing/work-orders',
+      fallback: '/manufacturing/workstations',
     });
   }, []);
 

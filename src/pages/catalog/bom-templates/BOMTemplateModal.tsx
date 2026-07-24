@@ -20,6 +20,12 @@ import BOMEngineeringPopup from './BOMEngineeringPopup';
 import CutBreakdownPanel from './CutBreakdownPanel';
 import type { BOMComponentDraft } from './types';
 import {
+  suggestQtyForRole,
+  bracketSoldAsFromQty,
+  qtyForBracketSoldAs,
+  type BracketSoldAs,
+} from './roleQtyHints';
+import {
   derivePreviewOptionGroups,
   filterBreakdownForAssemble,
   filterComponentsForAssemble,
@@ -374,14 +380,22 @@ export default function BOMTemplateModal({
 
   const getQtyDisplay = (comp: BOMComponentDraft) => {
     const pp = comp.per_panel ? ' ⧫PP' : '';
-    if (comp.qty_type === 'fixed') return `${comp.qty_value ?? '—'}${pp}`;
+    const role = normalizeRole(comp.component_role || '') || '';
+    if (comp.qty_type === 'fixed') {
+      if (role === 'bracket' || role === 'brackets') {
+        return Number(comp.qty_value) === 1
+          ? `1 kit (L+R)${pp}`
+          : `${comp.qty_value ?? 2} pcs (L+R)${pp}`;
+      }
+      return `${comp.qty_value ?? '—'}${pp}`;
+    }
     if (comp.qty_type === 'per_spacing') {
       const sp = comp.qty_spacing_mm ?? 500;
       const min = comp.qty_min;
       return `Every ${sp}mm${min != null ? ` (min ${min})` : ''}${pp}`;
     }
     if (comp.qty_type === 'per_joint') {
-      return `Per Joint ×${comp.qty_value ?? 1}`;
+      return `N−1 joints ×${comp.qty_value ?? 1}${pp}`;
     }
     const label = QTY_TYPE_LABELS[comp.qty_type || 'fixed'] || comp.qty_type || '—';
     const mult = comp.qty_value != null && comp.qty_value !== 1 ? ` x${comp.qty_value}` : '';
@@ -832,12 +846,25 @@ export default function BOMTemplateModal({
                       <Label>Role</Label>
                       <SelectShadcn
                         value={form.formData.component_role || 'none'}
-                        onValueChange={(v) =>
+                        onValueChange={(v) => {
+                          const nextRole = v === 'none' ? '' : v;
+                          const item = form.formData.component_item_id
+                            ? form.catalogItems.find((i) => i.id === form.formData.component_item_id)
+                            : null;
+                          const qtySuggest = suggestQtyForRole(nextRole, item);
                           form.setFormData((prev) => ({
                             ...prev,
-                            component_role: v === 'none' ? '' : v,
-                          }))
-                        }
+                            component_role: nextRole,
+                            ...(qtySuggest
+                              ? {
+                                  qty_type: qtySuggest.qty_type,
+                                  qty_value: qtySuggest.qty_value,
+                                  qty_spacing_mm: qtySuggest.qty_spacing_mm,
+                                  qty_min: qtySuggest.qty_min,
+                                }
+                              : {}),
+                          }));
+                        }}
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="Select role" />
@@ -846,7 +873,7 @@ export default function BOMTemplateModal({
                           <SelectItem value="none">— None —</SelectItem>
                           {getAllRoleOptions().map((opt) => (
                             <SelectItem key={opt.value} value={opt.value}>
-                              {opt.label}
+                              {getRoleLabel(opt.value)}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -928,12 +955,43 @@ export default function BOMTemplateModal({
                           }}
                         />
                         {['bracket', 'brackets'].includes(String(form.formData.component_role || '').toLowerCase()) && (
-                          <p className="mt-1 text-[11px] text-gray-500 leading-snug">
-                            Catalog Δ = 1 piece. Left+right pair → Qty <span className="font-medium">2</span>
-                            {' '}(5 mm/side). A sold-as-1 kit of 2 also uses Qty 2 for cut
-                            {' '}(preview treats Qty 1 as that pair).
-                          </p>
+                          <div className="mt-2 space-y-1.5">
+                            <Label className="text-[11px] text-gray-600">Sold as (consumption)</Label>
+                            <SelectShadcn
+                              value={bracketSoldAsFromQty(form.formData.qty_value)}
+                              onValueChange={(v) => {
+                                const soldAs = v as BracketSoldAs;
+                                form.setFormData((prev) => ({
+                                  ...prev,
+                                  qty_type: 'fixed',
+                                  qty_value: qtyForBracketSoldAs(soldAs),
+                                }));
+                              }}
+                            >
+                              <SelectTrigger className="h-8 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="individual">Individual pieces → Qty 2 (L + R)</SelectItem>
+                                <SelectItem value="pair_kit">Pair / kit → Qty 1 (covers L+R)</SelectItem>
+                              </SelectContent>
+                            </SelectShadcn>
+                            <p className="text-[11px] text-gray-500 leading-snug">
+                              Qty is how many <span className="font-medium">SKU units</span> this product consumes.
+                              Cut still uses both ends (Δ per piece from catalog). Do not put Qty 2 on a kit
+                              or you will double consumption.
+                            </p>
+                          </div>
                         )}
+                        {(() => {
+                          const hint = suggestQtyForRole(
+                            form.formData.component_role,
+                            selectedComponentItem,
+                          )?.hint;
+                          const role = String(form.formData.component_role || '').toLowerCase();
+                          if (!hint || role === 'bracket' || role === 'brackets') return null;
+                          return <p className="mt-1 text-[11px] text-gray-500 leading-snug">{hint}</p>;
+                        })()}
                       </div>
                       <div>
                         <Label>UOM</Label>
@@ -945,6 +1003,12 @@ export default function BOMTemplateModal({
                       </div>
                     </div>
                   )}
+                  {(form.formData.qty_type === 'per_joint' || form.formData.qty_type === 'per_spacing') && (() => {
+                    const hint = suggestQtyForRole(form.formData.component_role, selectedComponentItem)?.hint;
+                    return hint ? (
+                      <p className="text-[11px] text-gray-500 leading-snug -mt-2">{hint}</p>
+                    ) : null;
+                  })()}
                   {(form.formData.qty_type === 'per_width' || form.formData.qty_type === 'per_height') && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>

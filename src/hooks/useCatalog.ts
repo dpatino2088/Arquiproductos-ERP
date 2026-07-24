@@ -217,6 +217,11 @@ export function useCatalogItems(
             purchase_mode: (item.purchase_mode as CatalogItem['purchase_mode']) ?? null,
             stock_basis: (item.stock_basis as CatalogItem['stock_basis']) ?? null,
             purchase_uom: item.purchase_uom ?? item.purchase_unit ?? null,
+            purchase_unit: item.purchase_unit ?? item.purchase_uom ?? null,
+            units_per_purchase_unit:
+              item.units_per_purchase_unit != null && Number(item.units_per_purchase_unit) > 0
+                ? Number(item.units_per_purchase_unit)
+                : 1,
             msrp: finalMsrp, cost_price: item.cost_exw || item.cost_price || 0, unit_price: salePrice,
             delta_x_mm: item.delta_x_mm ?? null, delta_y_mm: item.delta_y_mm ?? null,
             is_active: item.is_active !== undefined && item.is_active !== null ? Boolean(item.is_active) : (item.active !== undefined && item.active !== null ? Boolean(item.active) : true),

@@ -498,8 +498,11 @@ export default function WorkOrderDetail({ moId }: WorkOrderDetailProps) {
 
   return (
     <div className="py-6 px-6">
-      <button onClick={() => router.navigate('/manufacturing/work-orders')} className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 mb-4">
-        <ArrowLeft className="w-4 h-4" /> Back to Work Orders
+      <button
+        onClick={() => router.navigate(`/manufacturing/manufacturing-orders/${moId}?tab=work-orders`)}
+        className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 mb-4"
+      >
+        <ArrowLeft className="w-4 h-4" /> Back to MO Work Orders
       </button>
 
       {/* Header */}

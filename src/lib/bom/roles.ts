@@ -22,6 +22,7 @@ export const CANONICAL_COMPONENT_ROLES = [
   'top_rail',
   'headbox',
   'bracket',
+  'intermediate_bracket',
   'idler',
   'drive',
   'motor',
@@ -50,6 +51,7 @@ export const CANONICAL_COMPONENT_ROLES = [
   'spring',
   'stopper',
   'mounting_clip',
+  'intermediate_connector',
   'end_plug', // Aunque no era canónico originalmente, se requiere como child role
 ] as const;
 
@@ -194,22 +196,30 @@ export function isValidSubRole(role: string | null | undefined, subRole: string 
  * Get display label for a role (Title Case)
  * Handles both canonical and legacy roles gracefully
  */
+const ROLE_DISPLAY_LABELS: Record<string, string> = {
+  bracket: 'Edge Bracket (L/R)',
+  intermediate_bracket: 'Intermediate Bracket (N−1)',
+  intermediate_connector: 'Intermediate Connector',
+  mounting_clip: 'Mounting Clip (spacing)',
+};
+
 export function getRoleLabel(role: string | null | undefined): string {
   if (!role) return '— None —';
   const normalized = normalizeRole(role);
   if (!normalized) return '— None —';
-  
-  // Check if it's a canonical role
-  const isCanonical = (CANONICAL_COMPONENT_ROLES as readonly string[]).includes(normalized);
-  
+
+  if (ROLE_DISPLAY_LABELS[normalized]) return ROLE_DISPLAY_LABELS[normalized];
+
+  // Prefer DB label when available
+  const cached = getCachedRoles();
+  const dbLabel = cached?.find((r) => r.role_code === normalized)?.label;
+  if (dbLabel) return dbLabel;
+
   // Convert snake_case to Title Case
-  const label = normalized
+  return normalized
     .split('_')
     .map(word => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ');
-  
-  // Show label without legacy suffix (use exact names in UI)
-  return label;
 }
 
 /**

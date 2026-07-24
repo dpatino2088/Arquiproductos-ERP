@@ -100,7 +100,7 @@ const MODULE_TABS: Record<string, { label: string; href: string }[]> = {
   ],
   '/manufacturing': [
     { label: 'Manufacturing Orders', href: '/manufacturing/manufacturing-orders' },
-    { label: 'Work Orders', href: '/manufacturing/work-orders' },
+    { label: 'Workstation', href: '/manufacturing/workstations' },
     { label: 'Calendar', href: '/manufacturing/calendar' },
     { label: 'Cut Optimization', href: '/manufacturing/cut-optimization' },
     { label: 'Finished Goods', href: '/manufacturing/finished-goods' },
@@ -191,7 +191,7 @@ function getCatalogTabs(can: (permissionCode: string) => boolean): { label: stri
 function getManufacturingTabs(can: (permissionCode: string) => boolean): { label: string; href: string }[] {
   const tabs: { label: string; href: string }[] = [];
   if (can('manufacturing.mo.read')) tabs.push({ label: 'Manufacturing Orders', href: '/manufacturing/manufacturing-orders' });
-  if (can('manufacturing.wo.read')) tabs.push({ label: 'Work Orders', href: '/manufacturing/work-orders' });
+  if (can('manufacturing.wo.read')) tabs.push({ label: 'Workstation', href: '/manufacturing/workstations' });
   if (can('manufacturing.calendar.read')) tabs.push({ label: 'Calendar', href: '/manufacturing/calendar' });
   if (can('manufacturing.cutopt.read') || can('manufacturing.wo.read')) {
     tabs.push({ label: 'Cut Optimization', href: '/manufacturing/cut-optimization' });
@@ -464,7 +464,20 @@ function Layout({ children }: LayoutProps) {
     } else if (route.startsWith('/inventory')) {
       setLastRouteForModule('/inventory', route);
     } else if (route.startsWith('/manufacturing')) {
-      setLastRouteForModule('/manufacturing', route);
+      // Retired standalone Work Orders list — never persist it.
+      if (route === '/manufacturing/work-orders' || route.startsWith('/manufacturing/work-orders?')) {
+        // skip
+      } else {
+        const moMatch = route.match(/^\/manufacturing\/work-orders\/([^/?#]+)/);
+        if (moMatch) {
+          setLastRouteForModule(
+            '/manufacturing',
+            `/manufacturing/manufacturing-orders/${moMatch[1]}?tab=work-orders`,
+          );
+        } else {
+          setLastRouteForModule('/manufacturing', route);
+        }
+      }
     } else if (route.startsWith('/financials')) {
       setLastRouteForModule('/financials', route);
     } else if (route.startsWith('/accounting')) {
@@ -866,7 +879,12 @@ function Layout({ children }: LayoutProps) {
       setCurrentRoute(actualPath);
     } else if (path === '/manufacturing') {
       const lastRoute = getLastRouteForModule('/manufacturing');
-      const actualPath = lastRoute || '/manufacturing/manufacturing-orders';
+      // Retired standalone Work Orders list — never restore it as the module landing.
+      const safeLast =
+        lastRoute && !lastRoute.startsWith('/manufacturing/work-orders')
+          ? lastRoute
+          : null;
+      const actualPath = safeLast || '/manufacturing/manufacturing-orders';
       router.navigate(actualPath);
       setCurrentRoute(actualPath);
     } else if (path === '/financials') {

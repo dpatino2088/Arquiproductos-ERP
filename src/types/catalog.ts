@@ -72,6 +72,8 @@ export interface CatalogItem {
   purchase_mode?: PurchaseMode | null; // v2: how the item is purchased from vendor
   stock_basis?: StockBasis | null; // v2: internal stock basis used by inventory
   purchase_uom?: string | null; // v2: vendor-facing unit used for purchase qty input
+  purchase_unit?: string | null; // DB column alias of purchase packaging unit
+  units_per_purchase_unit?: number | null; // pieces (or m) inside one purchase_unit
   moq?: number | null; // Minimum order quantity in purchase_unit
   default_margin_pct?: number | null; // Default margin percentage for MSRP calculation
   msrp?: number | null; // Manufacturer's Suggested Retail Price
