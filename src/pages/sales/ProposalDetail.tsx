@@ -1521,13 +1521,33 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
         if (line.line_type === 'custom') {
           const qty = Number(line.qty) || 0;
           const up = Number(line.unit_price) || 0;
+          const isMtm = line.custom_category === MADE_TO_MEASURE_CATEGORY;
+          const mtmPtName = isMtm && line.product_type_id
+            ? productTypeNameByCodeOrId.byId.get(line.product_type_id)
+            : null;
+          const mtmDrive =
+            isMtm && (line.drive_type === 'motor' || line.drive_type === 'motorized')
+              ? 'Motorized'
+              : isMtm && line.drive_type === 'manual'
+                ? 'Manual'
+                : null;
+          const typeTag = isMtm
+            ? [mtmPtName, mtmDrive].filter(Boolean).join(' · ') || 'Made-to-measure'
+            : (CUSTOM_CATEGORIES.find((o) => o.value === (line.custom_category ?? 'other'))?.label
+              ?? line.custom_category
+              ?? null);
           return {
             area: line.area ?? null,
             position: line.position ?? null,
-            description: (line.description || '—') + (line.custom_category ? ` (${line.custom_category})` : ''),
+            description: typeTag ? `${line.description || '—'} (${typeTag})` : (line.description || '—'),
             qty,
             unit_price: up,
             line_total: lineTotal,
+            product_type: typeTag,
+            drive_type: isMtm ? (line.drive_type ?? null) : null,
+            dimensions: isMtm && line.width_m != null && line.height_m != null
+              ? `${Math.round(Number(line.width_m) * 1000)} × ${Math.round(Number(line.height_m) * 1000)}`
+              : null,
           };
         }
         const snapFrozen = line.quote_line_snapshot;
@@ -1878,18 +1898,35 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
 
       const formLines: MeasurementFormLine[] = displayLines.map((line) => {
         if (line.line_type === 'custom') {
+          const isMtm = line.custom_category === MADE_TO_MEASURE_CATEGORY;
+          const mtmPtName = isMtm && line.product_type_id
+            ? productTypeNameByCodeOrId.byId.get(line.product_type_id)
+            : null;
+          const mtmDrive =
+            isMtm && (line.drive_type === 'motor' || line.drive_type === 'motorized')
+              ? 'Motorized'
+              : isMtm && line.drive_type === 'manual'
+                ? 'Manual'
+                : null;
+          const productTypeLabel = isMtm
+            ? [mtmPtName, mtmDrive].filter(Boolean).join(' · ') || 'Made-to-measure'
+            : (CUSTOM_CATEGORIES.find((o) => o.value === (line.custom_category ?? 'other'))?.label
+              ?? line.custom_category
+              ?? 'Custom');
           return {
             area: line.area ?? null,
             position: line.position ?? null,
-            product_type: line.custom_category ?? 'Custom',
+            product_type: productTypeLabel,
             collection_name: null,
             variant_name: null,
             description: line.description ?? null,
             qty: Number(line.qty) || 1,
-            width_m: null,
-            height_m: null,
-            dimensions_source: null,
-            drive_type: null,
+            width_m: isMtm ? (line.width_m ?? null) : null,
+            height_m: isMtm ? (line.height_m ?? null) : null,
+            dimensions_source: isMtm
+              ? { width_m: line.width_m ?? null, height_m: line.height_m ?? null }
+              : null,
+            drive_type: isMtm ? (line.drive_type ?? null) : null,
             drive_side: null,
             opening_direction: null,
             installation_type: null,
@@ -2897,13 +2934,13 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                             disabled={contentReadOnly}
                           >
                             <span className="text-sm text-gray-900">{line.description || '—'}</span>
-                            <span className="text-xs text-gray-500">
-                              {CUSTOM_CATEGORIES.find((o) => o.value === (line.custom_category ?? 'other'))?.label ?? 'Other'}
-                            </span>
-                            {line.custom_category === MADE_TO_MEASURE_CATEGORY && line.width_m != null && line.height_m != null && (
+                            {line.custom_category === MADE_TO_MEASURE_CATEGORY && line.width_m != null && line.height_m != null ? (
                               <span className="text-xs text-gray-500">
                                 {Math.round(Number(line.width_m) * 1000)} × {Math.round(Number(line.height_m) * 1000)}
-                                {line.drive_type === 'motor' ? ' · Motorized' : line.drive_type === 'manual' ? ' · Manual' : ''}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-gray-500">
+                                {CUSTOM_CATEGORIES.find((o) => o.value === (line.custom_category ?? 'other'))?.label ?? 'Other'}
                               </span>
                             )}
                           </button>
@@ -2916,7 +2953,28 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                             const ptName = (qlInfo?.product_type_id && productTypeNameByCodeOrId.byId.get(qlInfo.product_type_id)) ?? (ptRaw && productTypeNameByCodeOrId.byCode.get(ptRaw.trim().toLowerCase())) ?? ptRaw;
                             return ptName ?? '—';
                           })()
-                        : (
+                        : line.custom_category === MADE_TO_MEASURE_CATEGORY
+                          ? (() => {
+                              const ptName = line.product_type_id
+                                ? productTypeNameByCodeOrId.byId.get(line.product_type_id)
+                                : null;
+                              const driveLabel =
+                                line.drive_type === 'motor' || line.drive_type === 'motorized'
+                                  ? 'Motorized'
+                                  : line.drive_type === 'manual'
+                                    ? 'Manual'
+                                    : null;
+                              if (!ptName && !driveLabel) {
+                                return <span className="text-gray-700">Made-to-measure</span>;
+                              }
+                              return (
+                                <span className="text-gray-700 flex flex-col gap-0.5 leading-tight">
+                                  {ptName ? <span>{ptName}</span> : null}
+                                  {driveLabel ? <span className="text-xs text-gray-500">{driveLabel}</span> : null}
+                                </span>
+                              );
+                            })()
+                          : (
                           <span className="text-gray-700">
                             {CUSTOM_CATEGORIES.find((o) => o.value === (line.custom_category ?? 'other'))?.label ?? 'Other'}
                           </span>

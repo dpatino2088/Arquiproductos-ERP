@@ -106,16 +106,20 @@ export function useQuotes(dealerId?: string | null) {
   const { userType } = useAccessContext();
   const selectedDealerId = dealerId ?? effectiveDealerId ?? activeDealerId;
   const fetchQuotesRef = useRef<(signal?: AbortSignal) => Promise<void>>(null!);
+  const fetchIdRef = useRef(0);
+  /** Wait for org + ActingAs hydration before fetching (avoids empty flash / sticky stale dealer). */
+  const isScopeReady = !!activeOrganizationId && (userType !== 'internal' || hasHydrated);
 
   const fetchQuotes = useCallback(async (signal?: AbortSignal) => {
-    if (!activeOrganizationId) {
-      setLoading(false);
-      setQuotes([]);
+    if (!activeOrganizationId || !isScopeReady) {
+      // Keep loading until org/dealer scope is ready — do not flash empty state.
+      setLoading(true);
       setError(null);
       return;
     }
     if (signal?.aborted) return;
 
+    const thisFetchId = ++fetchIdRef.current;
     setLoading(true);
     setError(null);
 
@@ -127,7 +131,7 @@ export function useQuotes(dealerId?: string | null) {
           userType,
           activeDealerId: null,
         });
-        if (signal?.aborted) return;
+        if (signal?.aborted || thisFetchId !== fetchIdRef.current) return;
         effectiveDealerId = effective.dealerId;
         if (effectiveDealerId == null) {
           setQuotes([]);
@@ -154,8 +158,10 @@ export function useQuotes(dealerId?: string | null) {
       if (signal?.aborted) return;
 
       if (!quotesData || quotesData.length === 0) {
-        setQuotes([]);
-        setLoading(false);
+        if (thisFetchId === fetchIdRef.current) {
+          setQuotes([]);
+          setLoading(false);
+        }
         return;
       }
 
@@ -163,7 +169,7 @@ export function useQuotes(dealerId?: string | null) {
         .map((q: any) => q.created_by_user_id)
         .filter((id: any): id is string => !!id);
       const appUsersMap = await getAppUsersDisplayNames(createdByUserIds);
-      if (signal?.aborted) return;
+      if (signal?.aborted || thisFetchId !== fetchIdRef.current) return;
 
       const customerIds = [...new Set(
         quotesData.map((q: any) => q.customer_id).filter((id: any): id is string => !!id)
@@ -262,17 +268,20 @@ export function useQuotes(dealerId?: string | null) {
         };
       });
 
+      if (thisFetchId !== fetchIdRef.current) return;
       setQuotes(enrichedQuotes as QuoteListItem[]);
     } catch (err: any) {
-      if (err?.name === 'AbortError') return;
+      if (err?.name === 'AbortError' || thisFetchId !== fetchIdRef.current) return;
       const errorMessage = err instanceof Error ? err.message : 'Error loading quotes';
       console.error('[useQuotes] Error:', errorMessage);
       setError(errorMessage);
       setQuotes([]);
     } finally {
-      setLoading(false);
+      if (thisFetchId === fetchIdRef.current && !signal?.aborted) {
+        setLoading(false);
+      }
     }
-  }, [activeOrganizationId, userType, selectedDealerId]);
+  }, [activeOrganizationId, userType, selectedDealerId, isScopeReady]);
 
   fetchQuotesRef.current = fetchQuotes;
 
@@ -287,7 +296,7 @@ export function useQuotes(dealerId?: string | null) {
     return () => {
       ctrl.abort();
     };
-  }, [scopeKey, userType]);
+  }, [scopeKey, userType, isScopeReady]);
 
   return { quotes, loading, error, refetch };
 }

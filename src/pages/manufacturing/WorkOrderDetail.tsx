@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '../../lib/supabase/client';
 import { formatDate } from '../../lib/utils';
 import { router } from '../../lib/router';
+import { withReturnTo } from '../../lib/navigation/returnTo';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useFilteredMfgSubmodules } from './manufacturingSubmodules';
 import { useWorkOrderTasks, type WorkOrderTask } from '../../hooks/useWorkOrderTasks';
@@ -188,7 +189,8 @@ function StationCard({ task, onToggleLine, onBulkToggleLines, onStatusChange, mo
                 type="button"
                 onClick={() => {
                   const optimizeMode = stationCode === 'CUT-ROLL' ? 'fabric' : 'profiles';
-                  router.navigate(`/manufacturing/cut-optimization?mode=${optimizeMode}`);
+                  // Preserve the current WO detail so Cut Optimization can return here.
+                  router.navigate(withReturnTo(`/manufacturing/cut-optimization?mode=${optimizeMode}`));
                 }}
                 className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100"
               >

@@ -101,16 +101,18 @@ export function useProposalsList() {
   const { scopeKey, activeDealerId, effectiveDealerId: scopeEffectiveDealerId, hasHydrated } = useDealerScope();
   const { userType } = useAccessContext();
   const fetchListRef = useRef<(signal?: AbortSignal) => Promise<void>>(null!);
+  const fetchIdRef = useRef(0);
+  const isScopeReady = !!activeOrganizationId && (userType !== 'internal' || hasHydrated);
 
   const fetchList = useCallback(async (signal?: AbortSignal) => {
-    if (!activeOrganizationId) {
-      setList([]);
-      setLoading(false);
+    if (!activeOrganizationId || !isScopeReady) {
+      setLoading(true);
       setError(null);
       return;
     }
     if (signal?.aborted) return;
 
+    const thisFetchId = ++fetchIdRef.current;
     setLoading(true);
     setError(null);
 
@@ -122,7 +124,7 @@ export function useProposalsList() {
           userType,
           activeDealerId: null,
         });
-        if (signal?.aborted) return;
+        if (signal?.aborted || thisFetchId !== fetchIdRef.current) return;
         effectiveDealerId = effective.dealerId;
         if (effectiveDealerId == null) {
           setList([]);
@@ -258,15 +260,18 @@ export function useProposalsList() {
         const customerId = r.customer_id ?? q?.customer_id;
         r.customer_name = customerId ? customerMap.get(customerId) : undefined;
       });
+      if (thisFetchId !== fetchIdRef.current) return;
       setList(rows);
     } catch (err: any) {
-      if (err?.name === 'AbortError') return;
+      if (err?.name === 'AbortError' || thisFetchId !== fetchIdRef.current) return;
       setError(err?.message || 'Error loading proposals');
       setList([]);
     } finally {
-      setLoading(false);
+      if (thisFetchId === fetchIdRef.current && !signal?.aborted) {
+        setLoading(false);
+      }
     }
-  }, [activeOrganizationId, userType, activeDealerId, scopeEffectiveDealerId]);
+  }, [activeOrganizationId, userType, activeDealerId, scopeEffectiveDealerId, isScopeReady]);
 
   fetchListRef.current = fetchList;
 
@@ -281,7 +286,7 @@ export function useProposalsList() {
     return () => {
       ctrl.abort();
     };
-  }, [scopeKey, userType]);
+  }, [scopeKey, userType, isScopeReady]);
 
   const deleteProposal = useCallback(
     async (id: string) => {

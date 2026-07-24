@@ -7,6 +7,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { useCurrentOrgRole } from '../../hooks/useCurrentOrgRole';
 import { useFilteredMfgSubmodules } from './manufacturingSubmodules';
 import { router } from '../../lib/router';
+import { getReturnToFromCurrentQuery, navigateBackContextual } from '../../lib/navigation/returnTo';
 import { useUIStore } from '../../stores/ui-store';
 import CutPlanVisualizer from '../../components/manufacturing/CutPlanVisualizer';
 import RollCutVisualizer from '../../components/manufacturing/RollCutVisualizer';
@@ -129,6 +130,15 @@ export default function CutOptimization() {
   const [markingAll, setMarkingAll] = useState(false);
   const [focusedSku, setFocusedSku] = useState<string | null>(null);
   const addNotification = useUIStore((s) => s.addNotification);
+  const returnToWo = getReturnToFromCurrentQuery();
+  const backToWoDetail = !!returnToWo?.match(/^\/manufacturing\/work-orders\/[^/]+/);
+
+  const handleBack = useCallback(() => {
+    navigateBackContextual(router, {
+      queryReturnTo: getReturnToFromCurrentQuery(),
+      fallback: '/manufacturing/work-orders',
+    });
+  }, []);
 
   useEffect(() => {
     const qp = new URLSearchParams(window.location.search);
@@ -1205,8 +1215,8 @@ export default function CutOptimization() {
 
   return (
     <div className="py-6 px-6 space-y-6">
-      <button onClick={() => router.navigate('/manufacturing/work-orders')} className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700">
-        <ArrowLeft className="w-4 h-4" /> Back to Work Orders
+      <button onClick={handleBack} className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700">
+        <ArrowLeft className="w-4 h-4" /> {backToWoDetail ? 'Back to Work Order' : 'Back to Work Orders'}
       </button>
 
       {/* Header */}

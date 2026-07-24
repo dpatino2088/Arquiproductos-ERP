@@ -9,6 +9,7 @@ import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useFilteredMfgSubmodules } from './manufacturingSubmodules';
 import { useUIStore } from '../../stores/ui-store';
 import StatusBadge from '../../components/shared/StatusBadge';
+import StatusTabs from '../../components/shared/StatusTabs';
 import PanelCutDetail from '../../components/manufacturing/PanelCutDetail';
 import AssemblyDetail from '../../components/manufacturing/assembly/AssemblyDetail';
 import { router } from '../../lib/router';
@@ -629,6 +630,39 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
   const currentCenter = centers.find((c) => c.id === selectedCenter);
   const isAssemblyStation = currentCenter?.code === 'ASSEMBLY';
 
+  // Open-task counts per station for the tab bar badges.
+  const { data: stationOpenCounts = {} } = useQuery({
+    queryKey: ['workstation-open-counts', activeOrganizationId],
+    queryFn: async (): Promise<Record<string, number>> => {
+      if (!activeOrganizationId) return {};
+      const { data, error } = await supabase
+        .from('WorkOrderTasks')
+        .select('work_center_id')
+        .eq('organization_id', activeOrganizationId)
+        .in('status', ['pending', 'in_progress']);
+      if (error) throw error;
+      const counts: Record<string, number> = {};
+      for (const row of data ?? []) {
+        const id = (row as { work_center_id?: string | null }).work_center_id;
+        if (!id) continue;
+        counts[id] = (counts[id] || 0) + 1;
+      }
+      return counts;
+    },
+    enabled: !!activeOrganizationId && centers.length > 0,
+    refetchOnMount: true,
+  });
+
+  const stationTabs = useMemo(
+    () =>
+      centers.map((wc) => ({
+        label: wc.name,
+        value: wc.id,
+        count: stationOpenCounts[wc.id] || 0,
+      })),
+    [centers, stationOpenCounts]
+  );
+
   const filteredTasks = useMemo(() => {
     if (isOperator && user?.id) {
       return tasks.filter((t) => t.assigned_to_user_id === user.id);
@@ -717,25 +751,16 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
         </div>
       </div>
 
-      <div className="flex gap-2 flex-wrap">
-        {centers.map((wc) => (
-          <button
-            key={wc.id}
-            type="button"
-            onClick={() => {
-              setSelectedCenter(wc.id);
-              router.navigate(`/manufacturing/workstations/${wc.id}`, false);
-            }}
-            className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
-              selectedCenter === wc.id
-                ? 'bg-primary text-white border-primary'
-                : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
-            }`}
-          >
-            {wc.name}
-          </button>
-        ))}
-      </div>
+      {stationTabs.length > 0 && (
+        <StatusTabs
+          tabs={stationTabs}
+          activeTab={selectedCenter ?? stationTabs[0]?.value ?? ''}
+          onChange={(value) => {
+            setSelectedCenter(value);
+            router.navigate(`/manufacturing/workstations/${value}`, false);
+          }}
+        />
+      )}
 
       {currentCenter && (
         <div className="flex items-center justify-between gap-4">

@@ -21,11 +21,19 @@ export function useDealerScope() {
     const orgId = activeOrganizationId ?? 'none';
     const lastKnownOrgId = typeof window !== 'undefined' ? localStorage.getItem(LAST_ACTIVE_ORG_KEY) : null;
     const lastKnownDealerId = typeof window !== 'undefined' ? localStorage.getItem(LAST_ACTIVE_DEALER_KEY) : null;
-    const useOptimistic = activeDealerId == null && lastKnownOrgId != null && lastKnownOrgId === activeOrganizationId && lastKnownDealerId != null && lastKnownDealerId !== '';
+    // Optimistic dealer only while ActingAs is still hydrating. After hydrate,
+    // activeDealerId === null means "All dealers" and must not keep a stale localStorage dealer.
+    const useOptimistic =
+      !hasHydrated &&
+      activeDealerId == null &&
+      lastKnownOrgId != null &&
+      lastKnownOrgId === activeOrganizationId &&
+      lastKnownDealerId != null &&
+      lastKnownDealerId !== '';
     const effective = activeDealerId ?? (useOptimistic ? lastKnownDealerId : null) ?? null;
     const key = `${orgId}:${effective ?? 'all'}`;
     return { effectiveDealerId: effective, scopeKey: key };
-  }, [activeOrganizationId, activeDealerId]);
+  }, [activeOrganizationId, activeDealerId, hasHydrated]);
 
   return { activeDealerId, effectiveDealerId, scopeKey, hasHydrated };
 }

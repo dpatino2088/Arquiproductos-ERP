@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase/client';
 import { useOrganizationContext } from '../context/OrganizationContext';
 import { useDealerScope } from './useDealerScope';
+import { useAccessContext } from './useAccessContext';
 
 /**
  * SalesOrder shape canónico para UI
@@ -51,19 +52,22 @@ export function useSalesOrders(dealerId?: string | null) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { activeOrganizationId } = useOrganizationContext();
-  const { scopeKey, activeDealerId, effectiveDealerId: scopeEffectiveDealerId } = useDealerScope();
+  const { scopeKey, activeDealerId, effectiveDealerId: scopeEffectiveDealerId, hasHydrated } = useDealerScope();
+  const { userType } = useAccessContext();
   const effectiveDealerId = dealerId ?? scopeEffectiveDealerId ?? activeDealerId;
   const fetchSalesOrdersRef = useRef<(signal?: AbortSignal) => Promise<void>>(null!);
+  const fetchIdRef = useRef(0);
+  const isScopeReady = !!activeOrganizationId && (userType !== 'internal' || hasHydrated);
 
   const fetchSalesOrders = useCallback(async (signal?: AbortSignal) => {
-    if (!activeOrganizationId) {
-      setLoading(false);
-      setSalesOrders([]);
+    if (!activeOrganizationId || !isScopeReady) {
+      setLoading(true);
       setError(null);
       return;
     }
     if (signal?.aborted) return;
 
+    const thisFetchId = ++fetchIdRef.current;
     setLoading(true);
     setError(null);
 
@@ -97,14 +101,16 @@ export function useSalesOrders(dealerId?: string | null) {
           .eq('dealer_id', effectiveDealerId)
           .eq('deleted', false);
 
-        if (signal?.aborted) return;
+        if (signal?.aborted || thisFetchId !== fetchIdRef.current) return;
 
         if (quotesData && quotesData.length > 0) {
           const quoteIds = quotesData.map((q: { id: string }) => q.id);
           query = query.in('quote_id', quoteIds);
         } else {
-          setSalesOrders([]);
-          setLoading(false);
+          if (thisFetchId === fetchIdRef.current) {
+            setSalesOrders([]);
+            setLoading(false);
+          }
           return;
         }
       } else {
@@ -117,7 +123,7 @@ export function useSalesOrders(dealerId?: string | null) {
         .order('created_at', { ascending: false });
 
       if (queryError) throw queryError;
-      if (signal?.aborted) return;
+      if (signal?.aborted || thisFetchId !== fetchIdRef.current) return;
 
       if (import.meta.env.DEV && data && data.length > 0) {
         const withoutDealerId = data.filter((so: any) => {
@@ -131,15 +137,17 @@ export function useSalesOrders(dealerId?: string | null) {
 
       setSalesOrders(data || []);
     } catch (err: any) {
-      if (err?.name === 'AbortError') return;
+      if (err?.name === 'AbortError' || thisFetchId !== fetchIdRef.current) return;
       const errorMessage = err instanceof Error ? err.message : 'Error loading sales orders';
       console.error('[useSalesOrders] Error:', errorMessage);
       setError(errorMessage);
       setSalesOrders([]);
     } finally {
-      setLoading(false);
+      if (thisFetchId === fetchIdRef.current && !signal?.aborted) {
+        setLoading(false);
+      }
     }
-  }, [activeOrganizationId, effectiveDealerId]);
+  }, [activeOrganizationId, effectiveDealerId, isScopeReady]);
 
   fetchSalesOrdersRef.current = fetchSalesOrders;
 
@@ -154,7 +162,7 @@ export function useSalesOrders(dealerId?: string | null) {
     return () => {
       ctrl.abort();
     };
-  }, [scopeKey]);
+  }, [scopeKey, isScopeReady]);
 
   return { salesOrders, loading, error, refetch };
 }
