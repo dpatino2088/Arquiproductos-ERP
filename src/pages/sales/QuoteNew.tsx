@@ -4945,10 +4945,10 @@ export default function QuoteNew() {
     try {
       const { error } = await supabase.rpc('soft_delete_quotes', { p_quote_ids: [quoteId] });
       if (error) throw error;
-      useUIStore.getState().addNotification({ type: 'success', title: 'Eliminado', message: 'Cotización eliminada correctamente.' });
+      useUIStore.getState().addNotification({ type: 'success', title: 'Deleted', message: 'Quote deleted successfully.' });
       router.navigate('/sales/quotes');
     } catch (err: any) {
-      useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: err?.message || 'No se pudo eliminar la cotización.' });
+      useUIStore.getState().addNotification({ type: 'error', title: 'Error', message: err?.message || 'Could not delete the quote.' });
     } finally {
       setIsDeleting(false);
       setDeleteConfirmOpen(false);
@@ -5207,13 +5207,13 @@ export default function QuoteNew() {
             </div>
 
             <div>
-              <Label htmlFor="project_address">Dirección del Proyecto</Label>
+              <Label htmlFor="project_address">Project Address</Label>
               <textarea
                 id="project_address"
                 {...register('project_address')}
                 rows={1}
                 className="w-full h-9 min-h-9 resize-none px-2.5 py-1.5 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
-                placeholder="Dirección donde se instalará el proyecto..."
+                placeholder="Address where the project will be installed..."
               />
             </div>
 
@@ -5223,7 +5223,7 @@ export default function QuoteNew() {
                 id="notes"
                 {...register('notes')}
                 className="w-full min-h-[6rem] px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 resize-y"
-                placeholder="Notas adicionales..."
+                placeholder="Additional notes..."
               />
             </div>
           </div>
@@ -5728,7 +5728,7 @@ export default function QuoteNew() {
                                   <button
                                     onClick={() => handleDuplicateLine(line.id)}
                                     className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
-                                    title="Duplicar línea"
+                                    title="Duplicate line"
                                   >
                                     <Copy className="w-4 h-4" />
                                   </button>
@@ -6410,10 +6410,10 @@ export default function QuoteNew() {
         isOpen={deleteConfirmOpen}
         onClose={() => setDeleteConfirmOpen(false)}
         onConfirm={handleDeleteDraftQuote}
-        title="Eliminar Cotización"
-        message={`¿Estás seguro de que deseas eliminar la cotización ${quoteData?.quote_no || ''}? Esta acción no se puede deshacer.`}
-        confirmText="Eliminar"
-        cancelText="Cancelar"
+        title="Delete Quote"
+        message={`Are you sure you want to delete quote ${quoteData?.quote_no || ''}? This action cannot be undone.`}
+        confirmText="Delete"
+        cancelText="Cancel"
         variant="danger"
         isLoading={isDeleting}
       />

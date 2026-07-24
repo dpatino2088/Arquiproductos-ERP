@@ -173,11 +173,11 @@ export default function PortalQuotesList() {
       const newId = await duplicateQuote(duplicateTarget.id, mode, recalculate);
       addNotification({
         type: 'success',
-        title: mode === 'version' ? 'Versión creada' : 'Cotización duplicada',
+        title: mode === 'version' ? 'Version created' : 'Quote duplicated',
         message:
           mode === 'version'
-            ? 'Se creó una nueva versión vinculada al quote original.'
-            : 'Se creó una cotización independiente.',
+            ? 'A new version linked to the original quote was created.'
+            : 'An independent quote was created.',
       });
       setDuplicateTarget(null);
       setRefreshTick((t) => t + 1);
@@ -326,7 +326,7 @@ export default function PortalQuotesList() {
                                   toggleGroup(group.key);
                                 }}
                                 className="inline-flex items-center gap-1 text-[10px] text-gray-600 hover:text-gray-900 p-1 rounded"
-                                title={`${group.older.length} versión${group.older.length > 1 ? 'es' : ''} anterior${group.older.length > 1 ? 'es' : ''}`}
+                                title={`${group.older.length} previous version${group.older.length > 1 ? 's' : ''}`}
                               >
                                 {isExpanded ? (
                                   <ChevronDown className="w-3 h-3" />
@@ -360,7 +360,7 @@ export default function PortalQuotesList() {
                             className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-600 hover:text-gray-900 px-2 py-1 rounded hover:bg-gray-100"
                           >
                             <Copy className="w-3.5 h-3.5" />
-                            Duplicar
+                            Duplicate
                           </button>
                         </div>
                       )}
@@ -381,7 +381,7 @@ export default function PortalQuotesList() {
         disableVersion={duplicateTarget?.status === 'converted'}
         versionDisabledReason={
           duplicateTarget?.status === 'converted'
-            ? 'Este quote ya tiene Sales Order. Solo se puede crear una copia independiente.'
+            ? 'This quote already has a Sales Order. Only an independent copy can be created.'
             : null
         }
         isLoading={duplicatingLoading}

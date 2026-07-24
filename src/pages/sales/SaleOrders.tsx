@@ -226,11 +226,11 @@ export default function SaleOrders() {
     e.stopPropagation();
     
     const confirmed = await showConfirm({
-      title: 'Archivar Orden de Venta',
-      message: `¿Estás seguro de que deseas archivar la orden de venta "${order.saleOrderNo}"?`,
+      title: 'Archive Sales Order',
+      message: `Are you sure you want to archive sales order "${order.saleOrderNo}"?`,
       variant: 'warning',
-      confirmText: 'Archivar',
-      cancelText: 'Cancelar',
+      confirmText: 'Archive',
+      cancelText: 'Cancel',
     });
 
     if (!confirmed) return;
@@ -257,7 +257,7 @@ export default function SaleOrders() {
     } catch (error) {
       useUIStore.getState().addNotification({
         type: 'error',
-        title: 'Error al archivar',
+        title: 'Archive failed',
         message: error instanceof Error ? error.message : 'Error desconocido',
       });
     } finally {
@@ -269,11 +269,11 @@ export default function SaleOrders() {
     e.stopPropagation();
     
     const confirmed = await showConfirm({
-      title: 'Eliminar Orden de Venta',
-      message: `¿Estás seguro de que deseas eliminar la orden de venta "${order.saleOrderNo}"? Esta acción no se puede deshacer.`,
+      title: 'Delete Sales Order',
+      message: `Are you sure you want to delete sales order "${order.saleOrderNo}"? This action cannot be undone.`,
       variant: 'danger',
-      confirmText: 'Eliminar',
-      cancelText: 'Cancelar',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
     });
 
     if (!confirmed) return;
@@ -300,7 +300,7 @@ export default function SaleOrders() {
     } catch (error) {
       useUIStore.getState().addNotification({
         type: 'error',
-        title: 'Error al eliminar',
+        title: 'Delete failed',
         message: error instanceof Error ? error.message : 'Error desconocido',
       });
     } finally {
@@ -572,8 +572,8 @@ export default function SaleOrders() {
                             <button 
                               onClick={(e) => handleArchiveSaleOrder(order, e)}
                               className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
-                              aria-label={`Archivar ${order.saleOrderNo}`}
-                              title={`Archivar ${order.saleOrderNo}`}
+                              aria-label={`Archive ${order.saleOrderNo}`}
+                              title={`Archive ${order.saleOrderNo}`}
                             >
                               <Archive className="w-4 h-4" />
                             </button>
@@ -582,8 +582,8 @@ export default function SaleOrders() {
                             <button 
                               onClick={(e) => handleDeleteSaleOrder(order, e)}
                               className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
-                              aria-label={`Eliminar ${order.saleOrderNo}`}
-                              title={`Eliminar ${order.saleOrderNo}`}
+                              aria-label={`Delete ${order.saleOrderNo}`}
+                              title={`Delete ${order.saleOrderNo}`}
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>

@@ -944,7 +944,7 @@ export async function createProposalFromQuote(
   if (!dealerId) {
     return {
       error:
-        'No se puede crear la propuesta sin dealer. Asigna un dealer a la cotización o selecciona "Actuar como" un dealer antes de crear la propuesta.',
+        'Cannot create a proposal without a dealer. Assign a dealer to the quote or select "Act as" a dealer before creating the proposal.',
     };
   }
 
@@ -1389,7 +1389,7 @@ export async function createStandaloneProposal(
   if (!dealerId) {
     return {
       error:
-        'No se puede crear una propuesta sin dealer. Selecciona "Actuar como" un dealer antes de crear la propuesta.',
+        'Cannot create a proposal without a dealer. Select "Act as" a dealer before creating the proposal.',
     };
   }
 

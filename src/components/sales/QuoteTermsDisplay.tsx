@@ -78,8 +78,8 @@ export default function QuoteTermsDisplay({
       <h3 className="text-sm font-semibold text-gray-700 mb-2">Terms and Conditions</h3>
       <div className="text-sm text-gray-700 whitespace-pre-wrap">
         {loading && !displayContent
-          ? 'Cargando términos...'
-          : (displayContent || 'No hay términos configurados en Dealer Detail > Terms & Conditions.')}
+          ? 'Loading terms...'
+          : (displayContent || 'No terms configured in Dealer Detail > Terms & Conditions.')}
       </div>
     </div>
   );

@@ -477,7 +477,7 @@ export default function ProductStep({ config, onUpdate, policy: policyProp, poli
               🔧 DEBUG: BOM TEMPLATE (Admin Only)
             </Label>
             <p className="text-xs text-yellow-700 mb-2">
-              ⚠️ Solo visible en modo desarrollo. En producción, el template se resuelve automáticamente.
+              ⚠️ Dev only. In production the template is resolved automatically.
             </p>
             {bomTemplates.length === 1 ? (
               <p className="text-xs text-yellow-600">

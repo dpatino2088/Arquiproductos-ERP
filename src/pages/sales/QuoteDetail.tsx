@@ -529,10 +529,10 @@ export default function QuoteDetail() {
       const newId = await duplicateQuote(quote.id, mode, recalculate);
       addNotification({
         type: 'success',
-        title: mode === 'version' ? 'Versión creada' : 'Cotización duplicada',
+        title: mode === 'version' ? 'Version created' : 'Quote duplicated',
         message: mode === 'version'
-          ? 'Se creó una nueva versión vinculada al quote original.'
-          : 'Se creó una cotización independiente.',
+          ? 'A new version linked to the original quote was created.'
+          : 'An independent quote was created.',
       });
       setDuplicateOpen(false);
       router.navigate(withReturnTo(`/sales/quotes/${newId}/edit`));
@@ -733,10 +733,10 @@ export default function QuoteDetail() {
           onClick={() => setDuplicateOpen(true)}
           disabled={acting}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
-          title="Duplicar / Nueva versión"
+          title="Duplicate / New version"
         >
           <Copy className="w-4 h-4" />
-          Duplicar
+          Duplicate
         </button>
       );
     }
@@ -1407,7 +1407,7 @@ export default function QuoteDetail() {
         disableVersion={status === 'converted'}
         versionDisabledReason={
           status === 'converted'
-            ? 'Este quote ya tiene Sales Order. Solo se puede crear una copia independiente.'
+            ? 'This quote already has a Sales Order. Only an independent copy can be created.'
             : null
         }
         isLoading={duplicatingLoading}

@@ -59,9 +59,9 @@ const DuplicateQuoteModal: React.FC<DuplicateQuoteModalProps> = ({
               <Copy className="w-5 h-5 text-blue-600" />
             </div>
             <div>
-              <h3 className="text-lg font-semibold text-gray-900">Duplicar cotización</h3>
+              <h3 className="text-lg font-semibold text-gray-900">Duplicate quote</h3>
               {sourceQuoteNo && (
-                <p className="text-xs text-gray-500 mt-0.5">Origen: {sourceQuoteNo}</p>
+                <p className="text-xs text-gray-500 mt-0.5">Source: {sourceQuoteNo}</p>
               )}
             </div>
           </div>
@@ -69,7 +69,7 @@ const DuplicateQuoteModal: React.FC<DuplicateQuoteModalProps> = ({
             <button
               onClick={onClose}
               className="text-gray-400 hover:text-gray-600 transition-colors"
-              aria-label="Cerrar"
+              aria-label="Close"
             >
               <X className="w-5 h-5" />
             </button>
@@ -77,9 +77,7 @@ const DuplicateQuoteModal: React.FC<DuplicateQuoteModalProps> = ({
         </div>
 
         <div className="p-5 space-y-4">
-          <p className="text-sm text-gray-600">
-            Elige cómo quieres duplicar este Quote:
-          </p>
+          <p className="text-sm text-gray-600">Choose how to duplicate this Quote:</p>
 
           <div className="space-y-3">
             <label
@@ -103,15 +101,15 @@ const DuplicateQuoteModal: React.FC<DuplicateQuoteModalProps> = ({
               <div className="flex-1">
                 <div className="flex items-center gap-2">
                   <GitBranch className="w-4 h-4 text-blue-600" />
-                  <span className="font-medium text-gray-900">Nueva versión</span>
+                  <span className="font-medium text-gray-900">New version</span>
                   <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">
                     _V&lt;n&gt;
                   </span>
                 </div>
                 <p className="text-xs text-gray-500 mt-1">
-                  Crea una nueva versión vinculada al quote original (ej. QT-00123_V2).
-                  La versión anterior se marca como <strong>superseded</strong> y las versiones
-                  se agrupan en la lista. Ideal para iterar un proyecto.
+                  Creates a new version linked to the original quote (e.g. QT-00123_V2). The
+                  previous version is marked as <strong>superseded</strong> and versions are
+                  grouped in the list. Best for iterating on a project.
                 </p>
                 {disableVersion && versionDisabledReason && (
                   <p className="text-xs text-amber-700 mt-1">{versionDisabledReason}</p>
@@ -136,14 +134,14 @@ const DuplicateQuoteModal: React.FC<DuplicateQuoteModalProps> = ({
               <div className="flex-1">
                 <div className="flex items-center gap-2">
                   <Copy className="w-4 h-4 text-gray-600" />
-                  <span className="font-medium text-gray-900">Nuevo Quote</span>
+                  <span className="font-medium text-gray-900">New Quote</span>
                   <span className="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded">
                     QT-XXXXX
                   </span>
                 </div>
                 <p className="text-xs text-gray-500 mt-1">
-                  Crea un quote completamente nuevo (con número consecutivo propio) sin
-                  vínculo al original. Útil para otro cliente o un proyecto nuevo.
+                  Creates a completely new quote (with its own consecutive number) with no link
+                  to the original. Useful for another customer or a new project.
                 </p>
               </div>
             </label>
@@ -160,12 +158,11 @@ const DuplicateQuoteModal: React.FC<DuplicateQuoteModalProps> = ({
               />
               <div className="flex-1">
                 <span className="text-sm font-medium text-gray-900">
-                  Recalcular precios con el catálogo actual
+                  Recalculate prices with the current catalog
                 </span>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  Las líneas duplicadas quedarán con precios marcados como <em>stale</em> para
-                  que el siguiente guardado tome los costos y MSRP vigentes. Si se desactiva,
-                  los snapshots se conservan idénticos al original.
+                  Duplicated lines will be marked as <em>stale</em> so the next save picks up
+                  current costs and MSRP. If unchecked, snapshots stay identical to the original.
                 </p>
               </div>
             </label>
@@ -174,7 +171,7 @@ const DuplicateQuoteModal: React.FC<DuplicateQuoteModalProps> = ({
 
         <div className="flex items-center justify-end gap-3 p-5 border-t border-gray-200 bg-gray-50">
           <Button variant="outline" onClick={onClose} disabled={isLoading} className="min-w-[100px]">
-            Cancelar
+            Cancel
           </Button>
           <Button
             variant="primary"
@@ -183,7 +180,7 @@ const DuplicateQuoteModal: React.FC<DuplicateQuoteModalProps> = ({
             loading={isLoading}
             className="min-w-[140px]"
           >
-            {mode === 'version' ? 'Crear versión' : 'Duplicar'}
+            {mode === 'version' ? 'Create version' : 'Duplicate'}
           </Button>
         </div>
       </div>

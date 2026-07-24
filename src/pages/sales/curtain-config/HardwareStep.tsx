@@ -836,7 +836,7 @@ export default function HardwareStep({ config, onUpdate, filteredTemplateIds }: 
                           useUIStore.getState().addNotification({
                             type: 'info',
                             title: 'Bottom Bar guardado',
-                            message: 'Este Bottom Bar está guardado, pero no aparece en las opciones actuales. Ajusta color o filtros.',
+                            message: 'This Bottom Bar is saved but is not in the current options. Adjust color or filters.',
                           });
                           return;
                         }

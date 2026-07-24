@@ -951,10 +951,10 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           clearDraftsBeforeNavigate();
           useUIStore.getState().addNotification({
             type: 'success',
-            title: 'Nueva versión creada',
+            title: 'New version created',
             message: res.proposalNo
-              ? `Versión ${res.proposalNo} en borrador.`
-              : 'Versión creada en borrador.',
+              ? `Version ${res.proposalNo} is in draft.`
+              : 'Version created as draft.',
           });
           router.navigate(`/sales/proposals/${res.proposalId}`);
           return;
@@ -969,10 +969,10 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           clearDraftsBeforeNavigate();
           useUIStore.getState().addNotification({
             type: 'success',
-            title: 'Nueva propuesta',
+            title: 'New proposal',
             message: res.proposalNo
-              ? `Copia creada como ${res.proposalNo}.`
-              : 'Copia creada con nuevo número PR.',
+              ? `Copy created as ${res.proposalNo}.`
+              : 'Copy created with a new PR number.',
           });
           router.navigate(`/sales/proposals/${res.proposalId}`);
           return;
@@ -983,7 +983,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           useUIStore.getState().addNotification({
             type: 'error',
             title: 'Sin Quote',
-            message: 'Esta propuesta no tiene Quote vinculado; no se puede crear de cero desde Quote.',
+            message: 'This proposal has no linked Quote; cannot create from Quote.',
           });
           return;
         }
@@ -998,8 +998,8 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
         clearDraftsBeforeNavigate();
         useUIStore.getState().addNotification({
           type: 'success',
-          title: 'Nueva propuesta',
-          message: 'Propuesta creada de cero desde el Quote (nuevo número PR).',
+          title: 'New proposal',
+          message: 'Proposal created from Quote (new PR number).',
         });
         router.navigate(`/sales/proposals/${res.proposalId}`);
       } finally {
@@ -1877,7 +1877,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           useUIStore.getState().addNotification({
             type: 'success',
             title: 'Preview',
-            message: `PDF abierto en nueva pestaña (${result.fileName}). Descárgalo desde el botón de descarga del navegador cuando quieras.`,
+            message: `PDF opened in a new tab (${result.fileName}). Download it from the browser download button when ready.`,
           });
         } else {
           previewWindow.close();
@@ -2314,7 +2314,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
           onClick={() => setDuplicateModalOpen(true)}
           disabled={creatingVersion}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 transition-colors text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-          title="Duplicar propuesta (versión o nuevo desde Quote)"
+          title="Duplicate proposal (version or new from Quote)"
         >
           <Plus className="w-4 h-4" />
           {creatingVersion ? 'Creando...' : 'Duplicate'}
@@ -2506,7 +2506,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                           // Reopening an accepted proposal is an exceptional correction: confirm.
                           if (proposal?.status === 'accepted' && next !== 'accepted') {
                             const ok = window.confirm(
-                              'Vas a reabrir una propuesta ACEPTADA y regresarla a edición. Úsalo solo para corregir un error. Para cambios de color/medidas, mejor crea una nueva versión. ¿Continuar?'
+                              'You are about to reopen an ACCEPTED proposal and return it to editing. Use this only to fix a mistake. For color/measurement changes, create a new version instead. Continue?'
                             );
                             if (!ok) return;
                           }
@@ -2526,7 +2526,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                       </SelectShadcn>
                       {isAccepted && hasDownstreamSO && (
                         <p className="text-[11px] text-amber-600 mt-1">
-                          No se puede reabrir: ya existe una orden de venta generada. Crea una nueva versión si necesitas cambios.
+                          Cannot reopen: a sales order already exists. Create a new version if you need changes.
                         </p>
                       )}
                     </div>

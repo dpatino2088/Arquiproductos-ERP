@@ -11,7 +11,7 @@ export interface DuplicateProposalModalProps {
   onConfirm: (mode: DuplicateProposalMode) => Promise<void> | void;
   sourceProposalNo?: string | null;
   sourceQuoteNo?: string | null;
-  /** When true, proposal has a parent Quote — show "Nuevo desde Quote". */
+  /** When true, proposal has a parent Quote — show "New from Quote". */
   hasQuote?: boolean;
   isLoading?: boolean;
 }
@@ -57,9 +57,9 @@ const DuplicateProposalModal: React.FC<DuplicateProposalModalProps> = ({
               <Copy className="w-5 h-5 text-blue-600" />
             </div>
             <div>
-              <h3 className="text-lg font-semibold text-gray-900">Duplicar propuesta</h3>
+              <h3 className="text-lg font-semibold text-gray-900">Duplicate proposal</h3>
               {sourceProposalNo && (
-                <p className="text-xs text-gray-500 mt-0.5">Origen: {sourceProposalNo}</p>
+                <p className="text-xs text-gray-500 mt-0.5">Source: {sourceProposalNo}</p>
               )}
             </div>
           </div>
@@ -67,7 +67,7 @@ const DuplicateProposalModal: React.FC<DuplicateProposalModalProps> = ({
             <button
               onClick={onClose}
               className="text-gray-400 hover:text-gray-600 transition-colors"
-              aria-label="Cerrar"
+              aria-label="Close"
             >
               <X className="w-5 h-5" />
             </button>
@@ -76,7 +76,7 @@ const DuplicateProposalModal: React.FC<DuplicateProposalModalProps> = ({
 
         <div className="p-5 space-y-4">
           <p className="text-sm text-gray-600">
-            Elige cómo quieres duplicar esta propuesta (mismas reglas que Quote):
+            Choose how to duplicate this proposal (same rules as Quotes):
           </p>
 
           <div className="space-y-3">
@@ -99,14 +99,14 @@ const DuplicateProposalModal: React.FC<DuplicateProposalModalProps> = ({
               <div className="flex-1">
                 <div className="flex items-center gap-2">
                   <GitBranch className="w-4 h-4 text-blue-600" />
-                  <span className="font-medium text-gray-900">Nueva versión</span>
+                  <span className="font-medium text-gray-900">New version</span>
                   <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">
                     _V&lt;n&gt;
                   </span>
                 </div>
                 <p className="text-xs text-gray-500 mt-1">
-                  Copia todo (líneas, ajustes, add-ons, descuentos) como {baseNo}_V2…
-                  La actual queda archivada como histórico. Ideal para iterar el mismo proyecto.
+                  Copies everything (lines, adjustments, add-ons, discounts) as {baseNo}_V2…
+                  The current one is archived as history. Best for iterating on the same project.
                 </p>
               </div>
             </label>
@@ -130,15 +130,15 @@ const DuplicateProposalModal: React.FC<DuplicateProposalModalProps> = ({
               <div className="flex-1">
                 <div className="flex items-center gap-2">
                   <Copy className="w-4 h-4 text-gray-600" />
-                  <span className="font-medium text-gray-900">Nueva propuesta</span>
+                  <span className="font-medium text-gray-900">New proposal</span>
                   <span className="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded">
                     PR-XXXXX
                   </span>
                 </div>
                 <p className="text-xs text-gray-500 mt-1">
-                  Clone completo con número nuevo (como “Nuevo Quote”). Incluye todas las líneas
-                  y ajustes. La original no se archiva — útil para otro proyecto o cliente.
-                  Funciona también en propuestas standalone.
+                  Full clone with a new number (like “New Quote”). Includes all lines and
+                  adjustments. The original is not archived — useful for another project or
+                  customer. Also works for standalone proposals.
                 </p>
               </div>
             </label>
@@ -163,15 +163,15 @@ const DuplicateProposalModal: React.FC<DuplicateProposalModalProps> = ({
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
                     <FilePlus className="w-4 h-4 text-gray-600" />
-                    <span className="font-medium text-gray-900">Nuevo desde Quote</span>
+                    <span className="font-medium text-gray-900">New from Quote</span>
                     <span className="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded">
                       PR-XXXXX
                     </span>
                   </div>
                   <p className="text-xs text-gray-500 mt-1">
-                    Número nuevo, reconstruido desde el Quote
-                    {sourceQuoteNo ? ` (${sourceQuoteNo})` : ''} — sin copiar ajustes ni líneas
-                    custom de esta versión. La actual no se archiva.
+                    New number, rebuilt from the Quote
+                    {sourceQuoteNo ? ` (${sourceQuoteNo})` : ''} — without copying adjustments
+                    or custom lines from this version. The current one is not archived.
                   </p>
                 </div>
               </label>
@@ -181,7 +181,7 @@ const DuplicateProposalModal: React.FC<DuplicateProposalModalProps> = ({
 
         <div className="flex items-center justify-end gap-3 p-5 border-t border-gray-200 bg-gray-50">
           <Button variant="outline" onClick={onClose} disabled={isLoading} className="min-w-[100px]">
-            Cancelar
+            Cancel
           </Button>
           <Button
             variant="primary"
@@ -190,7 +190,7 @@ const DuplicateProposalModal: React.FC<DuplicateProposalModalProps> = ({
             loading={isLoading}
             className="min-w-[140px]"
           >
-            {mode === 'version' ? 'Crear versión' : 'Crear nuevo'}
+            {mode === 'version' ? 'Create version' : 'Create new'}
           </Button>
         </div>
       </div>

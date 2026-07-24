@@ -277,11 +277,11 @@ export default function Proposals() {
     async (p: (typeof paginatedList)[0], e: React.MouseEvent) => {
       e.stopPropagation();
       const confirmed = await showConfirm({
-        title: 'Eliminar propuesta',
-        message: `¿Eliminar la propuesta ${p.proposal_no || p.id.slice(0, 8)}?`,
+        title: 'Delete proposal',
+        message: `Delete proposal ${p.proposal_no || p.id.slice(0, 8)}?`,
         variant: 'danger',
-        confirmText: 'Eliminar',
-        cancelText: 'Cancelar',
+        confirmText: 'Delete',
+        cancelText: 'Cancel',
       });
       if (!confirmed) return;
       try {
@@ -297,7 +297,7 @@ export default function Proposals() {
         addNotification({
           type: 'error',
           title: 'Error',
-          message: getSupabaseErrorMessage(err) || 'No se pudo eliminar.',
+          message: getSupabaseErrorMessage(err) || 'Could not delete.',
         });
       } finally {
         setDialogLoading(false);
@@ -312,30 +312,30 @@ export default function Proposals() {
       if (!canArchiveProposal(p)) {
         addNotification({
           type: 'error',
-          title: 'No se puede archivar',
-          message: 'Solo se puede archivar una propuesta en estado cancelado o terminado.',
+          title: 'Cannot archive',
+          message: 'You can only archive a proposal that is cancelled or completed.',
         });
         return;
       }
       const confirmed = await showConfirm({
-        title: 'Archivar propuesta',
-        message: `¿Archivar ${p.proposal_no || p.id.slice(0, 8)}? No se eliminará, solo se ocultará de la lista activa.`,
+        title: 'Archive proposal',
+        message: `Archive ${p.proposal_no || p.id.slice(0, 8)}? It will not be deleted — only hidden from the active list.`,
         variant: 'info',
-        confirmText: 'Archivar',
-        cancelText: 'Cancelar',
+        confirmText: 'Archive',
+        cancelText: 'Cancel',
       });
       if (!confirmed) return;
       try {
         setDialogLoading(true);
         const { error: err } = await supabase.from('Proposals').update({ archived: true }).eq('id', p.id);
         if (err) throw err;
-        addNotification({ type: 'success', title: 'Archivado', message: 'Propuesta archivada correctamente.' });
+        addNotification({ type: 'success', title: 'Archived', message: 'Proposal archived successfully.' });
         await refetch();
       } catch (err: any) {
         addNotification({
           type: 'error',
           title: 'Error',
-          message: getSupabaseErrorMessage(err) || 'No se pudo archivar.',
+          message: getSupabaseErrorMessage(err) || 'Could not archive.',
         });
       } finally {
         setDialogLoading(false);
@@ -348,24 +348,24 @@ export default function Proposals() {
     async (p: (typeof list)[0], e: React.MouseEvent) => {
       e.stopPropagation();
       const confirmed = await showConfirm({
-        title: 'Restaurar propuesta',
-        message: `¿Restaurar ${p.proposal_no || p.id.slice(0, 8)}? Volverá a la lista activa.`,
+        title: 'Restore proposal',
+        message: `Restore ${p.proposal_no || p.id.slice(0, 8)}? It will return to the active list.`,
         variant: 'info',
-        confirmText: 'Restaurar',
-        cancelText: 'Cancelar',
+        confirmText: 'Restore',
+        cancelText: 'Cancel',
       });
       if (!confirmed) return;
       try {
         setDialogLoading(true);
         const { error: err } = await supabase.from('Proposals').update({ archived: false }).eq('id', p.id);
         if (err) throw err;
-        addNotification({ type: 'success', title: 'Restaurado', message: 'Propuesta restaurada correctamente.' });
+        addNotification({ type: 'success', title: 'Restored', message: 'Proposal restored successfully.' });
         await refetch();
       } catch (err: any) {
         addNotification({
           type: 'error',
           title: 'Error',
-          message: getSupabaseErrorMessage(err) || 'No se pudo restaurar.',
+          message: getSupabaseErrorMessage(err) || 'Could not restore.',
         });
       } finally {
         setDialogLoading(false);
@@ -450,10 +450,10 @@ export default function Proposals() {
           }
           addNotification({
             type: 'success',
-            title: 'Nueva versión creada',
+            title: 'New version created',
             message: res.proposalNo
-              ? `Versión ${res.proposalNo} en borrador.`
-              : 'Versión creada en borrador.',
+              ? `Version ${res.proposalNo} is in draft.`
+              : 'Version created as draft.',
           });
           setDuplicateTarget(null);
           await refetch();
@@ -469,10 +469,10 @@ export default function Proposals() {
           }
           addNotification({
             type: 'success',
-            title: 'Nueva propuesta',
+            title: 'New proposal',
             message: res.proposalNo
-              ? `Copia creada como ${res.proposalNo}.`
-              : 'Copia creada con nuevo número PR.',
+              ? `Copy created as ${res.proposalNo}.`
+              : 'Copy created with a new PR number.',
           });
           setDuplicateTarget(null);
           await refetch();
@@ -484,7 +484,7 @@ export default function Proposals() {
           addNotification({
             type: 'error',
             title: 'Sin Quote',
-            message: 'Esta propuesta no tiene Quote vinculado; no se puede crear de cero desde Quote.',
+            message: 'This proposal has no linked Quote; cannot create from Quote.',
           });
           return;
         }
@@ -498,8 +498,8 @@ export default function Proposals() {
         }
         addNotification({
           type: 'success',
-          title: 'Nueva propuesta',
-          message: 'Propuesta creada de cero desde el Quote (nuevo número PR).',
+          title: 'New proposal',
+          message: 'Proposal created from Quote (new PR number).',
         });
         setDuplicateTarget(null);
         await refetch();
@@ -517,23 +517,23 @@ export default function Proposals() {
     const ids = Array.from(selectedIds);
     if (ids.length === 0) return;
     const confirmed = await showConfirm({
-      title: 'Eliminar propuestas',
-      message: `¿Eliminar ${ids.length} propuesta(s) seleccionada(s)?`,
+      title: 'Delete proposals',
+      message: `Delete ${ids.length} selected proposal(s)?`,
       variant: 'danger',
-      confirmText: 'Eliminar',
-      cancelText: 'Cancelar',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
     });
     if (!confirmed) return;
     try {
       setDialogLoading(true);
       await deleteProposals(ids);
       setSelectedIds(new Set());
-      addNotification({ type: 'success', title: 'Eliminado', message: `${ids.length} propuesta(s) eliminada(s).` });
+      addNotification({ type: 'success', title: 'Deleted', message: `${ids.length} proposal(s) deleted.` });
     } catch (err: any) {
       addNotification({
         type: 'error',
         title: 'Error',
-        message: getSupabaseErrorMessage(err) || 'No se pudieron eliminar.',
+        message: getSupabaseErrorMessage(err) || 'Could not delete.',
       });
     } finally {
       setDialogLoading(false);
@@ -549,7 +549,7 @@ export default function Proposals() {
     return (
       <div className="py-6 px-6">
         <div className="bg-red-50 border border-red-200 rounded-lg p-6">
-          <h3 className="text-red-800 font-medium mb-2">Error al cargar propuestas</h3>
+          <h3 className="text-red-800 font-medium mb-2">Error loading proposals</h3>
           <p className="text-red-700 text-sm mb-4">{error}</p>
           <button
             onClick={() => refetch()}
@@ -602,7 +602,7 @@ export default function Proposals() {
               className="flex items-center gap-2 px-2 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 text-sm transition-colors"
             >
               <Trash2 style={{ width: 14, height: 14 }} />
-              Eliminar seleccionados ({selectedIds.size})
+              Delete selected ({selectedIds.size})
             </button>
           )}
         </div>
@@ -618,7 +618,7 @@ export default function Proposals() {
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
                 type="text"
-                placeholder="Buscar por número, cliente o quote..."
+                placeholder="Search by number, customer, or quote..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
@@ -725,11 +725,11 @@ export default function Proposals() {
                   <td colSpan={10} className="py-12 px-4 text-center">
                     <div className="flex flex-col items-center">
                       <Search className="w-12 h-12 text-gray-300 mb-4" />
-                      <p className="text-gray-600 mb-2">No se encontraron propuestas</p>
+                      <p className="text-gray-600 mb-2">No proposals found</p>
                       <p className="text-sm text-gray-400">
                         {list.length === 0
-                          ? 'Crea una propuesta desde el detalle de una Quote'
-                          : 'Intenta con otros términos de búsqueda'}
+                          ? 'Create a proposal from a Quote detail page'
+                          : 'Try different search terms'}
                       </p>
                     </div>
                   </td>
@@ -760,7 +760,7 @@ export default function Proposals() {
                             type="button"
                             onClick={(e) => { e.stopPropagation(); toggleFamily(p.id); }}
                             className="p-0.5 hover:bg-gray-200 rounded text-gray-500 shrink-0"
-                            title={expandedFamilies.has(p.id) ? 'Ocultar versiones anteriores' : 'Mostrar versiones anteriores'}
+                            title={expandedFamilies.has(p.id) ? 'Hide previous versions' : 'Show previous versions'}
                           >
                             {expandedFamilies.has(p.id) ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
                           </button>
@@ -857,7 +857,7 @@ export default function Proposals() {
                                 onClick={(e) => openDuplicateModal(p, e)}
                                 disabled={duplicatingId === p.id}
                                 className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                title="Duplicar propuesta"
+                                title="Duplicate proposal"
                               >
                                 <Copy style={{ width: 14, height: 14 }} />
                               </button>

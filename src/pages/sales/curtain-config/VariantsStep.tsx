@@ -607,7 +607,7 @@ export default function VariantsStep({ config, onUpdate, policy: policyProp }: V
                 >
                   {filteredCollections.length === 0 ? (
                     <div className="px-3 py-2 text-xs text-gray-500">
-                      {collectionSearch.trim() ? 'No se encontraron colecciones' : 'No hay colecciones disponibles'}
+                      {collectionSearch.trim() ? 'No collections found' : 'No collections available'}
                     </div>
                   ) : (
                     filteredCollections.map((name) => (

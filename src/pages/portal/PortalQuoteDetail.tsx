@@ -229,11 +229,11 @@ export default function PortalQuoteDetail() {
       const newId = await duplicateQuote(quote.id, mode, recalculate);
       addNotification({
         type: 'success',
-        title: mode === 'version' ? 'Versión creada' : 'Cotización duplicada',
+        title: mode === 'version' ? 'Version created' : 'Quote duplicated',
         message:
           mode === 'version'
-            ? 'Se creó una nueva versión vinculada al quote original.'
-            : 'Se creó una cotización independiente.',
+            ? 'A new version linked to the original quote was created.'
+            : 'An independent quote was created.',
       });
       setDuplicateOpen(false);
       window.location.href = `/portal/quotes/${newId}/edit`;
@@ -272,7 +272,7 @@ export default function PortalQuoteDetail() {
               className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
             >
               <Copy className="w-4 h-4" />
-              Duplicar
+              Duplicate
             </button>
           )}
           {canEdit && (
@@ -350,7 +350,7 @@ export default function PortalQuoteDetail() {
         disableVersion={quote.status === 'converted'}
         versionDisabledReason={
           quote.status === 'converted'
-            ? 'Este quote ya tiene Sales Order. Solo se puede crear una copia independiente.'
+            ? 'This quote already has a Sales Order. Only an independent copy can be created.'
             : null
         }
         isLoading={duplicatingLoading}

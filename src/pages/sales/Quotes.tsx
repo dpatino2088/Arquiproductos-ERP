@@ -229,7 +229,7 @@ export default function Quotes() {
       useUIStore.getState().addNotification({
         type: 'error',
         title: 'No permitido',
-        message: 'No se puede eliminar una cotización aprobada.',
+        message: 'Cannot delete an approved quote.',
       });
       return;
     }
@@ -239,15 +239,15 @@ export default function Quotes() {
     const hasProposals = proposalIds.length > 0;
 
     const confirmMessage = hasProposals
-      ? `La cotización ${quote.quote_no} tiene ${proposalIds.length} propuesta${proposalIds.length > 1 ? 's' : ''} asociada${proposalIds.length > 1 ? 's' : ''}. Se eliminarán en cascada junto con la cotización. ¿Deseas continuar?`
-      : `¿Eliminar la cotización ${quote.quote_no}?`;
+      ? `Quote ${quote.quote_no} has ${proposalIds.length} associated proposal${proposalIds.length > 1 ? 's' : ''}. They will be deleted with the quote. Continue?`
+      : `Delete quote ${quote.quote_no}?`;
 
     const confirmed = await showConfirm({
-      title: hasProposals ? 'Eliminar cotización y propuestas' : 'Eliminar Cotización',
+      title: hasProposals ? 'Delete quote and proposals' : 'Delete Quote',
       message: confirmMessage,
       variant: 'danger',
-      confirmText: 'Eliminar',
-      cancelText: 'Cancelar',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
     });
 
     if (!confirmed) return;
@@ -267,7 +267,7 @@ export default function Quotes() {
         useUIStore.getState().addNotification({
           type: 'error',
           title: 'Error',
-          message: 'Cotización no encontrada o sin permiso para eliminar.',
+          message: 'Quote not found or no permission to delete.',
         });
         await refetch();
         return;
@@ -282,8 +282,8 @@ export default function Quotes() {
         type: 'success',
         title: 'Eliminado',
         message: hasProposals
-          ? `Cotización y ${proposalIds.length} propuesta${proposalIds.length > 1 ? 's' : ''} eliminadas correctamente.`
-          : 'Cotización eliminada correctamente.',
+          ? `Quote and ${proposalIds.length} proposal${proposalIds.length > 1 ? 's' : ''} deleted successfully.`
+          : 'Quote deleted successfully.',
       });
 
       await refetch();
@@ -304,11 +304,11 @@ export default function Quotes() {
     async (quote: EnrichedQuote, e: React.MouseEvent) => {
       e.stopPropagation();
       const confirmed = await showConfirm({
-        title: 'Archivar cotización',
-        message: `¿Archivar ${quote.quote_no}? No se eliminará, solo se ocultará de la lista activa.`,
+        title: 'Archive quote',
+        message: `Archive ${quote.quote_no}? It will not be deleted — only hidden from the active list.`,
         variant: 'info',
-        confirmText: 'Archivar',
-        cancelText: 'Cancelar',
+        confirmText: 'Archive',
+        cancelText: 'Cancel',
       });
       if (!confirmed) return;
       try {
@@ -318,7 +318,7 @@ export default function Quotes() {
         useUIStore.getState().addNotification({
           type: 'success',
           title: 'Archivado',
-          message: 'Cotización archivada correctamente.',
+          message: 'Quote archived successfully.',
         });
         await refetch();
       } catch (err: any) {
@@ -338,11 +338,11 @@ export default function Quotes() {
     async (quote: EnrichedQuote, e: React.MouseEvent) => {
       e.stopPropagation();
       const confirmed = await showConfirm({
-        title: 'Restaurar cotización',
-        message: `¿Restaurar ${quote.quote_no}? Volverá a la lista activa.`,
+        title: 'Restore quote',
+        message: `Restore ${quote.quote_no}? It will return to the active list.`,
         variant: 'info',
-        confirmText: 'Restaurar',
-        cancelText: 'Cancelar',
+        confirmText: 'Restore',
+        cancelText: 'Cancel',
       });
       if (!confirmed) return;
       try {
@@ -352,7 +352,7 @@ export default function Quotes() {
         useUIStore.getState().addNotification({
           type: 'success',
           title: 'Restaurado',
-          message: 'Cotización restaurada correctamente.',
+          message: 'Quote restored successfully.',
         });
         await refetch();
       } catch (err: any) {
@@ -378,17 +378,17 @@ export default function Quotes() {
       const list = quotesWithProposals.map((q) => q.quote_no).join(', ');
       useUIStore.getState().addNotification({
         type: 'error',
-        title: 'No se puede eliminar',
-        message: `Las siguientes cotizaciones tienen propuestas asociadas. Elimine primero las propuestas desde Proposals: ${list}`,
+        title: 'Cannot delete',
+        message: `These quotes have associated proposals. Delete the proposals from Proposals first: ${list}`,
       });
       return;
     }
     const confirmed = await showConfirm({
-      title: 'Eliminar cotizaciones',
-      message: `¿Eliminar ${ids.length} cotización(es) seleccionada(s)?`,
+      title: 'Delete quotes',
+      message: `Delete ${ids.length} selected quote(s)?`,
       variant: 'danger',
-      confirmText: 'Eliminar',
-      cancelText: 'Cancelar',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
     });
     if (!confirmed) return;
     try {
@@ -399,14 +399,14 @@ export default function Quotes() {
         useUIStore.getState().addNotification({
           type: 'error',
           title: 'Error',
-          message: 'Algunas cotizaciones no se pudieron eliminar (sin permiso).',
+          message: 'Some quotes could not be deleted (no permission).',
         });
       } else {
         setSelectedIds(new Set());
         useUIStore.getState().addNotification({
           type: 'success',
           title: 'Eliminado',
-          message: `${data ?? ids.length} cotización(es) eliminada(s).`,
+          message: `${data ?? ids.length} quote(s) deleted.`,
         });
       }
       await refetch();
@@ -441,11 +441,11 @@ export default function Quotes() {
         const newId = await duplicateQuote(duplicateTarget.id, mode, recalculate);
         useUIStore.getState().addNotification({
           type: 'success',
-          title: mode === 'version' ? 'Versión creada' : 'Cotización duplicada',
+          title: mode === 'version' ? 'Version created' : 'Quote duplicated',
           message:
             mode === 'version'
-              ? 'Se creó una nueva versión vinculada al quote original.'
-              : 'Se creó una cotización independiente.',
+              ? 'A new version linked to the original quote was created.'
+              : 'An independent quote was created.',
         });
         setDuplicateTarget(null);
         await refetch();
@@ -453,7 +453,7 @@ export default function Quotes() {
       } catch (err: any) {
         useUIStore.getState().addNotification({
           type: 'error',
-          title: 'Error duplicando',
+          title: 'Duplicate failed',
           message: getSupabaseErrorMessage(err),
         });
       } finally {
@@ -626,7 +626,7 @@ export default function Quotes() {
     return (
       <div className="py-6 px-6">
         <div className="bg-red-50 border border-red-200 rounded-lg p-6">
-          <h3 className="text-red-800 font-medium mb-2">Error al cargar cotizaciones</h3>
+          <h3 className="text-red-800 font-medium mb-2">Error loading quotes</h3>
           <p className="text-red-700 text-sm mb-4">{error}</p>
           <button
             onClick={() => refetch()}
@@ -654,7 +654,7 @@ export default function Quotes() {
               className="flex items-center gap-2 px-2 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 text-sm transition-colors"
             >
               <Trash2 style={{ width: 14, height: 14 }} />
-              Eliminar seleccionados ({selectedIds.size})
+              Delete selected ({selectedIds.size})
             </button>
           )}
           {canCreateQuote && (
@@ -680,7 +680,7 @@ export default function Quotes() {
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
                 type="text"
-                placeholder="Buscar por número, cliente o contacto..."
+                placeholder="Search by number, customer, or contact..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-9 pr-3 py-1 border border-gray-200 rounded text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
@@ -786,11 +786,11 @@ export default function Quotes() {
                   <td colSpan={isInternal ? 11 : 9} className="py-12 px-4 text-center">
                     <div className="flex flex-col items-center">
                       <Search className="w-12 h-12 text-gray-300 mb-4" />
-                      <p className="text-gray-600 mb-2">No se encontraron cotizaciones</p>
+                      <p className="text-gray-600 mb-2">No quotes found</p>
                       <p className="text-sm text-gray-400">
                         {quotes.length === 0 
-                          ? 'Crea tu primera cotización' 
-                          : 'Intenta con otros términos de búsqueda'}
+                          ? 'Create your first quote' 
+                          : 'Try different search terms'}
                       </p>
                     </div>
                   </td>
@@ -843,7 +843,7 @@ export default function Quotes() {
                         {!opts.isOlder && group.older.length > 0 && !isExpanded && (
                           <span
                             className="inline-block w-2 h-2 rounded-full bg-blue-500"
-                            title={`${group.older.length} versión${group.older.length > 1 ? 'es' : ''} anterior${group.older.length > 1 ? 'es' : ''}`}
+                            title={`${group.older.length} previous version${group.older.length > 1 ? 's' : ''}`}
                           />
                         )}
                       </div>
@@ -936,7 +936,7 @@ export default function Quotes() {
                                   type="button"
                                   onClick={(e) => openDuplicateModal(quote, e)}
                                   className="p-1.5 hover:bg-gray-100 rounded text-gray-600 transition-colors"
-                                  title="Duplicar / Nueva versión"
+                                  title="Duplicate / New version"
                                 >
                                   <Copy style={{ width: 14, height: 14 }} />
                                 </button>
@@ -1045,7 +1045,7 @@ export default function Quotes() {
         disableVersion={duplicateTarget?.status === 'converted'}
         versionDisabledReason={
           duplicateTarget?.status === 'converted'
-            ? 'Este quote ya tiene Sales Order. Solo se puede crear una copia independiente.'
+            ? 'This quote already has a Sales Order. Only an independent copy can be created.'
             : null
         }
         isLoading={duplicatingLoading}
