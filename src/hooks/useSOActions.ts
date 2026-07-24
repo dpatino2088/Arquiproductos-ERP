@@ -76,7 +76,12 @@ export function useSOActions() {
         addNotification({ type: 'success', title: 'Sales Order Created', message: 'Sales order created from quote.' });
         return data as { sales_order_id: string; so_number: string };
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : 'Failed to create sales order';
+        const msg =
+          err && typeof err === 'object' && 'message' in err && typeof (err as { message: unknown }).message === 'string'
+            ? (err as { message: string }).message
+            : err instanceof Error
+              ? err.message
+              : 'Failed to create sales order';
         addNotification({ type: 'error', title: 'Error', message: msg });
         throw err;
       } finally {
