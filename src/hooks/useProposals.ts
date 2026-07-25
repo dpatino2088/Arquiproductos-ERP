@@ -861,8 +861,9 @@ export interface CreateProposalFromQuoteOptions {
    */
   versionOf?: { baseProposalNo: string; versionNo: number } | null;
   /**
-   * Allocate a brand-new PR-XXXXX (version 1), ignoring any existing proposals for
-   * this quote. Used by "Duplicar → Nuevo desde Quote". Existing proposals are left alone.
+   * Allocate a brand-new PR-XXXXX number. Still linked to the same quote, so
+   * `version_no` must be the next free value for that quote (unique index
+   * proposals_quote_version_uniq). Used by "Duplicate → New from Quote".
    */
   forceNewNumber?: boolean;
 }
@@ -880,6 +881,54 @@ function getProposalVersionFromNo(proposalNo: string | null | undefined): number
   if (!m || !m[1]) return null;
   const n = Number(m[1]);
   return Number.isFinite(n) && n >= 2 ? n : null;
+}
+
+/** Highest version_no among non-deleted proposals (column + `_V<n>` suffix). */
+function maxProposalVersionNo(
+  rows: Array<{ proposal_no?: string | null; version_no?: number | null }>
+): number {
+  return rows.reduce((max, p) => {
+    const col = Number(p.version_no);
+    const fromCol = Number.isFinite(col) && col > 0 ? col : 0;
+    const fromSuffix = getProposalVersionFromNo(p.proposal_no) ?? 0;
+    // Bare PR-XXXXX with null/0 version_no still occupies slot 1.
+    const bareBase = !fromSuffix && getProposalBaseNo(p.proposal_no) ? 1 : 0;
+    return Math.max(max, fromCol, fromSuffix, bareBase);
+  }, 0);
+}
+
+/**
+ * Next free `version_no` for a quote (and optionally a PR family).
+ * Required by unique index (quote_id, version_no) WHERE deleted = false —
+ * including archived rows, which still hold their version slot.
+ */
+async function getNextProposalVersionNo(opts: {
+  quoteId?: string | null;
+  organizationId?: string | null;
+  baseProposalNo?: string | null;
+}): Promise<number> {
+  let maxV = 0;
+
+  if (opts.quoteId) {
+    const { data } = await supabase
+      .from('Proposals')
+      .select('proposal_no, version_no')
+      .eq('quote_id', opts.quoteId)
+      .eq('deleted', false);
+    maxV = Math.max(maxV, maxProposalVersionNo(data ?? []));
+  }
+
+  if (opts.organizationId && opts.baseProposalNo) {
+    const { data: family } = await supabase
+      .from('Proposals')
+      .select('proposal_no, version_no')
+      .eq('organization_id', opts.organizationId)
+      .ilike('proposal_no', `${opts.baseProposalNo}%`)
+      .eq('deleted', false);
+    maxV = Math.max(maxV, maxProposalVersionNo(family ?? []));
+  }
+
+  return maxV + 1;
 }
 
 /**
@@ -962,16 +1011,7 @@ export async function createProposalFromQuote(
     created_at: string | null;
   }>;
 
-  const maxVersionNoFromColumn = proposalsForQuote.reduce((max, p) => {
-    const n = Number(p.version_no);
-    if (!Number.isFinite(n) || n <= 0) return max;
-    return Math.max(max, n);
-  }, 0);
-  const maxVersionNoFromSuffix = proposalsForQuote.reduce((max, p) => {
-    const suffix = getProposalVersionFromNo(p.proposal_no);
-    if (!suffix) return max;
-    return Math.max(max, suffix);
-  }, 0);
+  const maxVersionForQuote = maxProposalVersionNo(proposalsForQuote);
 
   let newVersion: number;
   let proposalNo: string;
@@ -983,11 +1023,12 @@ export async function createProposalFromQuote(
         ? options.versionOf.baseProposalNo
         : `${options.versionOf.baseProposalNo}_V${newVersion}`;
   } else if (options?.forceNewNumber) {
-    // Fresh proposal number, even if this quote already has PR-xxxx / _V<n> siblings.
-    newVersion = 1;
+    // Fresh PR-XXXXX number, but version_no must still be unique per quote
+    // (proposals_quote_version_uniq includes archived rows).
+    newVersion = maxVersionForQuote + 1;
     proposalNo = await generateNextProposalNumber(orgId, dealerId);
   } else {
-    newVersion = Math.max(maxVersionNoFromColumn, maxVersionNoFromSuffix, 0) + 1;
+    newVersion = maxVersionForQuote + 1;
 
     let baseProposalNo: string | null = null;
     const firstProposalWithNo = proposalsForQuote.find((p) => getProposalBaseNo(p.proposal_no));
@@ -1134,22 +1175,12 @@ export async function createProposalVersion(
 
   const baseProposalNo = getProposalBaseNo(src.proposal_no) ?? src.proposal_no ?? null;
 
-  // Next version across the whole PR family (base + _V suffixes), archived included.
-  let nextVersion = 2;
-  if (baseProposalNo) {
-    const { data: family } = await supabase
-      .from('Proposals')
-      .select('proposal_no, version_no')
-      .eq('organization_id', src.organization_id)
-      .ilike('proposal_no', `${baseProposalNo}%`)
-      .eq('deleted', false);
-    const maxV = (family ?? []).reduce((m: number, p: any) => {
-      const col = Number(p.version_no);
-      const suf = getProposalVersionFromNo(p.proposal_no) ?? 0;
-      return Math.max(m, Number.isFinite(col) ? col : 0, suf);
-    }, 1);
-    nextVersion = maxV + 1;
-  }
+  // Next version across the PR family AND the quote (unique index is per quote_id).
+  const nextVersion = await getNextProposalVersionNo({
+    quoteId: src.quote_id,
+    organizationId: src.organization_id,
+    baseProposalNo,
+  });
 
   const cloned = await cloneProposalAsVersion(src, baseProposalNo, nextVersion);
   if ('error' in cloned) return cloned;
@@ -1326,9 +1357,15 @@ export async function duplicateProposalAsCopy(
     return { error: e?.message || 'Failed to allocate proposal number' };
   }
 
+  // Keep quote link when present; version_no must be next free for that quote
+  // (cannot reuse 1 — proposals_quote_version_uniq). Standalone → version 1.
+  const versionNo = src.quote_id
+    ? await getNextProposalVersionNo({ quoteId: src.quote_id })
+    : 1;
+
   const cloned = await cloneProposalContent(src, {
     proposalNo,
-    versionNo: 1,
+    versionNo,
     quoteId: src.quote_id ?? null,
   });
   if ('error' in cloned) return cloned;
