@@ -12,6 +12,7 @@ import type { InventoryAvailabilityRow } from '../../../types/inventory';
 import { useUIStore } from '../../../stores/ui-store';
 import StatusBadge from '../../shared/StatusBadge';
 import { Package, XCircle, Loader2, ArrowRightLeft, ChevronRight, ChevronDown, Search, AlertTriangle, Calendar, ShieldAlert, ShoppingCart } from 'lucide-react';
+import { recomputeMoFabricPurchase } from '../../../lib/fabricNestPurchase';
 
 interface MaterialsTabProps {
   moId: string;
@@ -54,13 +55,24 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 type ViewMode = 'category' | 'sku';
 
+interface FabricPurchaseInfo {
+  nest_used_m: number;
+  purchase_qty: number;
+  purchase_waste_pct: number;
+}
+
 interface AggregatedMaterial {
   catalog_item_id: string;
   sku: string;
   item_name: string;
   part_role: string;
   uom: string;
+  /** Linear / quote qty (sum of bil.qty × SO qty). */
   totalQty: number;
+  /** Nest-based buy qty for fabric; null for non-fabric or not yet computed. */
+  buyQty: number | null;
+  nestUsedM: number | null;
+  purchaseWastePct: number | null;
   unitCost: number | undefined;
   totalCost: number;
   unitMsrp: number | undefined;
@@ -75,6 +87,12 @@ const TABLE_HEAD_CELL = 'py-3 px-6 font-medium text-xs';
 const TABLE_BODY_CELL = 'py-3 px-6 text-sm';
 const TABLE_HEAD_STICKY = 'bg-gray-50 border-b border-gray-200 sticky top-0 z-10 shadow-[0_1px_0_0_theme(colors.gray.200)]';
 const SECTION_HEADER = 'bg-gray-50 px-6 py-3 border-b border-gray-200';
+
+/** Qty used for buy / allocate / shortage: nest purchase for fabric, else linear. */
+function requiredQtyForAgg(agg: AggregatedMaterial): number {
+  if (String(agg.part_role).toLowerCase() === 'fabric' && agg.buyQty != null) return agg.buyQty;
+  return agg.totalQty;
+}
 
 export default function MaterialsTab({
   moId,
@@ -95,9 +113,37 @@ export default function MaterialsTab({
 
   const [viewMode, setViewMode] = useState<ViewMode>('sku');
   const [shouldShowError, setShouldShowError] = useState(false);
+  const [fabricPurchaseBySku, setFabricPurchaseBySku] = useState<Map<string, FabricPurchaseInfo>>(new Map());
 
   const { activeOrganizationId } = useOrganizationContext();
   const { defaultWarehouse } = useWarehouses(activeOrganizationId);
+
+  // Recompute nest-based fabric purchase qty whenever materials (BOM) are available
+  useEffect(() => {
+    if (!moId || !hasBomLines) return;
+    let cancelled = false;
+    (async () => {
+      await recomputeMoFabricPurchase(moId);
+      if (cancelled) return;
+      const { data } = await supabase
+        .from('ManufacturingOrderFabricPurchase')
+        .select('catalog_item_id, nest_used_m, purchase_qty, purchase_waste_pct')
+        .eq('manufacturing_order_id', moId);
+      if (cancelled) return;
+      const map = new Map<string, FabricPurchaseInfo>();
+      for (const row of data ?? []) {
+        map.set(row.catalog_item_id, {
+          nest_used_m: Number(row.nest_used_m) || 0,
+          purchase_qty: Number(row.purchase_qty) || 0,
+          purchase_waste_pct: Number(row.purchase_waste_pct) || 0,
+        });
+      }
+      setFabricPurchaseBySku(map);
+    })().catch(() => {
+      /* non-blocking */
+    });
+    return () => { cancelled = true; };
+  }, [moId, hasBomLines, materials.length]);
   const addNotification = useUIStore((s) => s.addNotification);
 
   const { allocations, loading: allocLoading, refetch: refetchAllocations } = useMOAllocations(moId);
@@ -128,7 +174,10 @@ export default function MaterialsTab({
         existing.totalCost += m.total_cost_exw;
         existing.totalMsrp += (m.total_msrp || 0);
         existing.bomInstanceLineIds.push(m.bom_instance_line_id);
+        if (String(m.part_role).toLowerCase() === 'fabric') existing.part_role = 'fabric';
       } else {
+        const fp = fabricPurchaseBySku.get(m.catalog_item_id);
+        const isFabric = String(m.part_role).toLowerCase() === 'fabric';
         map.set(m.catalog_item_id, {
           catalog_item_id: m.catalog_item_id,
           sku: m.sku,
@@ -136,6 +185,9 @@ export default function MaterialsTab({
           part_role: m.part_role,
           uom: m.uom,
           totalQty: m.qty,
+          buyQty: isFabric && fp ? fp.purchase_qty : null,
+          nestUsedM: isFabric && fp ? fp.nest_used_m : null,
+          purchaseWastePct: isFabric && fp ? fp.purchase_waste_pct : null,
           unitCost: m.unit_cost_exw,
           totalCost: m.total_cost_exw,
           unitMsrp: m.unit_msrp,
@@ -146,8 +198,18 @@ export default function MaterialsTab({
         });
       }
     }
+    // Attach / refresh fabric purchase after aggregation
+    for (const agg of map.values()) {
+      if (String(agg.part_role).toLowerCase() !== 'fabric') continue;
+      const fp = fabricPurchaseBySku.get(agg.catalog_item_id);
+      if (fp) {
+        agg.buyQty = fp.purchase_qty;
+        agg.nestUsedM = fp.nest_used_m;
+        agg.purchaseWastePct = fp.purchase_waste_pct;
+      }
+    }
     return [...map.values()].sort((a, b) => a.sku.localeCompare(b.sku));
-  }, [materials]);
+  }, [materials, fabricPurchaseBySku]);
 
   const [localExclusions, setLocalExclusions] = useState<Map<string, boolean> | null>(null);
   const [isSavingExclusions, setIsSavingExclusions] = useState(false);
@@ -213,8 +275,9 @@ export default function MaterialsTab({
   const allocStats = useMemo(() => {
     return activeSkus.reduce((acc, agg) => {
       const allocated = allocationMap.get(agg.catalog_item_id) ?? 0;
-      const gap = Math.round((agg.totalQty - allocated) * 10000) / 10000;
-      acc.totalRequired += agg.totalQty;
+      const required = requiredQtyForAgg(agg);
+      const gap = Math.round((required - allocated) * 10000) / 10000;
+      acc.totalRequired += required;
       acc.totalAllocated += allocated;
       if (gap <= 0) acc.ok++;
       else if (allocated > 0) acc.partial++;
@@ -239,7 +302,7 @@ export default function MaterialsTab({
     const items = aggregatedBySku
       .map(m => {
         const alreadyAllocated = allocationMap.get(m.catalog_item_id) ?? 0;
-        const gap = Math.round((m.totalQty - alreadyAllocated) * 10000) / 10000;
+        const gap = Math.round((requiredQtyForAgg(m) - alreadyAllocated) * 10000) / 10000;
         return { catalog_item_id: m.catalog_item_id, qty: gap };
       })
       .filter(item => item.qty >= MIN_QTY);
@@ -562,7 +625,9 @@ export default function MaterialsTab({
                   <th className={`text-left text-gray-900 ${TABLE_HEAD_CELL}`}>Description</th>
                   <th className={`text-left text-gray-900 ${TABLE_HEAD_CELL} w-[140px]`}>Role</th>
                   <th className={`text-left text-gray-900 ${TABLE_HEAD_CELL} w-[120px]`} title="Primary storage location">Location</th>
-                  <th className={`text-right text-gray-900 ${TABLE_HEAD_CELL} w-[120px]`}>Total Qty</th>
+                  <th className={`text-right text-gray-900 ${TABLE_HEAD_CELL} w-[140px]`} title="Buy qty (nest + purchase waste) for fabric; quote qty for other roles">
+                    Qty
+                  </th>
                   <th className={`text-right text-gray-900 ${TABLE_HEAD_CELL} w-[90px]`}>UoM</th>
                   <th className={`text-left text-gray-900 ${TABLE_HEAD_CELL} w-[140px]`}>Availability</th>
                   {canViewCosts && showCosts && (
@@ -578,6 +643,8 @@ export default function MaterialsTab({
               <tbody className="divide-y divide-gray-200">
                 {aggregatedBySku.map((agg) => {
                   const isExcluded = getEffectiveExcluded(agg.catalog_item_id, !!agg.excluded);
+                  const isFabric = String(agg.part_role).toLowerCase() === 'fabric';
+                  const displayQty = isFabric && agg.buyQty != null ? agg.buyQty : agg.totalQty;
                   return (
                   <tr key={agg.catalog_item_id} className={`hover:bg-gray-50 ${isExcluded ? 'opacity-40' : ''}`}>
                     {isServiceMO && (
@@ -604,8 +671,16 @@ export default function MaterialsTab({
                         <span className="text-gray-400 text-xs">—</span>
                       )}
                     </td>
-                    <td className={`${TABLE_BODY_CELL} text-gray-900 text-right font-semibold w-[120px]`}>
-                      {agg.uom === 'm' ? agg.totalQty.toFixed(2) : agg.totalQty.toFixed(0)}
+                    <td className={`${TABLE_BODY_CELL} text-gray-900 text-right font-semibold w-[140px]`}>
+                      <div>{agg.uom === 'm' ? displayQty.toFixed(2) : displayQty.toFixed(0)}</div>
+                      {isFabric && agg.buyQty != null && (
+                        <div className="text-[10px] font-normal text-gray-500 leading-tight mt-0.5">
+                          Buy (nest {agg.nestUsedM?.toFixed(1)}m + {((agg.purchaseWastePct ?? 0) * 100).toFixed(0)}%)
+                          {Math.abs(agg.totalQty - agg.buyQty) > 0.001 && (
+                            <> · Quote {agg.totalQty.toFixed(2)}</>
+                          )}
+                        </div>
+                      )}
                     </td>
                     <td className={`${TABLE_BODY_CELL} text-gray-700 text-right w-[90px]`}>{agg.uom}</td>
                     <td className={`${TABLE_BODY_CELL} w-[140px]`}>
@@ -810,7 +885,7 @@ export default function MaterialsTab({
           if (searchLc && !agg.sku.toLowerCase().includes(searchLc) && !agg.item_name.toLowerCase().includes(searchLc)) return false;
           if (allocFilter === 'all') return true;
           const allocated = allocationMap.get(agg.catalog_item_id) ?? 0;
-          const gap = Math.round((agg.totalQty - allocated) * 10000) / 10000;
+          const gap = Math.round((requiredQtyForAgg(agg) - allocated) * 10000) / 10000;
           if (allocFilter === 'shortages') return gap > 0;
           return gap <= 0;
         });
@@ -923,7 +998,8 @@ export default function MaterialsTab({
                   <tbody className="divide-y divide-gray-100">
                     {filteredSkus.map(agg => {
                       const allocated = allocationMap.get(agg.catalog_item_id) ?? 0;
-                      const gap = Math.round((agg.totalQty - allocated) * 10000) / 10000;
+                      const required = requiredQtyForAgg(agg);
+                      const gap = Math.round((required - allocated) * 10000) / 10000;
                       const avail = availabilityMap[agg.catalog_item_id];
                       const onHand = avail?.on_hand_qty ?? 0;
                       const isExpanded = expandedSkuId === agg.catalog_item_id;
@@ -1041,6 +1117,7 @@ function AllocationRow({
   moId, orgId, warehouseId, availability, onTransferred,
 }: AllocationRowProps) {
   const fmt = (qty: number) => agg.uom === 'm' ? qty.toFixed(2) : qty.toFixed(0);
+  const required = requiredQtyForAgg(agg);
 
   return (
     <>
@@ -1056,7 +1133,7 @@ function AllocationRow({
         </td>
         <td className="px-3 py-2 font-mono text-gray-900 text-xs">{agg.sku}</td>
         <td className="px-3 py-2 text-gray-700 text-xs truncate max-w-[200px]" title={agg.item_name}>{agg.item_name}</td>
-        <td className="px-3 py-2 text-right tabular-nums text-xs">{fmt(agg.totalQty)}</td>
+        <td className="px-3 py-2 text-right tabular-nums text-xs">{fmt(required)}</td>
         <td className="px-3 py-2 text-right tabular-nums text-xs">{fmt(onHand)}</td>
         <td className="px-3 py-2 text-right tabular-nums text-xs font-medium text-green-700">
           {allocated > 0 ? fmt(allocated) : '—'}
@@ -1089,7 +1166,7 @@ function AllocationRow({
               sku={agg.sku}
               itemName={agg.item_name}
               uom={agg.uom}
-              requiredQty={agg.totalQty}
+              requiredQty={required}
               allocatedQty={allocated}
               gap={gap}
               availability={availability}

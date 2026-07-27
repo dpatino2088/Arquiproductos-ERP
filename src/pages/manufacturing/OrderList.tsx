@@ -321,6 +321,8 @@ export default function OrderList() {
           const bomErrors = (bomData as { errors?: string[] } | null)?.errors ?? [];
           throw new Error(`MO created (${moNumber}) but BOM generation failed: ${bomErrors.join('; ') || 'Unknown error'}`);
         }
+        const { recomputeMoFabricPurchase } = await import('../../lib/fabricNestPurchase');
+        await recomputeMoFabricPurchase(moId);
       }
 
       useUIStore.getState().addNotification({

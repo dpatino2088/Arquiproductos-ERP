@@ -139,6 +139,9 @@ export function useSOActions() {
             const bomErrors = (bomData as { errors?: string[] } | null)?.errors ?? [];
             throw new Error(`MO created but BOM generation failed: ${bomErrors.join('; ') || 'Unknown error'}`);
           }
+          // Nest-based fabric purchase qty for Material Demand / PO
+          const { recomputeMoFabricPurchase } = await import('../lib/fabricNestPurchase');
+          await recomputeMoFabricPurchase(mo.mo_id);
         }
         addNotification({
           type: 'success',

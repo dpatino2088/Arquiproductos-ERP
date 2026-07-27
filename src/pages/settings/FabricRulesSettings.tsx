@@ -35,14 +35,14 @@ const FORMULA_LABELS: Record<string, string> = {
 function inferDefaults(ptName: string): Partial<FabricRule> {
   const n = ptName.toLowerCase();
   if (n.includes('dual'))
-    return { fabric_width_source: 'tube_width', formula_code: 'ROLLER_DROPS', pricing_output_uom: 'm', panel_multiplier: 2, tube_wrap_mm: 35, bottom_wrap_mm: 0, safety_margin_mm: 20, fabric_width_clearance_mm: 2, waste_pct: 0.15, heatseal_price_per_m: 0, bottom_bar_wrap_pct: 0.08, allow_rotation: false, heatseal_direction: 'none' as const };
+    return { fabric_width_source: 'tube_width', formula_code: 'ROLLER_DROPS', pricing_output_uom: 'm', panel_multiplier: 2, tube_wrap_mm: 35, bottom_wrap_mm: 0, safety_margin_mm: 20, fabric_width_clearance_mm: 2, waste_pct: 0.15, purchase_waste_pct: 0.20, heatseal_price_per_m: 0, bottom_bar_wrap_pct: 0.08, allow_rotation: false, heatseal_direction: 'none' as const };
   if (n.includes('triple'))
-    return { fabric_width_source: 'tube_width', formula_code: 'ROLLER_DROPS', pricing_output_uom: 'm', panel_multiplier: 3, tube_wrap_mm: 35, bottom_wrap_mm: 0, safety_margin_mm: 20, fabric_width_clearance_mm: 2, waste_pct: 0.15, heatseal_price_per_m: 0, bottom_bar_wrap_pct: 0.08, allow_rotation: false, heatseal_direction: 'none' as const };
+    return { fabric_width_source: 'tube_width', formula_code: 'ROLLER_DROPS', pricing_output_uom: 'm', panel_multiplier: 3, tube_wrap_mm: 35, bottom_wrap_mm: 0, safety_margin_mm: 20, fabric_width_clearance_mm: 2, waste_pct: 0.15, purchase_waste_pct: 0.20, heatseal_price_per_m: 0, bottom_bar_wrap_pct: 0.08, allow_rotation: false, heatseal_direction: 'none' as const };
   if (n.includes('roller') || n.includes('zip'))
-    return { fabric_width_source: 'tube_width', formula_code: 'ROLLER_DROPS', pricing_output_uom: 'm', panel_multiplier: 1, tube_wrap_mm: 35, bottom_wrap_mm: 50, safety_margin_mm: 20, fabric_width_clearance_mm: 2, waste_pct: 0.15, heatseal_price_per_m: 5, bottom_bar_wrap_pct: 0.08, allow_rotation: true, heatseal_direction: 'horizontal' as const };
+    return { fabric_width_source: 'tube_width', formula_code: 'ROLLER_DROPS', pricing_output_uom: 'm', panel_multiplier: 1, tube_wrap_mm: 35, bottom_wrap_mm: 50, safety_margin_mm: 20, fabric_width_clearance_mm: 2, waste_pct: 0.15, purchase_waste_pct: 0.20, heatseal_price_per_m: 5, bottom_bar_wrap_pct: 0.08, allow_rotation: true, heatseal_direction: 'horizontal' as const };
   if (n.includes('drapery') || n.includes('curtain') || n.includes('wave') || n.includes('ripple') || n.includes('pinch'))
-    return { fabric_width_source: 'finished_width_x_fullness', formula_code: 'DRAPERY_PANELS', pricing_output_uom: 'm2', fullness_factor: 2.0, waste_pct: 0.10, allow_rotation: true, heatseal_direction: 'vertical' as const, bottom_hem_options: [0, 5, 10, 15] };
-  return { fabric_width_source: 'finished_width', formula_code: 'AREA_BASED', pricing_output_uom: 'm2', waste_pct: 0.15, allow_rotation: true, heatseal_direction: 'none' as const };
+    return { fabric_width_source: 'finished_width_x_fullness', formula_code: 'DRAPERY_PANELS', pricing_output_uom: 'm2', fullness_factor: 2.0, waste_pct: 0.10, purchase_waste_pct: 0.20, allow_rotation: true, heatseal_direction: 'vertical' as const, bottom_hem_options: [0, 5, 10, 15] };
+  return { fabric_width_source: 'finished_width', formula_code: 'AREA_BASED', pricing_output_uom: 'm2', waste_pct: 0.15, purchase_waste_pct: 0.20, allow_rotation: true, heatseal_direction: 'none' as const };
 }
 
 function getEmptyRule(productTypeId: string, ptName: string): Partial<FabricRule> {
@@ -61,6 +61,7 @@ function getEmptyRule(productTypeId: string, ptName: string): Partial<FabricRule
     extra_width_m: 0,
     pricing_output_uom: defaults.pricing_output_uom ?? 'm',
     waste_pct: defaults.waste_pct ?? 0.15,
+    purchase_waste_pct: defaults.purchase_waste_pct ?? 0.20,
     round_to_increment: 0.1,
     min_qty: 0,
     top_hem_cm: 0,
@@ -207,6 +208,7 @@ export default function FabricRulesSettings() {
       return Number.isFinite(n) ? n : undefined;
     };
     const wasteDisplay = draft.waste_pct == null ? '' : String(Math.round(draft.waste_pct * 100));
+    const purchaseWasteDisplay = draft.purchase_waste_pct == null ? '' : String(Math.round(draft.purchase_waste_pct * 100));
     const confectionDisplay = draft.confection_pct == null ? '' : String(Math.round(draft.confection_pct * 100));
     const bottomBarWrapDisplay = draft.bottom_bar_wrap_pct == null ? '' : String(Math.round(draft.bottom_bar_wrap_pct * 100));
     const cmToMmDisplay = (v: number | null | undefined): string => (v == null ? '' : String(Math.round(v * 10)));
@@ -436,10 +438,10 @@ export default function FabricRulesSettings() {
           </div>
         )}
 
-        {/* ── Waste + Purchasing + Confection ── */}
+        {/* ── Waste (quote) + Purchase waste (nest/PO) + Confection ── */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div>
-            <Label className="text-xs">Waste (%)</Label>
+            <Label className="text-xs">Waste (%) — quote</Label>
             <div className="relative">
               <Input
                 type="number" step={1} min={0} max={100}
@@ -452,6 +454,23 @@ export default function FabricRulesSettings() {
               />
               <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">%</span>
             </div>
+            <span className="text-[10px] text-gray-500">Linear qty for quoting/cost</span>
+          </div>
+          <div>
+            <Label className="text-xs">Purchase waste (%)</Label>
+            <div className="relative">
+              <Input
+                type="number" step={1} min={0} max={100}
+                value={purchaseWasteDisplay}
+                onChange={e => {
+                  const n = parseNumberOrUndefined(e.target.value);
+                  setDraft({ ...draft, purchase_waste_pct: n == null ? undefined : n / 100 });
+                }}
+                className="text-xs pr-6"
+              />
+              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">%</span>
+            </div>
+            <span className="text-[10px] text-gray-500">On nest roll use for PO (e.g. 18–25)</span>
           </div>
           <div>
             <Label className="text-xs text-gray-500 line-through">Confection (%)</Label>
@@ -591,7 +610,8 @@ export default function FabricRulesSettings() {
                                     )}
                                   </>
                                 )}
-                                <span>Waste: {(rule.waste_pct * 100).toFixed(0)}%</span>
+                                <span>Waste (quote): {(rule.waste_pct * 100).toFixed(0)}%</span>
+                                <span>Purchase waste: {((rule.purchase_waste_pct ?? 0.2) * 100).toFixed(0)}%</span>
                                 {(rule.confection_pct ?? 0) > 0 && (
                                   <span className="text-amber-700 line-through" title="Deprecated — moved to Labor Rules">Confection: {(rule.confection_pct * 100).toFixed(0)}%</span>
                                 )}

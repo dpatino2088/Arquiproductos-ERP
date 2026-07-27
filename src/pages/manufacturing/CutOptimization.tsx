@@ -16,6 +16,7 @@ import PanelCutDetail from '../../components/manufacturing/PanelCutDetail';
 import { advanceMOOnAllTasksComplete } from '../../lib/moLifecycle';
 import { optimize1D, type CutPiece } from '../../lib/cutOptimizer';
 import { optimize2D, type FabricPiece, type PlacedFabricPiece } from '../../lib/cutOptimizer2D';
+import { decomposePanelIntoDrops as decomposePanelIntoDropsShared, recomputeMoFabricPurchase } from '../../lib/fabricNestPurchase';
 import { generateConsolidated1DPDF, generateCutPlanPDF, type ConsolidatedCutGroup } from '../../lib/pdf/generateCutPlanPDF';
 import { generateThermalCutStickersPDF, type ThermalCutLabel } from '../../lib/pdf/thermalCutStickerPdf';
 import { Scissors, Layers, RefreshCw, Loader2, ChevronDown, ChevronRight, Printer, CheckCircle2, Circle, ArrowLeft, FileDown } from 'lucide-react';
@@ -819,6 +820,21 @@ export default function CutOptimization() {
     [skuGroups, selectedSkus],
   );
 
+  // Keep nest-based purchase qty in sync when fabric cut plan data is available
+  useEffect(() => {
+    if (mode !== 'fabric') return;
+    const moIds = [...new Set(allSkuGroups.flatMap((g) => g.cuts.map((c) => c.mo_id)))];
+    if (moIds.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      for (const id of moIds) {
+        if (cancelled) break;
+        await recomputeMoFabricPurchase(id);
+      }
+    })().catch(() => { /* non-blocking */ });
+    return () => { cancelled = true; };
+  }, [mode, allSkuGroups]);
+
   // Count of not-yet-cut lines across all visible SKUs (drives the "Mark All" button).
   const uncutLineCount = useMemo(
     () => skuGroups.reduce((sum, g) => sum + g.cuts.filter(c => !c.completed).length, 0),
@@ -1147,71 +1163,21 @@ export default function CutOptimization() {
    * Decompose a fabric panel into actual drops for roll placement.
    * Each drop is a rectangle that fits within the roll's fixed width.
    *
-   * - panelWidthMm (cut_length_mm) = effective width of the finished panel
-   * - dropHeightMm (cut_height_mm) = the drop/height including wraps + safety
-   * - rollWidthMm = fixed width of the fabric roll
-   *
-   * For ROLLER_DROPS: each drop uses the full roll width.
-   * If panelWidth ≤ rollWidth → 1 piece at panelWidth × dropHeight
-   * If panelWidth > rollWidth → primary drops at rollWidth + last drop at remainder.
-   *   The last (smallest) drop is the secondary piece that goes on top (next to tube),
-   *   the primary drops are full roll-width pieces.
-   *   Each piece has its REAL dimensions so the optimizer can reuse leftover space.
+   * Drop split shared with nest-based Material Demand purchase qty.
    */
-  function decomposePanelIntoDrops(
-    cut: PendingCut,
-    rollWidthMm: number,
-  ): FabricPiece[] {
-    const panelWidthMm = cut.cut_length_mm;
-    const dropHeightMm = cut.cut_height_mm;
-
-    const prodW = cut.product_width_m ? Math.round(cut.product_width_m * 1000) : null;
-    const prodH = cut.product_height_m ? Math.round(cut.product_height_m * 1000) : null;
-
-    if (!panelWidthMm || panelWidthMm <= 0 || !dropHeightMm || dropHeightMm <= 0) {
-      const w = prodW ?? null;
-      const h = prodH ?? null;
-      if (!w || !h) return [];
-
-      return [{
-        id: `${cut.bil_id}-d1`,
-        widthMm: Math.min(w, rollWidthMm),
-        heightMm: h,
+  function decomposePanelIntoDrops(cut: PendingCut, rollWidthMm: number): FabricPiece[] {
+    return decomposePanelIntoDropsShared(
+      {
+        bilId: cut.bil_id,
+        cutLengthMm: cut.cut_length_mm,
+        cutHeightMm: cut.cut_height_mm,
+        productWidthM: cut.product_width_m,
+        productHeightM: cut.product_height_m,
         moId: cut.mo_id,
         moNumber: cut.mo_number,
-        label: `${cut.mo_number} · ${w}×${h}mm`,
-      }];
-    }
-
-    if (panelWidthMm <= rollWidthMm) {
-      return [{
-        id: `${cut.bil_id}-d1`,
-        widthMm: panelWidthMm,
-        heightMm: dropHeightMm,
-        moId: cut.mo_id,
-        moNumber: cut.mo_number,
-        label: `${cut.mo_number} · ${Math.round(panelWidthMm)}×${Math.round(dropHeightMm)}mm`,
-      }];
-    }
-
-    const numDrops = Math.ceil(panelWidthMm / rollWidthMm);
-    const remainder = panelWidthMm - (numDrops - 1) * rollWidthMm;
-    const pieces: FabricPiece[] = [];
-
-    for (let i = 0; i < numDrops; i++) {
-      const isLastDrop = i === numDrops - 1;
-      const dropW = isLastDrop ? remainder : rollWidthMm;
-      const posLabel = isLastDrop ? 'Top (secondary)' : `Main${numDrops > 2 ? ` ${i + 1}` : ''}`;
-      pieces.push({
-        id: `${cut.bil_id}-d${i + 1}`,
-        widthMm: dropW,
-        heightMm: dropHeightMm,
-        moId: cut.mo_id,
-        moNumber: cut.mo_number,
-        label: `${cut.mo_number} · ${posLabel} · ${Math.round(dropW)}×${Math.round(dropHeightMm)}mm`,
-      });
-    }
-    return pieces;
+      },
+      rollWidthMm,
+    );
   }
 
   return (

@@ -1531,6 +1531,10 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
     return String(acc) || '—';
   }, []);
 
+  // Must be declared before buildProposalPDFDoc — closing over a later const
+  // causes TDZ ("Cannot access '…' before initialization") when generating the PDF.
+  const customerAddressDisplay = normalizeAddressText(customer?.address ?? null);
+
   const buildProposalPDFDoc = useCallback(
     async (variant: 'internal' | 'customer') => {
       if (!proposal || !proposalId) return null;
@@ -1853,7 +1857,23 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
       const fileName = `${proposalNo}_${customerPart}.PDF`;
       return { doc, fileName };
     },
-    [proposal, proposalId, displayLines, quoteLinesMap, configuredProductsMap, customer, contact, totals, summary, formatAccessoriesForPDF, dealerLogoUrl, headerForm]
+    [
+      proposal,
+      proposalId,
+      displayLines,
+      displayAddonsMap,
+      quoteLinesMap,
+      configuredProductsMap,
+      productTypeNameByCodeOrId,
+      customer,
+      customerAddressDisplay,
+      contact,
+      totals,
+      summary,
+      formatAccessoriesForPDF,
+      dealerLogoUrl,
+      headerForm,
+    ]
   );
 
   const handlePreviewPDF = useCallback(
@@ -2193,7 +2213,6 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
   const statusDropdownDisabled = contentReadOnly && !canRevertStatus;
 
   const contactDisplay = (contact?.contact_name ?? '').trim();
-  const customerAddressDisplay = normalizeAddressText(customer?.address ?? null);
   const linkedQuoteId = quote?.id ?? proposal.quote_id ?? null;
   const actionButtons = (
     <div className="flex items-center gap-2">

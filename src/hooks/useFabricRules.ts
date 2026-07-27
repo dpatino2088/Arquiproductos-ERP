@@ -19,6 +19,8 @@ export interface FabricRule {
   extra_width_m: number;
   pricing_output_uom: string;
   waste_pct: number;
+  /** Waste on nest roll consumption for Material Demand / PO (0–1). Pricing uses waste_pct. */
+  purchase_waste_pct: number;
   round_to_increment: number;
   min_qty: number;
   top_hem_cm: number;
