@@ -42,6 +42,7 @@ interface MOLine {
   sales_order_line_id: string | null;
   status: string;
   quantity: number;
+  unit_index: number;
   SaleOrderLine?: {
     description: string | null;
     collection_name: string | null;
@@ -57,7 +58,8 @@ interface MOLine {
 }
 
 interface MOLineReadiness {
-  sales_order_line_id: string;
+  manufacturing_order_line_id: string;
+  sales_order_line_id: string | null;
   readiness_status: 'ok' | 'incomplete';
   has_shortage: boolean;
 }
@@ -89,7 +91,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const [actionsOpen, setActionsOpen] = useState(false);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [moLines, setMoLines] = useState<MOLine[]>([]);
-  const [lineReadinessBySoLineId, setLineReadinessBySoLineId] = useState<Map<string, MOLineReadiness>>(new Map());
+  const [lineReadinessByMolId, setLineReadinessByMolId] = useState<Map<string, MOLineReadiness>>(new Map());
   const autoPromotingLinesRef = useRef(false);
   const [cancelReason, setCancelReason] = useState('');
   const [showCancelDialog, setShowCancelDialog] = useState(false);
@@ -97,7 +99,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const [reviewingAll, setReviewingAll] = useState(false);
   const [creatingAllWO, setCreatingAllWO] = useState(false);
   const [taskProgress, setTaskProgress] = useState<{ total: number; completed: number; inProgress: number }>({ total: 0, completed: 0, inProgress: 0 });
-  const [woLineIds, setWoLineIds] = useState<Set<string>>(new Set());
+  const [woMolIds, setWoMolIds] = useState<Set<string>>(new Set());
   const [siblingMOs, setSiblingMOs] = useState<{ id: string; manufacturing_order_no: string }[]>([]);
   const [claimInfo, setClaimInfo] = useState<{ id: string; claim_no: string; chargeable: boolean } | null>(null);
   const isServiceMO = mo?.mo_type === 'rework' || mo?.mo_type === 'replacement';
@@ -154,13 +156,13 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     if (MATERIAL_READY_OR_BEYOND.includes(l.status)) return true;
     // Material already allocated (readiness ok) counts as ready even if the line
     // hasn't been promoted to materials_ready yet — no manual "Allocate" needed.
-    if (l.status === 'material_available' && l.sales_order_line_id) {
-      return lineReadinessBySoLineId.get(l.sales_order_line_id)?.readiness_status === 'ok';
+    if (l.status === 'material_available') {
+      return lineReadinessByMolId.get(l.id)?.readiness_status === 'ok';
     }
     return false;
   }).length;
   const eligibleWOCount = moLines.filter(
-    (l) => l.status === 'materials_ready' && !!l.sales_order_line_id && !woLineIds.has(l.sales_order_line_id as string)
+    (l) => l.status === 'materials_ready' && !woMolIds.has(l.id)
   ).length;
   const materialTag = moLines.length === 0
     ? ''
@@ -233,13 +235,14 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     if (!moId) return;
     const { data: molData } = await supabase
       .from('ManufacturingOrderLines')
-      .select('id, sales_order_line_id, status, quantity')
+      .select('id, sales_order_line_id, status, quantity, unit_index')
       .eq('manufacturing_order_id', moId)
       .eq('deleted', false)
-      .order('created_at', { ascending: true });
+      .order('created_at', { ascending: true })
+      .order('unit_index', { ascending: true });
     if (!molData || molData.length === 0) {
       setMoLines([]);
-      setLineReadinessBySoLineId(new Map());
+      setLineReadinessByMolId(new Map());
       return;
     }
 
@@ -263,6 +266,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
 
     const mappedLines = molData.map((m: any) => ({
       ...m,
+      unit_index: Number(m.unit_index ?? 1),
       SaleOrderLine: solMap.get(m.sales_order_line_id) ?? null,
     }));
     setMoLines(mappedLines);
@@ -272,15 +276,15 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     });
     if (readinessErr) {
       if (import.meta.env.DEV) console.warn('[ManufacturingOrderDetail] line readiness error:', readinessErr);
-      setLineReadinessBySoLineId(new Map());
+      setLineReadinessByMolId(new Map());
       return;
     }
     const nextMap = new Map<string, MOLineReadiness>();
     (readinessRows as MOLineReadiness[] | null ?? []).forEach((row) => {
-      if (!row?.sales_order_line_id) return;
-      nextMap.set(row.sales_order_line_id, row);
+      if (!row?.manufacturing_order_line_id) return;
+      nextMap.set(row.manufacturing_order_line_id, row);
     });
-    setLineReadinessBySoLineId(nextMap);
+    setLineReadinessByMolId(nextMap);
 
   }, [moId]);
 
@@ -288,15 +292,15 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     if (!moId) return;
     const { data } = await supabase
       .from('WorkOrderTasks')
-      .select('status, sales_order_line_id')
+      .select('status, manufacturing_order_line_id')
       .eq('manufacturing_order_id', moId)
       .eq('deleted', false);
     if (data) {
       const ids = new Set<string>();
-      for (const t of data as Array<{ sales_order_line_id: string | null }>) {
-        if (t.sales_order_line_id) ids.add(t.sales_order_line_id);
+      for (const t of data as Array<{ manufacturing_order_line_id: string | null }>) {
+        if (t.manufacturing_order_line_id) ids.add(t.manufacturing_order_line_id);
       }
-      setWoLineIds(ids);
+      setWoMolIds(ids);
       setTaskProgress({
         total: data.length,
         completed: data.filter((t: any) => t.status === 'completed').length,
@@ -336,9 +340,8 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   useEffect(() => {
     if (autoPromotingLinesRef.current) return;
     const promotable = moLines.filter((l) => {
-      if (!l.sales_order_line_id) return false;
       if (l.status !== 'reviewed' && l.status !== 'confirmed' && l.status !== 'material_available') return false;
-      const r = lineReadinessBySoLineId.get(l.sales_order_line_id);
+      const r = lineReadinessByMolId.get(l.id);
       return r?.readiness_status === 'ok';
     });
     if (promotable.length === 0) return;
@@ -364,7 +367,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
         refetch();
       }
     })();
-  }, [moLines, lineReadinessBySoLineId, refetch]);
+  }, [moLines, lineReadinessByMolId, refetch]);
 
   const fetchFinancialSummary = useCallback(async () => {
     if (!mo?.sales_order_id) { setFinancialSummary(null); return; }
@@ -667,12 +670,12 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   }, [moLines, addNotification, refetch]);
 
   const handleCreateWO = useCallback(async (line: MOLine) => {
-    if (!moId || !line.sales_order_line_id) return;
+    if (!moId) return;
     setAdvancingLineId(line.id);
 
     const { data, error: rpcErr } = await supabase.rpc('generate_work_orders_for_line', {
       p_mo_id: moId,
-      p_sales_order_line_id: line.sales_order_line_id,
+      p_manufacturing_order_line_id: line.id,
       p_regenerate: false,
     });
     setAdvancingLineId(null);
@@ -688,9 +691,9 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       return;
     }
     await fetchTaskProgress();
-    setWoLineIds((prev) => {
+    setWoMolIds((prev) => {
       const next = new Set(prev);
-      next.add(line.sales_order_line_id as string);
+      next.add(line.id);
       return next;
     });
     addNotification({
@@ -703,7 +706,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
   const handleCreateAllWO = useCallback(async () => {
     if (!moId) return;
     const eligible = moLines.filter(
-      (l) => l.status === 'materials_ready' && !!l.sales_order_line_id && !woLineIds.has(l.sales_order_line_id as string)
+      (l) => l.status === 'materials_ready' && !woMolIds.has(l.id)
     );
     if (eligible.length === 0) return;
 
@@ -711,20 +714,20 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     let created = 0;
     let tasksTotal = 0;
     let linesTotal = 0;
-    const createdSoLineIds: string[] = [];
+    const createdMolIds: string[] = [];
     const failures: string[] = [];
 
     for (const line of eligible) {
       const { data, error: rpcErr } = await supabase.rpc('generate_work_orders_for_line', {
         p_mo_id: moId,
-        p_sales_order_line_id: line.sales_order_line_id,
+        p_manufacturing_order_line_id: line.id,
         p_regenerate: false,
       });
       const result = data as { ok?: boolean; error?: string; tasks_created?: number; lines_created?: number } | null;
       if (rpcErr || !result?.ok) {
         const message = (result?.error ?? rpcErr?.message ?? '').toLowerCase();
         if (message.includes('already exist')) {
-          createdSoLineIds.push(line.sales_order_line_id as string);
+          createdMolIds.push(line.id);
           continue;
         }
         failures.push(result?.error ?? rpcErr?.message ?? 'Unknown error');
@@ -733,15 +736,15 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       created += 1;
       tasksTotal += Number(result.tasks_created ?? 0);
       linesTotal += Number(result.lines_created ?? 0);
-      createdSoLineIds.push(line.sales_order_line_id as string);
+      createdMolIds.push(line.id);
     }
 
     setCreatingAllWO(false);
     await fetchTaskProgress();
-    if (createdSoLineIds.length > 0) {
-      setWoLineIds((prev) => {
+    if (createdMolIds.length > 0) {
+      setWoMolIds((prev) => {
         const next = new Set(prev);
-        createdSoLineIds.forEach((id) => next.add(id));
+        createdMolIds.forEach((id) => next.add(id));
         return next;
       });
     }
@@ -759,7 +762,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
         message: `${failures.length} line(s) could not generate Work Orders. ${failures[0]}`,
       });
     }
-  }, [moId, moLines, woLineIds, addNotification, fetchTaskProgress]);
+  }, [moId, moLines, woMolIds, addNotification, fetchTaskProgress]);
 
 
   if (!moId) {
@@ -1332,9 +1335,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
               ) : (
                 moLines.map((line, idx) => {
                   const sol = line.SaleOrderLine;
-                  const readiness = line.sales_order_line_id
-                    ? lineReadinessBySoLineId.get(line.sales_order_line_id)
-                    : undefined;
+                  const readiness = lineReadinessByMolId.get(line.id);
                   const ptLabels: Record<string, string> = {
                     roller: 'Roller Shade', roller_shade: 'Roller Shade',
                     drapery: 'Drapery', dual: 'Dual Shade', dual_shade: 'Dual Shade',
@@ -1351,7 +1352,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
                   const area = sol?.area;
                   const position = sol?.position;
                   const lineStatus = line.status || 'draft';
-                  const hasWO = !!line.sales_order_line_id && woLineIds.has(line.sales_order_line_id);
+                  const hasWO = woMolIds.has(line.id);
                   const materialOk = readiness?.readiness_status === 'ok';
 
                   return (
@@ -1365,6 +1366,11 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
                         <div className="font-medium text-gray-900">
                           {ptLabel}{ptLabel && ' — '}{fabricName}
                           {manufacturer && <span className="text-gray-500 font-normal"> | {manufacturer}</span>}
+                          {Number(sol?.quantity ?? 0) > 1 && (
+                            <span className="ml-1.5 text-xs font-normal text-gray-500">
+                              · unit #{line.unit_index || 1}
+                            </span>
+                          )}
                         </div>
                         <div className="flex items-center gap-2 mt-0.5">
                           {sku && <span className="text-xs text-gray-500 font-mono">{sku}</span>}
@@ -1381,7 +1387,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
                           </div>
                         ) : '—'}
                       </td>
-                      <td className="px-4 py-3 text-right tabular-nums">{sol?.quantity ?? line.quantity ?? '—'}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">{line.quantity ?? 1}</td>
                       <td className="px-4 py-3 text-center">
                         {readiness ? (
                           <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium ${

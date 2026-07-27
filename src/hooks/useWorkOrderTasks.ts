@@ -162,11 +162,11 @@ export function useWorkOrderTasks(moId: string | null | undefined) {
 
     const { data: biData } = await supabase
       .from('BOMInstances')
-      .select('sales_order_line_id')
+      .select('manufacturing_order_line_id')
       .eq('id', bilData.bom_instance_id)
       .single();
-    const soLineId = biData?.sales_order_line_id as string | null;
-    if (!soLineId) return true;
+    const molId = biData?.manufacturing_order_line_id as string | null;
+    if (!molId) return true;
 
     const { data: readinessRows, error } = await supabase.rpc('get_mo_line_material_readiness', {
       p_mo_id: taskData.manufacturing_order_id,
@@ -180,8 +180,8 @@ export function useWorkOrderTasks(moId: string | null | undefined) {
       return false;
     }
 
-    const lineReadiness = ((readinessRows as Array<{ sales_order_line_id: string; readiness_status: string }> | null) ?? [])
-      .find((r) => r.sales_order_line_id === soLineId);
+    const lineReadiness = ((readinessRows as Array<{ manufacturing_order_line_id: string; readiness_status: string }> | null) ?? [])
+      .find((r) => r.manufacturing_order_line_id === molId);
     if (lineReadiness?.readiness_status === 'incomplete') {
       addNotification({
         type: 'warning',

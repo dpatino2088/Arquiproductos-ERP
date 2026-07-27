@@ -173,11 +173,11 @@ export default function MOLineDetail({ moId: propMoId, lineId: propLineId }: MOL
   }, [moId, lineId]);
 
   const fetchMaterials = useCallback(async () => {
-    if (!moId || !line?.sales_order_line_id) { setLoadingMaterials(false); return; }
+    if (!moId || !lineId) { setLoadingMaterials(false); return; }
     setLoadingMaterials(true);
     const { data, error } = await supabase.rpc('get_mo_line_materials_detail', {
       p_mo_id: moId,
-      p_sales_order_line_id: line.sales_order_line_id,
+      p_manufacturing_order_line_id: lineId,
     });
     if (error) {
       console.warn('get_mo_line_materials_detail error:', error);
@@ -186,7 +186,7 @@ export default function MOLineDetail({ moId: propMoId, lineId: propLineId }: MOL
       setMaterials((data ?? []) as MaterialRow[]);
     }
     setLoadingMaterials(false);
-  }, [moId, line?.sales_order_line_id]);
+  }, [moId, lineId]);
 
   useEffect(() => { fetchLine(); }, [fetchLine]);
   useEffect(() => { fetchMaterials(); }, [fetchMaterials]);

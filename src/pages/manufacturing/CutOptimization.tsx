@@ -170,7 +170,7 @@ export default function CutOptimization() {
       // tasks stay so their cuts remain visible in the Completed/All tabs.
       let taskQuery = supabase
         .from('WorkOrderTasks')
-        .select('id, manufacturing_order_id, work_center_id, status, assigned_to_user_id, planned_start_at, sales_order_line_id')
+        .select('id, manufacturing_order_id, work_center_id, status, assigned_to_user_id, planned_start_at, sales_order_line_id, manufacturing_order_line_id')
         .eq('deleted', false)
         .in('status', ['in_progress', 'completed']);
 
@@ -195,27 +195,32 @@ export default function CutOptimization() {
       const taskIds = matchedTasks.map((t: any) => t.id);
       const moIds = [...new Set(matchedTasks.map((t: any) => t.manufacturing_order_id))];
 
-      // Build stable WOL labels (L1/L2/...) per MO based on MOL creation order
-      const lineIndexByMoSol: Record<string, number> = {};
+      // Stable WOL labels: L{solOrdinal} · #{unit_index} per MO
+      const lineLabelByMolId: Record<string, string> = {};
       if (moIds.length > 0) {
         const { data: molRows } = await supabase
           .from('ManufacturingOrderLines')
-          .select('manufacturing_order_id, sales_order_line_id, created_at')
+          .select('id, manufacturing_order_id, sales_order_line_id, unit_index, created_at')
           .in('manufacturing_order_id', moIds)
           .eq('deleted', false)
           .order('manufacturing_order_id', { ascending: true })
-          .order('created_at', { ascending: true });
-        const seenByMo: Record<string, Set<string>> = {};
-        const idxByMo: Record<string, number> = {};
+          .order('created_at', { ascending: true })
+          .order('unit_index', { ascending: true });
+        const solOrdByMoSol: Record<string, number> = {};
+        const nextSolOrdByMo: Record<string, number> = {};
         for (const r of (molRows ?? [])) {
           const moId = (r as any).manufacturing_order_id as string;
           const solId = (r as any).sales_order_line_id as string | null;
+          const molId = (r as any).id as string;
           if (!solId) continue;
-          if (!seenByMo[moId]) { seenByMo[moId] = new Set<string>(); idxByMo[moId] = 0; }
-          if (seenByMo[moId].has(solId)) continue;
-          seenByMo[moId].add(solId);
-          idxByMo[moId] += 1;
-          lineIndexByMoSol[`${moId}::${solId}`] = idxByMo[moId];
+          const key = `${moId}::${solId}`;
+          if (solOrdByMoSol[key] == null) {
+            nextSolOrdByMo[moId] = (nextSolOrdByMo[moId] ?? 0) + 1;
+            solOrdByMoSol[key] = nextSolOrdByMo[moId];
+          }
+          const solOrd = solOrdByMoSol[key];
+          const unitIdx = Number((r as any).unit_index ?? 1);
+          lineLabelByMolId[molId] = unitIdx > 1 ? `L${solOrd} · #${unitIdx}` : `L${solOrd}`;
         }
       }
 
@@ -270,8 +275,9 @@ export default function CutOptimization() {
         if (!liveMoIds.has(t.manufacturing_order_id)) return;
         taskToMo[t.id] = t.manufacturing_order_id;
         taskToSol[t.id] = t.sales_order_line_id ?? null;
-        const idx = t.sales_order_line_id ? lineIndexByMoSol[`${t.manufacturing_order_id}::${t.sales_order_line_id}`] : null;
-        taskToLineLabel[t.id] = idx ? `L${idx}` : null;
+        taskToLineLabel[t.id] = t.manufacturing_order_line_id
+          ? (lineLabelByMolId[t.manufacturing_order_line_id] ?? null)
+          : null;
       });
 
       const catalogIds = [...new Set((lines ?? []).map((l: any) => l.catalog_item_id).filter(Boolean))];
@@ -282,17 +288,8 @@ export default function CutOptimization() {
       const catMap: Record<string, any> = {};
       (catalogItems ?? []).forEach((ci: any) => { catMap[ci.id] = ci; });
 
-      // Fetch product_type + product dimensions + style + SOL qty via BIL -> BI -> SOL -> CP
-      type BilMeta = {
-        product_type: string | null;
-        product_name: string | null;
-        style_label: string | null;
-        width_m: number | null;
-        height_m: number | null;
-        sol_quantity: number;
-      };
-      const bilMetaMap: Record<string, BilMeta> = {};
-      const solQtyBySolId: Record<string, number> = {};
+      // Fetch product_type + product dimensions + style via BIL -> BI -> SOL -> CP
+      const bilMetaMap: Record<string, { product_type: string | null; product_name: string | null; style_label: string | null; width_m: number | null; height_m: number | null }> = {};
       const bilIds = [...new Set((lines ?? []).map((l: any) => l.bom_instance_line_id).filter(Boolean))] as string[];
       if (bilIds.length > 0) {
         const { data: bilRows } = await supabase
@@ -314,16 +311,12 @@ export default function CutOptimization() {
 
         const solIds = [...new Set(Object.values(biSolMap))];
         const { data: solRows } = solIds.length > 0
-          ? await supabase.from('SaleOrderLines').select('id, product_type, width_m, height_m, collection_name, description, configured_product_id, quantity').in('id', solIds)
+          ? await supabase.from('SaleOrderLines').select('id, product_type, width_m, height_m, collection_name, description, configured_product_id').in('id', solIds)
           : { data: [] };
 
         const solMap: Record<string, any> = {};
-        (solRows ?? []).forEach((r: any) => {
-          solMap[r.id] = r;
-          solQtyBySolId[r.id] = Math.max(1, Math.round(Number(r.quantity) || 1));
-        });
+        (solRows ?? []).forEach((r: any) => { solMap[r.id] = r; });
 
-        // Fetch style_code from ConfiguredProducts.config_snapshot
         const cpIds = [...new Set((solRows ?? []).map((r: any) => r.configured_product_id).filter(Boolean))] as string[];
         const cpStyleMap: Record<string, string> = {};
         if (cpIds.length > 0) {
@@ -354,21 +347,7 @@ export default function CutOptimization() {
             style_label: cpId ? (cpStyleMap[cpId] ?? null) : null,
             width_m: sol?.width_m != null ? Number(sol.width_m) : null,
             height_m: sol?.height_m != null ? Number(sol.height_m) : null,
-            sol_quantity: solId ? (solQtyBySolId[solId] ?? 1) : 1,
           };
-        });
-      }
-
-      // Also resolve SOL qty for tasks whose BIL meta path missed (fallback by task SOL).
-      const taskSolIds = [...new Set(Object.values(taskToSol).filter(Boolean))] as string[];
-      const missingSolQty = taskSolIds.filter((id) => solQtyBySolId[id] == null);
-      if (missingSolQty.length > 0) {
-        const { data: extraSols } = await supabase
-          .from('SaleOrderLines')
-          .select('id, quantity')
-          .in('id', missingSolQty);
-        (extraSols ?? []).forEach((r: any) => {
-          solQtyBySolId[r.id] = Math.max(1, Math.round(Number(r.quantity) || 1));
         });
       }
 
@@ -378,73 +357,50 @@ export default function CutOptimization() {
         const cutHeight = l.cut_width_mm != null ? Number(l.cut_width_mm) : null;
 
         if (mode === 'fabric') {
-          // Cut Optimization (fabric) is the roll-cut order: only fabric panels with full 2D cuts.
           return role === 'fabric'
             && cutLength != null && cutLength > 0
             && cutHeight != null && cutHeight > 0;
         }
 
-        // Cut Optimization (profiles) is 1D profile cutting: exclude fabric and require a valid linear cut.
         return role !== 'fabric'
           && cutLength != null && cutLength > 0;
       };
 
       const modeEligibleLines = (lines ?? []).filter((l: any) => isLineEligibleForMode(l));
-      // BOM is 1 instance per SOL; WOTL.qty is already per-unit × sol.quantity (meters/ea).
-      // Cut Plan must nest one physical piece per sold unit — expand by SOL.quantity.
+      // One WOTL / BIL per MOL unit — no SOL.quantity expansion.
       const cuts: PendingCut[] = modeEligibleLines
         .filter((l: any) => Boolean(taskToMo[l.task_id]))
-        .flatMap((l: any) => {
+        .map((l: any) => {
         const moId = taskToMo[l.task_id];
-        const solId = taskToSol[l.task_id];
         const ci = l.catalog_item_id ? catMap[l.catalog_item_id] : null;
         const bilMeta = l.bom_instance_line_id ? bilMetaMap[l.bom_instance_line_id] : null;
-        const unitCount = Math.max(
-          1,
-          bilMeta?.sol_quantity
-            ?? (solId ? solQtyBySolId[solId] : undefined)
-            ?? 1,
-        );
-        const baseBilId = (l.bom_instance_line_id ?? l.id) as string;
-        const baseLabel = taskToLineLabel[l.task_id] ?? null;
-        const totalQty = Number(l.qty) || 0;
-        const perUnitQty = unitCount > 0 ? totalQty / unitCount : totalQty;
-
-        return Array.from({ length: unitCount }, (_, unitIdx) => {
-          const unitNo = unitIdx + 1;
-          const lineLabel = unitCount > 1 && baseLabel
-            ? `${baseLabel} · #${unitNo}`
-            : unitCount > 1
-              ? `#${unitNo}`
-              : baseLabel;
-          return {
-            wotl_id: l.id,
-            bil_id: unitCount > 1 ? `${baseBilId}::u${unitNo}` : baseBilId,
-            sku: l.sku ?? '',
-            item_name: l.item_name ?? '',
-            cut_length_mm: l.cut_length_mm != null ? Number(l.cut_length_mm) : null,
-            cut_height_mm: l.cut_width_mm != null ? Number(l.cut_width_mm) : null,
-            qty: perUnitQty,
-            mo_id: moId,
-            mo_number: moMap[moId] ?? '',
-            sales_order_line_id: solId ?? null,
-            line_label: lineLabel,
-            so_number: moToSoId[moId] ? soMap[moToSoId[moId] as string] ?? null : null,
-            so_id: moToSoId[moId] ?? null,
-            dealer_name: moToSoId[moId] ? dealerMap[soDealerIdMap[moToSoId[moId] as string] ?? ''] ?? null : null,
-            part_role: l.component_role ?? '',
-            stock_length_mm: ci?.stock_length_mm != null ? Number(ci.stock_length_mm) : null,
-            roll_width_m: ci?.roll_width_m != null ? Number(ci.roll_width_m) : null,
-            roll_length_value: ci?.roll_length_value != null ? Number(ci.roll_length_value) : null,
-            roll_length_uom: ci?.roll_length_uom ?? null,
-            product_type: bilMeta?.product_type ?? null,
-            product_name: bilMeta?.product_name ?? null,
-            style_label: bilMeta?.style_label ?? null,
-            product_width_m: bilMeta?.width_m ?? null,
-            product_height_m: bilMeta?.height_m ?? null,
-            completed: l.completed === true,
-          } satisfies PendingCut;
-        });
+        return {
+          wotl_id: l.id,
+          bil_id: l.bom_instance_line_id ?? l.id,
+          sku: l.sku ?? '',
+          item_name: l.item_name ?? '',
+          cut_length_mm: l.cut_length_mm != null ? Number(l.cut_length_mm) : null,
+          cut_height_mm: l.cut_width_mm != null ? Number(l.cut_width_mm) : null,
+          qty: Number(l.qty),
+          mo_id: moId,
+          mo_number: moMap[moId] ?? '',
+          sales_order_line_id: taskToSol[l.task_id] ?? null,
+          line_label: taskToLineLabel[l.task_id] ?? null,
+          so_number: moToSoId[moId] ? soMap[moToSoId[moId] as string] ?? null : null,
+          so_id: moToSoId[moId] ?? null,
+          dealer_name: moToSoId[moId] ? dealerMap[soDealerIdMap[moToSoId[moId] as string] ?? ''] ?? null : null,
+          part_role: l.component_role ?? '',
+          stock_length_mm: ci?.stock_length_mm != null ? Number(ci.stock_length_mm) : null,
+          roll_width_m: ci?.roll_width_m != null ? Number(ci.roll_width_m) : null,
+          roll_length_value: ci?.roll_length_value != null ? Number(ci.roll_length_value) : null,
+          roll_length_uom: ci?.roll_length_uom ?? null,
+          product_type: bilMeta?.product_type ?? null,
+          product_name: bilMeta?.product_name ?? null,
+          style_label: bilMeta?.style_label ?? null,
+          product_width_m: bilMeta?.width_m ?? null,
+          product_height_m: bilMeta?.height_m ?? null,
+          completed: l.completed === true,
+        };
       });
 
       return { cuts, ineligibleCount: Math.max(0, modeEligibleLines.length - cuts.length) };

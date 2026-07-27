@@ -188,7 +188,6 @@ export async function recomputeMoFabricPurchase(moId: string): Promise<{ ok: boo
     configured_product_id: string | null;
     width_m?: number | null;
     height_m?: number | null;
-    quantity?: number | null;
   };
 
   const { data: moRaw, error: moErr } = await supabase
@@ -241,13 +240,13 @@ export async function recomputeMoFabricPurchase(moId: string): Promise<{ ok: boo
   if (ciErr) return { ok: false, rows: 0, error: ciErr.message };
   const catalogMap = new Map((catalogItemsRaw as CatalogRow[] | null ?? []).map((c) => [c.id, c]));
 
-  // Product type + sold qty per SOL for FabricRules / nest expansion
+  // Product type per SOL for FabricRules (rotation / purchase_waste).
+  // Nest pieces = one per BOMInstanceLine; unit split is already N BOMInstances.
   const productTypeBySol = new Map<string, string>();
-  const solQtyBySol = new Map<string, number>();
   if (solIds.length > 0) {
     const { data: solsRaw } = await supabase
       .from('SaleOrderLines')
-      .select('id, product_type_id, configured_product_id, quantity')
+      .select('id, product_type_id, configured_product_id')
       .in('id', solIds);
     const sols = (solsRaw ?? []) as SolRow[];
     const cpIds = [...new Set(sols.map((s) => s.configured_product_id).filter(Boolean))] as string[];
@@ -264,7 +263,6 @@ export async function recomputeMoFabricPurchase(moId: string): Promise<{ ok: boo
     for (const s of sols) {
       const pt = s.product_type_id || (s.configured_product_id ? cpTypeMap.get(s.configured_product_id) : null);
       if (pt) productTypeBySol.set(s.id, pt);
-      solQtyBySol.set(s.id, Math.max(1, Math.round(Number(s.quantity) || 1)));
     }
   }
 
@@ -316,25 +314,21 @@ export async function recomputeMoFabricPurchase(moId: string): Promise<{ ok: boo
     const solId = instanceSolMap.get(line.bom_instance_id) ?? null;
     const dims = solId ? dimsBySol.get(solId) : undefined;
     const pt = solId ? productTypeBySol.get(solId) : undefined;
-    // BOM is 1 instance per SOL — nest one physical panel per sold unit.
-    const unitCount = solId ? (solQtyBySol.get(solId) ?? 1) : 1;
     let g = groups.get(catalogItemId);
     if (!g) {
       g = { catalogItemId, cuts: [], productTypeIds: new Set() };
       groups.set(catalogItemId, g);
     }
     if (pt) g.productTypeIds.add(pt);
-    for (let u = 1; u <= unitCount; u++) {
-      g.cuts.push({
-        bilId: unitCount > 1 ? `${line.id}::u${u}` : line.id,
-        cutLengthMm: line.cut_length_mm != null ? Number(line.cut_length_mm) : null,
-        cutHeightMm: line.cut_height_mm != null ? Number(line.cut_height_mm) : null,
-        productWidthM: dims?.width_m != null ? Number(dims.width_m) : null,
-        productHeightM: dims?.height_m != null ? Number(dims.height_m) : null,
-        moId: mo.id,
-        moNumber: mo.manufacturing_order_no ?? undefined,
-      });
-    }
+    g.cuts.push({
+      bilId: line.id,
+      cutLengthMm: line.cut_length_mm != null ? Number(line.cut_length_mm) : null,
+      cutHeightMm: line.cut_height_mm != null ? Number(line.cut_height_mm) : null,
+      productWidthM: dims?.width_m != null ? Number(dims.width_m) : null,
+      productHeightM: dims?.height_m != null ? Number(dims.height_m) : null,
+      moId: mo.id,
+      moNumber: mo.manufacturing_order_no ?? undefined,
+    });
   }
 
   const rows: FabricPurchaseRow[] = [];
