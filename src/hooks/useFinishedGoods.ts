@@ -34,6 +34,9 @@ export interface FinishedGoodsMOGroup {
   lines: FinishedGoodLine[];
 }
 
+/** Outbound fulfillment of the SO (not payment). */
+export type SoFulfillmentStatus = 'partial' | 'ready_for_delivery' | 'delivered';
+
 export interface FinishedGoodsSOGroup {
   sales_order_id: string;
   sales_order_no: string;
@@ -47,6 +50,12 @@ export interface FinishedGoodsSOGroup {
   totalAccessories: number;
   deliveredAccessories: number;
   hasServiceMOOnly: boolean;
+  /** All manufacture + supply units on the SO (for Partial vs Ready). */
+  soDeliverableTotal: number;
+  soDeliverableReady: number;
+  soDeliverableDelivered: number;
+  soDeliverablePending: number;
+  fulfillmentStatus: SoFulfillmentStatus;
 }
 
 interface SalesOrderLookupRow {
@@ -73,6 +82,114 @@ export interface UseFinishedGoodsOptions {
    * leaves this off; the Inventory > Deliveries queue turns it on.
    */
   includeSupply?: boolean;
+}
+
+type SoProgress = { total: number; ready: number; delivered: number; pending: number };
+
+function deriveFulfillmentStatus(p: SoProgress): SoFulfillmentStatus {
+  if (p.total <= 0) return 'ready_for_delivery';
+  if (p.delivered >= p.total && p.ready === 0) return 'delivered';
+  // Partial: some ready now while others pending, or mid multi-wave shipment.
+  if (p.ready > 0 && p.pending > 0) return 'partial';
+  if (p.ready > 0 && p.delivered > 0) return 'partial';
+  if (p.pending > 0 && p.delivered > 0) return 'partial';
+  if (p.ready > 0) return 'ready_for_delivery';
+  return 'delivered';
+}
+
+async function loadSoDeliverableProgress(
+  organizationId: string,
+  soIds: string[],
+): Promise<Map<string, SoProgress>> {
+  const map = new Map<string, SoProgress>();
+  const bump = (soId: string, status: string) => {
+    const cur = map.get(soId) ?? { total: 0, ready: 0, delivered: 0, pending: 0 };
+    cur.total += 1;
+    if (status === 'ready') cur.ready += 1;
+    else if (status === 'delivered') cur.delivered += 1;
+    else cur.pending += 1;
+    map.set(soId, cur);
+  };
+
+  const { data: rpcProgress, error: rpcErr } = await supabase.rpc('get_so_deliverable_progress', {
+    p_org_id: organizationId,
+    p_so_ids: soIds,
+  });
+  if (!rpcErr && rpcProgress) {
+    for (const row of rpcProgress as {
+      sales_order_id: string;
+      total_count: number;
+      ready_count: number;
+      delivered_count: number;
+      pending_count: number;
+    }[]) {
+      map.set(row.sales_order_id, {
+        total: Number(row.total_count ?? 0),
+        ready: Number(row.ready_count ?? 0),
+        delivered: Number(row.delivered_count ?? 0),
+        pending: Number(row.pending_count ?? 0),
+      });
+    }
+    return map;
+  }
+
+  const { data: ptRows } = await supabase
+    .from('ProductTypes')
+    .select('code, fulfillment_type')
+    .eq('organization_id', organizationId);
+  const fromPt = (ptRows ?? [])
+    .filter((p: { fulfillment_type: string | null }) => p.fulfillment_type === 'supply_only')
+    .map((p: { code: string }) => p.code);
+  const supplyCodes = new Set(fromPt.length > 0 ? fromPt : ['catalog', 'service', 'window_film']);
+
+  const { data: moRows } = await supabase
+    .from('ManufacturingOrders')
+    .select('id, sales_order_id')
+    .eq('organization_id', organizationId)
+    .eq('deleted', false)
+    .in('sales_order_id', soIds);
+  const moList = (moRows ?? []) as { id: string; sales_order_id: string }[];
+  const moToSo = new Map(moList.map((m) => [m.id, m.sales_order_id]));
+  const moIds = moList.map((m) => m.id);
+
+  if (moIds.length > 0) {
+    const { data: molRows } = await supabase
+      .from('ManufacturingOrderLines')
+      .select('id, manufacturing_order_id, delivery_status, sales_order_line_id, SaleOrderLines(product_type)')
+      .eq('deleted', false)
+      .in('manufacturing_order_id', moIds);
+    for (const mol of (molRows ?? []) as {
+      manufacturing_order_id: string;
+      delivery_status: string | null;
+      SaleOrderLines: { product_type: string | null } | { product_type: string | null }[] | null;
+    }[]) {
+      const sol = Array.isArray(mol.SaleOrderLines) ? mol.SaleOrderLines[0] : mol.SaleOrderLines;
+      const pt = sol?.product_type ?? '';
+      if (pt && supplyCodes.has(pt)) continue;
+      const soId = moToSo.get(mol.manufacturing_order_id);
+      if (!soId) continue;
+      bump(soId, mol.delivery_status ?? 'pending');
+    }
+  }
+
+  if (supplyCodes.size > 0) {
+    const { data: solRows } = await supabase
+      .from('SaleOrderLines')
+      .select('id, sales_order_id, delivery_status, product_type')
+      .eq('organization_id', organizationId)
+      .or('deleted.eq.false,deleted.is.null')
+      .in('sales_order_id', soIds)
+      .in('product_type', [...supplyCodes])
+      .not('catalog_item_id', 'is', null);
+    for (const sol of (solRows ?? []) as {
+      sales_order_id: string;
+      delivery_status: string | null;
+    }[]) {
+      bump(sol.sales_order_id, sol.delivery_status ?? 'pending');
+    }
+  }
+
+  return map;
 }
 
 export function useFinishedGoods(options?: UseFinishedGoodsOptions) {
@@ -227,85 +344,143 @@ export function useFinishedGoods(options?: UseFinishedGoodsOptions) {
         throw new Error(err.message);
       }
 
-      // Supply / MTM lines (bought or stocked products, no Manufacturing Order).
-      // Once reserved/received they are "ready" and must be deliverable with the
-      // same rules as manufactured (CP) products. Only folded in for the unified
-      // Deliveries queue; Finished Goods stays manufactured-only.
-      if (includeSupply) try {
-        const { data: ptRows } = await supabase
-          .from('ProductTypes')
-          .select('code')
-          .eq('organization_id', activeOrganizationId)
-          .eq('fulfillment_type', 'supply_only');
-        const supplyCodes = (ptRows ?? []).map((p: { code: string }) => p.code);
-        if (supplyCodes.length > 0) {
-          const { data: solRows } = await supabase
-            .from('SaleOrderLines')
-            .select('id, sales_order_id, description, product_type, area, position, catalog_item_id, quantity, delivered_qty, delivery_status')
-            .eq('organization_id', activeOrganizationId)
-            .eq('deleted', false)
-            .in('product_type', supplyCodes)
-            .not('catalog_item_id', 'is', null)
-            .in('delivery_status', ['ready', 'delivered']);
+      // Supply / MTM lines ready to ship (even while manufacture is still pending → Partial).
+      if (includeSupply) {
+        try {
+          type SupplyRpcRow = {
+            line_id: string;
+            sales_order_id: string;
+            sales_order_no: string | null;
+            dealer_id: string | null;
+            dealer_name: string | null;
+            customer_id: string | null;
+            customer_name: string | null;
+            description: string | null;
+            product_type: string | null;
+            area: string | null;
+            position: string | null;
+            catalog_item_id: string | null;
+            catalog_item_name: string | null;
+            catalog_item_sku: string | null;
+            quantity: number;
+            delivery_status: string;
+          };
 
-          const supplyRows = (solRows ?? []) as {
-            id: string; sales_order_id: string; description: string | null; product_type: string | null;
-            area: string | null; position: string | null; catalog_item_id: string | null;
-            quantity: number; delivered_qty: number | null; delivery_status: string;
-          }[];
-          const existingIds = new Set(linesData.map((l) => l.line_id));
-          const newSupply = supplyRows.filter((r) => !existingIds.has(r.id));
-
-          if (newSupply.length > 0) {
-            const soIds2 = [...new Set(newSupply.map((r) => r.sales_order_id))];
-            const catIds2 = [...new Set(newSupply.map((r) => r.catalog_item_id).filter(Boolean))] as string[];
-            const { data: soRows2 } = await supabase
-              .from('SalesOrders').select('id, sales_order_no, dealer_id, customer_id').in('id', soIds2);
+          let supplyRows: SupplyRpcRow[] = [];
+          const { data: rpcRows, error: rpcErr } = await supabase.rpc(
+            'get_deliveries_supply_ready_lines',
+            { p_org_id: activeOrganizationId },
+          );
+          if (!rpcErr && rpcRows) {
+            supplyRows = rpcRows as SupplyRpcRow[];
+          } else {
+            // Fallback: direct table reads (pre-RPC environments / cache lag)
+            if (rpcErr && import.meta.env.DEV) {
+              console.warn('[useFinishedGoods] supply RPC fallback:', rpcErr.message);
+            }
+            const { data: ptRows } = await supabase
+              .from('ProductTypes')
+              .select('code')
+              .eq('organization_id', activeOrganizationId)
+              .eq('fulfillment_type', 'supply_only');
+            const codes = (ptRows ?? []).map((p: { code: string }) => p.code);
+            const productTypes = codes.length > 0 ? codes : ['catalog', 'service', 'window_film'];
+            // SaleOrderLines has delivery_status only (no delivered_qty column).
+            const { data: solRows, error: solErr } = await supabase
+              .from('SaleOrderLines')
+              .select('id, sales_order_id, description, product_type, area, position, catalog_item_id, quantity, delivery_status')
+              .eq('organization_id', activeOrganizationId)
+              .or('deleted.eq.false,deleted.is.null')
+              .in('product_type', productTypes)
+              .not('catalog_item_id', 'is', null)
+              .in('delivery_status', ['ready', 'delivered']);
+            if (solErr) throw solErr;
+            const raw = (solRows ?? []) as {
+              id: string; sales_order_id: string; description: string | null; product_type: string | null;
+              area: string | null; position: string | null; catalog_item_id: string | null;
+              quantity: number; delivery_status: string;
+            }[];
+            const soIds2 = [...new Set(raw.map((r) => r.sales_order_id))];
+            const catIds2 = [...new Set(raw.map((r) => r.catalog_item_id).filter(Boolean))] as string[];
+            const [{ data: soRows2 }, { data: catRows2 }] = await Promise.all([
+              soIds2.length
+                ? supabase.from('SalesOrders').select('id, sales_order_no, dealer_id, customer_id').in('id', soIds2)
+                : Promise.resolve({ data: [] as SalesOrderLookupRow[] }),
+              catIds2.length
+                ? supabase.from('CatalogItems').select('id, name, sku').in('id', catIds2)
+                : Promise.resolve({ data: [] as CatalogItemLookupRow[] }),
+            ]);
             const soRowsT = (soRows2 ?? []) as SalesOrderLookupRow[];
             const dealerIds2 = [...new Set(soRowsT.map((s) => s.dealer_id).filter(Boolean))] as string[];
             const custIds2 = [...new Set(soRowsT.map((s) => s.customer_id).filter(Boolean))] as string[];
-            const [{ data: dealerRows2 }, { data: custRows2 }, { data: catRows2 }] = await Promise.all([
+            const [{ data: dealerRows2 }, { data: custRows2 }] = await Promise.all([
               dealerIds2.length ? supabase.from('Dealers').select('id, dealer_name').in('id', dealerIds2) : Promise.resolve({ data: [] as any[] }),
               custIds2.length ? supabase.from('DirectoryCustomers').select('id, customer_name').in('id', custIds2) : Promise.resolve({ data: [] as any[] }),
-              catIds2.length ? supabase.from('CatalogItems').select('id, name, sku').in('id', catIds2) : Promise.resolve({ data: [] as any[] }),
             ]);
             const soMap2 = new Map(soRowsT.map((s) => [s.id, s]));
             const dealerMap2 = new Map<string, string>((dealerRows2 ?? []).map((d: any) => [String(d.id), String(d.dealer_name ?? '')]));
             const custMap2 = new Map<string, string>((custRows2 ?? []).map((c: any) => [String(c.id), String(c.customer_name ?? '')]));
             const catMap2 = new Map(((catRows2 ?? []) as CatalogItemLookupRow[]).map((c) => [c.id, c]));
-
-            for (const r of newSupply) {
+            supplyRows = raw.map((r) => {
               const so = soMap2.get(r.sales_order_id);
               const ci = r.catalog_item_id ? catMap2.get(r.catalog_item_id) : undefined;
-              linesData.push({
-                line_type: 'product',
+              return {
                 line_id: r.id,
                 sales_order_id: r.sales_order_id,
-                manufacturing_order_id: `supply:${r.sales_order_id}`,
-                manufacturing_order_no: 'Supply',
-                mo_status: 'supply',
-                organization_id: activeOrganizationId,
-                delivery_status: r.delivery_status,
-                quantity: Number(r.quantity ?? 0),
-                delivered_qty: Number(r.delivered_qty ?? 0),
-                delivered_at: null,
                 sales_order_no: so?.sales_order_no ?? null,
+                dealer_id: so?.dealer_id ?? null,
                 dealer_name: so?.dealer_id ? (dealerMap2.get(so.dealer_id) ?? null) : null,
+                customer_id: so?.customer_id ?? null,
                 customer_name: so?.customer_id ? (custMap2.get(so.customer_id) ?? null) : null,
-                line_description: r.description ?? null,
-                product_type: r.product_type ?? null,
-                area: r.area ?? null,
-                position: r.position ?? null,
+                description: r.description,
+                product_type: r.product_type,
+                area: r.area,
+                position: r.position,
+                catalog_item_id: r.catalog_item_id,
                 catalog_item_name: ci?.name ?? null,
                 catalog_item_sku: ci?.sku ?? null,
-                released_at: null,
-                claim_id: null,
-              });
-            }
+                quantity: r.quantity,
+                delivery_status: r.delivery_status,
+              };
+            });
+          }
+
+          const existingIds = new Set(linesData.map((l) => l.line_id));
+          for (const r of supplyRows) {
+            if (existingIds.has(r.line_id)) continue;
+            linesData.push({
+              line_type: 'product',
+              line_id: r.line_id,
+              sales_order_id: r.sales_order_id,
+              manufacturing_order_id: `supply:${r.sales_order_id}`,
+              manufacturing_order_no: 'Supply',
+              mo_status: 'supply',
+              organization_id: activeOrganizationId,
+              delivery_status: r.delivery_status,
+              quantity: Number(r.quantity ?? 0),
+              delivered_qty: r.delivery_status === 'delivered' ? Number(r.quantity ?? 0) : 0,
+              delivered_at: null,
+              sales_order_no: r.sales_order_no,
+              dealer_name: r.dealer_name,
+              customer_name: r.customer_name,
+              line_description: r.description,
+              product_type: r.product_type,
+              area: r.area,
+              position: r.position,
+              catalog_item_name: r.catalog_item_name,
+              catalog_item_sku: r.catalog_item_sku,
+              released_at: null,
+              claim_id: null,
+            });
+          }
+          if (import.meta.env.DEV) {
+            console.info('[useFinishedGoods] supply ready lines:', supplyRows.length);
+          }
+        } catch (supplyErr) {
+          if (import.meta.env.DEV) {
+            console.warn('[useFinishedGoods] supply lines skipped:', supplyErr);
           }
         }
-      } catch {
-        // Best-effort: supply lines are additive; never block manufactured goods.
       }
 
       const bySO = new Map<string, FinishedGoodLine[]>();
@@ -337,6 +512,8 @@ export function useFinishedGoods(options?: UseFinishedGoodsOptions) {
 
         const allProductClaimIds = productLines.map(l => l.claim_id).filter(Boolean);
         const hasServiceMOOnly = allProductClaimIds.length > 0 && allProductClaimIds.length === productLines.length;
+        const readyProductLines = productLines.filter(l => l.delivery_status === 'ready').length;
+        const deliveredProductLines = productLines.filter(l => l.delivery_status === 'delivered').length;
 
         result.push({
           sales_order_id: soId,
@@ -346,12 +523,43 @@ export function useFinishedGoods(options?: UseFinishedGoodsOptions) {
           mos: Array.from(moMap.values()),
           accessories: accessoryLines,
           totalProductLines: productLines.length,
-          deliveredProductLines: productLines.filter(l => l.delivery_status === 'delivered').length,
-          readyProductLines: productLines.filter(l => l.delivery_status === 'ready').length,
+          deliveredProductLines,
+          readyProductLines,
           totalAccessories: accessoryLines.length,
           deliveredAccessories: accessoryLines.filter(l => l.delivery_status === 'delivered').length,
           hasServiceMOOnly,
+          // Defaults; enriched below with full SO progress when possible.
+          soDeliverableTotal: productLines.length,
+          soDeliverableReady: readyProductLines,
+          soDeliverableDelivered: deliveredProductLines,
+          soDeliverablePending: 0,
+          fulfillmentStatus:
+            deliveredProductLines > 0 && readyProductLines > 0
+              ? 'partial'
+              : readyProductLines > 0
+                ? 'ready_for_delivery'
+                : 'delivered',
         });
+      }
+
+      // Enrich with full SO progress (manufacture MOLs + supply SOLs) so Partial
+      // means "some ready now, others still pending" — enables partial delivery UX.
+      const soIdsForProgress = result.map((g) => g.sales_order_id).filter((id) => id && id !== '__no_so');
+      if (soIdsForProgress.length > 0) {
+        try {
+          const progress = await loadSoDeliverableProgress(activeOrganizationId, soIdsForProgress);
+          for (const g of result) {
+            const p = progress.get(g.sales_order_id);
+            if (!p) continue;
+            g.soDeliverableTotal = p.total;
+            g.soDeliverableReady = p.ready;
+            g.soDeliverableDelivered = p.delivered;
+            g.soDeliverablePending = p.pending;
+            g.fulfillmentStatus = deriveFulfillmentStatus(p);
+          }
+        } catch {
+          // Keep queue defaults if progress lookup fails.
+        }
       }
 
       setGroups(result);

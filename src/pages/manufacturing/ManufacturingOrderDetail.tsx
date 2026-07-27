@@ -129,7 +129,6 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       blind: 'Blind',
       curtain: 'Curtain',
       panel: 'Panel',
-      catalog: 'Catalog',
     };
     const types = Array.from(new Set(
       moLines
@@ -248,12 +247,28 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
 
     const solIds = [...new Set(molData.map((m: any) => m.sales_order_line_id).filter(Boolean))];
     let solMap = new Map<string, any>();
+    /** product_type → fulfillment_type (supply_only stays on SO Procurement, not MO Lines) */
+    const supplyOnlyTypes = new Set<string>();
     if (solIds.length > 0) {
       const { data: solData } = await supabase
         .from('SaleOrderLines')
-        .select('id, description, collection_name, variant_name, product_type, hardware_color, area, position, quantity, unit_price, catalog_item_id')
+        .select('id, description, collection_name, variant_name, product_type, hardware_color, area, position, quantity, unit_price, catalog_item_id, organization_id')
         .in('id', solIds);
       if (solData) {
+        const orgIds = [...new Set(solData.map((s: any) => s.organization_id).filter(Boolean))];
+        const codes = [...new Set(solData.map((s: any) => s.product_type).filter(Boolean))];
+        if (orgIds.length > 0 && codes.length > 0) {
+          const { data: ptData } = await supabase
+            .from('ProductTypes')
+            .select('organization_id, code, fulfillment_type')
+            .in('organization_id', orgIds)
+            .in('code', codes);
+          for (const pt of ptData ?? []) {
+            if (pt.fulfillment_type === 'supply_only' && pt.code) {
+              supplyOnlyTypes.add(`${pt.organization_id}:${pt.code}`);
+            }
+          }
+        }
         const catIds = [...new Set(solData.map((s: any) => s.catalog_item_id).filter(Boolean))];
         let catMap = new Map<string, any>();
         if (catIds.length > 0) {
@@ -264,11 +279,17 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
       }
     }
 
-    const mappedLines = molData.map((m: any) => ({
-      ...m,
-      unit_index: Number(m.unit_index ?? 1),
-      SaleOrderLine: solMap.get(m.sales_order_line_id) ?? null,
-    }));
+    const mappedLines = molData
+      .filter((m: any) => {
+        const sol = solMap.get(m.sales_order_line_id);
+        if (!sol?.product_type) return true;
+        return !supplyOnlyTypes.has(`${sol.organization_id}:${sol.product_type}`);
+      })
+      .map((m: any) => ({
+        ...m,
+        unit_index: Number(m.unit_index ?? 1),
+        SaleOrderLine: solMap.get(m.sales_order_line_id) ?? null,
+      }));
     setMoLines(mappedLines);
 
     const { data: readinessRows, error: readinessErr } = await supabase.rpc('get_mo_line_material_readiness', {
@@ -1341,7 +1362,7 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
                     drapery: 'Drapery', dual: 'Dual Shade', dual_shade: 'Dual Shade',
                     triple: 'Triple Shade', triple_shade: 'Triple Shade',
                     zebra: 'Zebra Shade', zebra_shade: 'Zebra Shade',
-                    catalog: 'Catalog', blind: 'Blind', curtain: 'Curtain',
+                    blind: 'Blind', curtain: 'Curtain',
                   };
                   const ptRaw = (sol?.product_type || '').toLowerCase();
                   const ptLabel = ptLabels[ptRaw] || (ptRaw ? ptRaw.charAt(0).toUpperCase() + ptRaw.slice(1) : '');

@@ -438,6 +438,23 @@ interface LineProductInfo {
   catalogName: string | null;
   manufacturer: string | null;
   sku: string | null;
+  area: string | null;
+  position: string | null;
+  width_m: number | null;
+  height_m: number | null;
+}
+
+function formatLineLocation(area?: string | null, position?: string | null): string | null {
+  const parts = [area?.trim(), position?.trim()].filter(Boolean) as string[];
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
+
+function formatLineSize(widthM?: number | null, heightM?: number | null): string | null {
+  const w = Number(widthM);
+  const h = Number(heightM);
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return null;
+  // SO stores meters; show mm for shop-floor readability.
+  return `${Math.round(w * 1000)} × ${Math.round(h * 1000)} mm`;
 }
 
 export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', dealerName = '', productName = '', salesOrderNo, moStatus, isServiceMO, claimNo, moType }: WorkOrdersTabProps) {
@@ -474,7 +491,7 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
       if (solIds.length === 0) return;
       const { data: solData } = await supabase
         .from('SaleOrderLines')
-        .select('id, description, product_type, collection_name, variant_name, hardware_color, quantity, catalog_item_id')
+        .select('id, description, product_type, collection_name, variant_name, hardware_color, quantity, catalog_item_id, area, position, width_m, height_m')
         .in('id', solIds);
       if (!solData) return;
       const catIds = [...new Set(solData.map((s: any) => s.catalog_item_id).filter(Boolean))];
@@ -497,6 +514,10 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
           catalogName: cat?.name ?? null,
           manufacturer: cat?.manufacturer ?? null,
           sku: cat?.sku ?? null,
+          area: s.area ?? null,
+          position: s.position ?? null,
+          width_m: s.width_m != null ? Number(s.width_m) : null,
+          height_m: s.height_m != null ? Number(s.height_m) : null,
         });
       }
       setLineProductMap(m);
@@ -889,6 +910,8 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
         const ptRaw = (group.product?.product_type || '').toLowerCase();
         const ptLabel = ptLabels[ptRaw] || (ptRaw ? ptRaw.charAt(0).toUpperCase() + ptRaw.slice(1) : '');
         const fabricName = group.product?.description || group.product?.catalogName || group.product?.variant_name || 'Product';
+        const locationLabel = formatLineLocation(group.product?.area, group.product?.position);
+        const sizeLabel = formatLineSize(group.product?.width_m, group.product?.height_m);
 
         const groupKey = group.lineId ?? 'ungrouped';
         const isExpanded = expandedGroups.has(groupKey);
@@ -909,15 +932,24 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
                   ? <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
                   : <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />}
                 <div className="min-w-0">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-semibold text-gray-900 text-sm">{group.label}</span>
                     <StatusBadge status={groupStatus} type="workOrder" size="sm" />
+                    {locationLabel && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700 max-w-[220px] truncate" title={locationLabel}>
+                        {locationLabel}
+                      </span>
+                    )}
                   </div>
                   {group.product && (
                     <div className="text-xs text-gray-500 mt-1 truncate">
                       {ptLabel}{ptLabel && ' — '}{fabricName}
                       {group.product.hardware_color && <span className="text-gray-400"> · {group.product.hardware_color}</span>}
+                      {sizeLabel && <span className="text-gray-400"> · {sizeLabel}</span>}
                     </div>
+                  )}
+                  {!locationLabel && (
+                    <div className="text-[11px] text-amber-600/80 mt-0.5">No location on SO line</div>
                   )}
                 </div>
               </div>

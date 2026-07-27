@@ -108,7 +108,9 @@ export default function Deliveries() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-foreground">Deliveries</h1>
-          <p className="text-xs text-gray-500">Everything ready to dispatch — manufactured, purchased and stock — grouped by Sales Order</p>
+          <p className="text-xs text-gray-500">
+            SOs with allocated / ready lines — ship full or partial. Manufactured, purchased and stock, grouped by Sales Order.
+          </p>
         </div>
         <div className="flex items-center gap-4 text-sm">
           <div className="flex items-center gap-1.5">
@@ -221,6 +223,23 @@ function DeliverySOCard({
     : 'Unpaid'
     : null;
 
+  const fulfillment = group.fulfillmentStatus;
+  const fulfillmentLabel =
+    fulfillment === 'partial' ? 'Partial'
+    : fulfillment === 'ready_for_delivery' ? 'Ready for delivery'
+    : 'Delivered';
+  const fulfillmentCls =
+    fulfillment === 'partial' ? 'bg-amber-100 text-amber-800'
+    : fulfillment === 'ready_for_delivery' ? 'bg-blue-100 text-blue-800'
+    : 'bg-green-100 text-green-800';
+
+  const total = group.soDeliverableTotal || group.totalProductLines;
+  const ready = group.soDeliverableReady || group.readyProductLines;
+  const delivered = group.soDeliverableDelivered || group.deliveredProductLines;
+  const pending = group.soDeliverablePending;
+  const createLabel =
+    fulfillment === 'partial' ? 'Create Partial Delivery' : 'Create Delivery';
+
   return (
     <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
       <div className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-gray-50" onClick={onToggle}>
@@ -229,9 +248,12 @@ function DeliverySOCard({
             {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
           </button>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="font-semibold text-sm text-primary">{group.sales_order_no}</span>
               <span className="text-xs text-gray-500">{group.dealer_name}</span>
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${fulfillmentCls}`}>
+                {fulfillmentLabel}
+              </span>
               {paymentLabel && (
                 <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                   paymentComplete ? 'bg-green-100 text-green-800' :
@@ -248,7 +270,11 @@ function DeliverySOCard({
               )}
             </div>
             <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-500">
-              <span>{group.readyProductLines} ready line{group.readyProductLines !== 1 ? 's' : ''}</span>
+              <span>
+                {ready} of {total} ready
+                {delivered > 0 ? ` · ${delivered} delivered` : ''}
+                {pending > 0 ? ` · ${pending} pending` : ''}
+              </span>
               {group.totalAccessories > 0 && (
                 <span>· {group.totalAccessories} accessor{group.totalAccessories !== 1 ? 'ies' : 'y'}</span>
               )}
@@ -273,7 +299,7 @@ function DeliverySOCard({
             }`}
           >
             {deliveryBlocked ? <Lock className="w-3.5 h-3.5" /> : <Truck className="w-3.5 h-3.5" />}
-            {deliveryBlocked ? 'Payment Required' : 'Create Delivery'}
+            {deliveryBlocked ? 'Payment Required' : createLabel}
           </button>
         </div>
       </div>

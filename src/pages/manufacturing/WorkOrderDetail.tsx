@@ -44,6 +44,8 @@ interface LineGroup {
   lineIndex: number;
   solId: string | null;
   description: string;
+  location: string | null;
+  sizeLabel: string | null;
   tasks: WorkOrderTask[];
   totalComponents: number;
   completedComponents: number;
@@ -308,11 +310,19 @@ function LineAccordion({ group, allTasks, onToggleLine, onBulkToggleLines, onSta
         <div className="flex items-center gap-3 min-w-0">
           {expanded ? <ChevronDown className="h-4 w-4 text-gray-500 shrink-0" /> : <ChevronRight className="h-4 w-4 text-gray-500 shrink-0" />}
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-sm font-semibold text-gray-900">Line {group.lineIndex}</span>
               <StatusBadge status={group.globalStatus} type="workOrder" size="sm" />
+              {group.location && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700 max-w-[220px] truncate" title={group.location}>
+                  {group.location}
+                </span>
+              )}
             </div>
-            <p className="text-xs text-gray-500 mt-0.5 truncate">{group.description}</p>
+            <p className="text-xs text-gray-500 mt-0.5 truncate">
+              {group.description}
+              {group.sizeLabel ? <span className="text-gray-400"> · {group.sizeLabel}</span> : null}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-4 shrink-0">
@@ -366,7 +376,7 @@ export default function WorkOrderDetail({ moId }: WorkOrderDetailProps) {
   const { tasks, loading: tasksLoading, toggleLineCompleted, bulkToggleAssemblyLines, updateTaskStatus } = useWorkOrderTasks(moId);
   const [moInfo, setMoInfo] = useState<MOInfo | null>(null);
   const [loading, setLoading] = useState(true);
-  const [solDescriptions, setSolDescriptions] = useState<Record<string, string>>({});
+  const [solMeta, setSolMeta] = useState<Record<string, { description: string; location: string | null; sizeLabel: string | null }>>({});
 
   useEffect(() => {
     registerSubmodules('Manufacturing', filteredSubmodules);
@@ -431,16 +441,44 @@ export default function WorkOrderDetail({ moId }: WorkOrderDetailProps) {
 
   useEffect(() => { fetchMOInfo(); }, [fetchMOInfo]);
 
-  // Fetch SOL descriptions for line labels
+  // Fetch SOL meta for line labels (product + location + size)
   useEffect(() => {
     const solIds = [...new Set(tasks.map(t => t.sales_order_line_id).filter(Boolean))] as string[];
     if (solIds.length === 0) return;
-    supabase.from('SaleOrderLines').select('id, description, variant_name, product_type').in('id', solIds).then((res: { data: Array<{ id: string; description: string | null; variant_name: string | null; product_type: string | null }> | null }) => {
-      const data = res.data ?? [];
-      const map: Record<string, string> = {};
-      for (const sol of data) map[sol.id] = sol.description || sol.variant_name || sol.product_type || 'Line';
-      setSolDescriptions(map);
-    });
+    supabase
+      .from('SaleOrderLines')
+      .select('id, description, variant_name, product_type, area, position, width_m, height_m')
+      .in('id', solIds)
+      .then((res: {
+        data: Array<{
+          id: string;
+          description: string | null;
+          variant_name: string | null;
+          product_type: string | null;
+          area: string | null;
+          position: string | null;
+          width_m: number | null;
+          height_m: number | null;
+        }> | null;
+      }) => {
+        const data = res.data ?? [];
+        const map: Record<string, { description: string; location: string | null; sizeLabel: string | null }> = {};
+        for (const sol of data) {
+          const locParts = [sol.area?.trim(), sol.position?.trim()].filter(Boolean) as string[];
+          const w = Number(sol.width_m);
+          const h = Number(sol.height_m);
+          const sizeLabel =
+            Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0
+              ? `${Math.round(w * 1000)} × ${Math.round(h * 1000)} mm`
+              : null;
+          map[sol.id] = {
+            description: sol.description || sol.variant_name || sol.product_type || 'Line',
+            location: locParts.length > 0 ? locParts.join(' · ') : null,
+            sizeLabel,
+          };
+        }
+        setSolMeta(map);
+      });
   }, [tasks]);
 
   // Group tasks by sales_order_line_id
@@ -457,17 +495,20 @@ export default function WorkOrderDetail({ moId }: WorkOrderDetailProps) {
       const lineTasks = grouped[key];
       const totalComponents = lineTasks.reduce((sum, t) => sum + t.lines.length, 0);
       const completedComponents = lineTasks.reduce((sum, t) => sum + t.lines.filter(l => l.completed).length, 0);
+      const meta = key === '__no_line__' ? null : solMeta[key];
       return {
         lineIndex: idx + 1,
         solId: key === '__no_line__' ? null : key,
-        description: key === '__no_line__' ? (moInfo?.product_name ?? '—') : (solDescriptions[key] ?? 'Line'),
+        description: key === '__no_line__' ? (moInfo?.product_name ?? '—') : (meta?.description ?? 'Line'),
+        location: meta?.location ?? null,
+        sizeLabel: meta?.sizeLabel ?? null,
         tasks: lineTasks.sort((a, b) => (a.work_center?.sequence ?? 0) - (b.work_center?.sequence ?? 0)),
         totalComponents,
         completedComponents,
         globalStatus: deriveStatus(lineTasks),
       };
     });
-  }, [tasks, solDescriptions, moInfo?.product_name]);
+  }, [tasks, solMeta, moInfo?.product_name]);
 
   if (loading || tasksLoading) {
     return <div className="flex items-center justify-center py-20"><Loader2 className="h-6 w-6 animate-spin text-gray-400" /></div>;

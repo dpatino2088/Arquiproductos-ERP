@@ -41,10 +41,9 @@ interface Props {
 }
 
 /**
- * Procurement panel for supply / made-to-measure orders. Lets an internal user
- * link each Sales Order line to a supply product (special purchase catalog) and
- * raise a Purchase Order that references the Sales Order line, so the exact item
- * is bought and later delivered against this order.
+ * Procurement for supply_only SO lines.
+ * - Catalog lines already have catalog_item_id → reserve stock or Order Supply / PO.
+ * - Custom lines (no catalog_item_id) → Link a supply product or Create PO, then allocate → Deliveries.
  */
 export default function SupplyProcurementPanel({
   salesOrderId,
@@ -58,7 +57,10 @@ export default function SupplyProcurementPanel({
   const { createPurchaseOrder, isCreating } = useCreatePurchaseOrder();
   const [reserving, setReserving] = useState(false);
 
-  const [catalog, setCatalog] = useState<SupplyCatalogItem[]>([]);
+  /** is_supply_product items for the Link modal (custom / special purchase). */
+  const [supplyCatalog, setSupplyCatalog] = useState<SupplyCatalogItem[]>([]);
+  /** Any CatalogItems already linked on SO lines (sellable catalog or supply product). */
+  const [linkedCatalog, setLinkedCatalog] = useState<SupplyCatalogItem[]>([]);
   const [poLines, setPoLines] = useState<POLineRef[]>([]);
   const [reserved, setReserved] = useState<Map<string, number>>(new Map());
   const [loading, setLoading] = useState(true);
@@ -68,12 +70,24 @@ export default function SupplyProcurementPanel({
 
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
 
+  const linkedIdsKey = useMemo(
+    () =>
+      [...new Set(supplyLines.map((l) => l.catalog_item_id).filter(Boolean) as string[])]
+        .sort()
+        .join(','),
+    [supplyLines],
+  );
+  const linkedIds = useMemo(
+    () => (linkedIdsKey ? linkedIdsKey.split(',') : []),
+    [linkedIdsKey],
+  );
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
       try {
-        const [catRes, poRes, allocRes] = await Promise.all([
+        const [supplyCatRes, linkedCatRes, poRes, allocRes] = await Promise.all([
           supabase
             .from('CatalogItems')
             .select('id, name, sku, cost_exw')
@@ -81,6 +95,12 @@ export default function SupplyProcurementPanel({
             .eq('is_supply_product', true)
             .eq('is_active', true)
             .order('name', { ascending: true }),
+          linkedIds.length > 0
+            ? supabase
+                .from('CatalogItems')
+                .select('id, name, sku, cost_exw')
+                .in('id', linkedIds)
+            : Promise.resolve({ data: [] as SupplyCatalogItem[] }),
           supabase
             .from('PurchaseOrders')
             .select('id, status, PurchaseOrderLines(sales_order_line_id, catalog_item_id, ordered_qty, received_qty)')
@@ -94,7 +114,8 @@ export default function SupplyProcurementPanel({
             .eq('status', 'reserved'),
         ]);
         if (cancelled) return;
-        setCatalog((catRes.data ?? []) as SupplyCatalogItem[]);
+        setSupplyCatalog((supplyCatRes.data ?? []) as SupplyCatalogItem[]);
+        setLinkedCatalog((linkedCatRes.data ?? []) as SupplyCatalogItem[]);
 
         const flatLines: POLineRef[] = [];
         for (const po of (poRes.data ?? []) as { PurchaseOrderLines?: POLineRef[] }[]) {
@@ -112,7 +133,7 @@ export default function SupplyProcurementPanel({
       }
     })();
     return () => { cancelled = true; };
-  }, [organizationId, salesOrderId, reloadKey]);
+  }, [organizationId, salesOrderId, reloadKey, linkedIds]);
 
   // Ordered/received per SO line. Primary match is by sales_order_line_id (set by
   // "Order Supply"). As a fallback, PO lines linked to this SO at the header level
@@ -146,9 +167,10 @@ export default function SupplyProcurementPanel({
 
   const catalogById = useMemo(() => {
     const m = new Map<string, SupplyCatalogItem>();
-    for (const c of catalog) m.set(c.id, c);
+    for (const c of linkedCatalog) m.set(c.id, c);
+    for (const c of supplyCatalog) m.set(c.id, c);
     return m;
-  }, [catalog]);
+  }, [linkedCatalog, supplyCatalog]);
 
   // Lines that are linked to a supply product but not yet fully on order.
   const linesToOrder = useMemo(() => {
@@ -294,7 +316,11 @@ export default function SupplyProcurementPanel({
             type="button"
             onClick={handleOrderSupply}
             disabled={isCreating || linesToOrder.length === 0}
-            title={linesToOrder.length === 0 ? 'Link supply products to lines first, or use Create PO' : 'Create a draft PO for the linked supply items'}
+            title={
+              linesToOrder.length === 0
+                ? 'Catalog lines: use Reserve stock if available, or Create PO. Custom lines: link a product first.'
+                : 'Create a draft PO for catalog/supply items still short'
+            }
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-primary text-white hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {isCreating ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShoppingCart className="w-4 h-4" />}
@@ -305,9 +331,10 @@ export default function SupplyProcurementPanel({
 
       <div className="px-4 py-2.5 border-b border-gray-100 bg-blue-50/40 text-xs text-gray-600 leading-relaxed">
         {isMixedOrder
-          ? 'This order mixes manufactured and supply items. Manufactured lines are produced and shipped from Manufacturing; the supply items below are bought/stocked here. '
+          ? 'This order mixes manufactured and supply items. Manufactured lines ship from Manufacturing; supply items below are fulfilled here. '
           : ''}
-        Each supply line must be <span className="font-medium">reserved from stock</span> or <span className="font-medium">received from a PO</span> before it can be delivered. Items that are not yet available are held back (backorder) and can be delivered later.
+        <span className="font-medium">Catalog</span> lines already have a product — reserve from stock (when paid) or buy via PO, then they go to Deliveries.{' '}
+        <span className="font-medium">Custom</span> lines need a linked supply product and a PO; once received and allocated, they go to Deliveries.
       </div>
 
       {loading ? (
@@ -319,7 +346,7 @@ export default function SupplyProcurementPanel({
           <thead className="bg-gray-50 border-b">
             <tr>
               <th className="px-4 py-2 text-left font-medium text-gray-600">Line</th>
-              <th className="px-4 py-2 text-left font-medium text-gray-600">Supply product</th>
+              <th className="px-4 py-2 text-left font-medium text-gray-600">Product</th>
               <th className="px-4 py-2 text-right font-medium text-gray-600">Qty</th>
               <th className="px-4 py-2 text-right font-medium text-gray-600">On order</th>
               <th className="px-4 py-2 text-right font-medium text-gray-600">Reserved</th>
@@ -334,29 +361,32 @@ export default function SupplyProcurementPanel({
               const reservedQty = l.catalog_item_id ? (reserved.get(l.catalog_item_id) ?? 0) : 0;
               const qty = Number(l.quantity ?? 0);
               let status: { label: string; cls: string };
-              if (!l.catalog_item_id) status = { label: 'Not linked', cls: 'bg-gray-100 text-gray-600' };
+              if (!l.catalog_item_id) status = { label: 'Custom — link product', cls: 'bg-gray-100 text-gray-600' };
               else if (reservedQty >= qty - 1e-6) status = { label: 'Ready to deliver', cls: 'bg-green-50 text-green-700' };
               else if (received > 0) status = { label: 'Received', cls: 'bg-emerald-50 text-emerald-700' };
               else if (ordered >= qty - 1e-6) status = { label: 'On order', cls: 'bg-amber-50 text-amber-700' };
-              else status = { label: 'Needs PO', cls: 'bg-orange-50 text-orange-700' };
+              else status = { label: 'Needs stock or PO', cls: 'bg-orange-50 text-orange-700' };
               return (
                 <tr key={l.id} className="border-t">
                   <td className="px-4 py-3 text-gray-900">{l.description ?? '—'}</td>
                   <td className="px-4 py-3">
-                    {ci ? (
+                    {l.catalog_item_id && ci ? (
                       <div>
                         <div className="text-gray-900 flex items-center gap-1">
                           <CheckCircle2 className="w-3.5 h-3.5 text-green-600" /> {ci.name}
                         </div>
                         <div className="text-xs text-gray-500">{ci.sku}</div>
                       </div>
+                    ) : l.catalog_item_id ? (
+                      <div className="text-xs text-gray-500">Catalog linked</div>
                     ) : (
                       <button
                         type="button"
                         onClick={() => setLinkFor(l)}
                         className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border border-gray-300 text-gray-700 hover:bg-gray-50"
+                        title="Custom item: link a supply product, then create a PO"
                       >
-                        <Link2 className="w-3.5 h-3.5" /> Link supply product
+                        <Link2 className="w-3.5 h-3.5" /> Link custom / supply product
                       </button>
                     )}
                   </td>
@@ -378,7 +408,7 @@ export default function SupplyProcurementPanel({
           line={linkFor}
           organizationId={organizationId}
           currency={currency}
-          existing={catalog}
+          existing={supplyCatalog}
           onClose={() => setLinkFor(null)}
           onLinked={() => { setLinkFor(null); reload(); onChanged(); }}
         />
@@ -460,8 +490,11 @@ function LinkSupplyProductModal({ line, organizationId, currency, existing, onCl
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div className="w-full max-w-md rounded-lg bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="px-5 py-4 border-b">
-          <h3 className="text-base font-semibold text-gray-900">Link supply product</h3>
-          <p className="text-xs text-gray-500 mt-0.5">{line.description ?? 'Order line'}</p>
+          <h3 className="text-base font-semibold text-gray-900">Link custom / supply product</h3>
+          <p className="text-xs text-gray-500 mt-0.5">
+            For custom lines only (no catalog SKU). Catalog products are already linked on the SO line.
+          </p>
+          <p className="text-xs text-gray-400 mt-1">{line.description ?? 'Order line'}</p>
         </div>
         <div className="px-5 py-4 space-y-4">
           <div className="flex gap-2">
