@@ -786,22 +786,31 @@ export default function CatalogItemNew() {
           category_id: data.category_id || null,
           image_url: data.image_url || null,
           item_role: data.item_role || null,
-          is_roll: data.is_roll || false,
-          roll_type: data.roll_type || null,
-          collection_name: data.collection_name || null,
-          variant_name: data.variant_name || null,
-          // Prefer explicit value/uom; fallback to normalized meters if legacy rows lack value/uom
-          roll_width_value:
-            data.roll_width_value != null
-              ? Number(data.roll_width_value)
-              : (data.roll_width_m != null ? Number(data.roll_width_m) : null),
-          roll_width_uom: data.roll_width_uom || (data.roll_width_value == null && data.roll_width_m != null ? 'm' : 'm'),
-          roll_length_value:
-            data.roll_length_value != null
-              ? Number(data.roll_length_value)
-              : (data.roll_length_m != null ? Number(data.roll_length_m) : null),
-          roll_length_uom: data.roll_length_uom || (data.roll_length_value == null && data.roll_length_m != null ? 'm' : 'm'),
-          roll_pricing_mode: (data.is_roll && data.roll_pricing_mode === 'per_unit') ? 'per_linear_meter' : (data.roll_pricing_mode || null),
+          is_roll: !!data.is_roll,
+          roll_type: data.is_roll ? (data.roll_type || null) : null,
+          collection_name: data.is_roll ? (data.collection_name || null) : null,
+          variant_name: data.is_roll ? (data.variant_name || null) : null,
+          // Prefer explicit value/uom; only fall back to normalized meters for active roll items.
+          // Falling back when is_roll=false resurrects stale roll_width_m and re-checks Roll Item.
+          roll_width_value: data.is_roll
+            ? (data.roll_width_value != null
+                ? Number(data.roll_width_value)
+                : (data.roll_width_m != null ? Number(data.roll_width_m) : null))
+            : null,
+          roll_width_uom: data.is_roll
+            ? (data.roll_width_uom || (data.roll_width_value == null && data.roll_width_m != null ? 'm' : 'm'))
+            : 'm',
+          roll_length_value: data.is_roll
+            ? (data.roll_length_value != null
+                ? Number(data.roll_length_value)
+                : (data.roll_length_m != null ? Number(data.roll_length_m) : null))
+            : null,
+          roll_length_uom: data.is_roll
+            ? (data.roll_length_uom || (data.roll_length_value == null && data.roll_length_m != null ? 'm' : 'm'))
+            : 'm',
+          roll_pricing_mode: data.is_roll
+            ? ((data.roll_pricing_mode === 'per_unit') ? 'per_linear_meter' : (data.roll_pricing_mode || null))
+            : null,
           color: data.color || null,
           cost_exw: data.cost_exw ? Number(data.cost_exw) : null,
           purchase_mode: (data.purchase_mode && ['unit_packaged', 'linear_direct', 'roll'].includes(data.purchase_mode))
@@ -840,8 +849,9 @@ export default function CatalogItemNew() {
                 formValues.image_url = dbValues.image_url;
               }
 
-              const isRollItem = !!(formValues.is_roll || dbValues.is_roll);
-              if (isRollItem) {
+              // Only backfill roll fields when the draft itself is still a roll item.
+              // Never re-inject DB roll data after the user unchecked Roll Item.
+              if (formValues.is_roll) {
                 if (!formValues.collection_name && dbValues.collection_name) {
                   formValues.collection_name = dbValues.collection_name;
                 }
@@ -857,7 +867,6 @@ export default function CatalogItemNew() {
                 if (!formValues.unit_of_measure && dbValues.unit_of_measure) {
                   formValues.unit_of_measure = dbValues.unit_of_measure;
                 }
-                // Restore roll dimensions
                 if (formValues.roll_width_value == null && dbValues.roll_width_value != null) {
                   formValues.roll_width_value = dbValues.roll_width_value;
                 }
@@ -870,6 +879,13 @@ export default function CatalogItemNew() {
                 if (!formValues.roll_length_uom && dbValues.roll_length_uom) {
                   formValues.roll_length_uom = dbValues.roll_length_uom;
                 }
+              } else {
+                formValues.roll_type = null;
+                formValues.collection_name = null;
+                formValues.variant_name = null;
+                formValues.roll_width_value = null;
+                formValues.roll_length_value = null;
+                formValues.roll_pricing_mode = null;
               }
               
               draftHydratedRef.current = true;
@@ -891,18 +907,8 @@ export default function CatalogItemNew() {
           formValues = dbValues;
         }
         
-        // If roll data exists but is_roll is false (stale session/legacy), force roll mode
-        const hasRollData = !!(
-          formValues.roll_type ||
-          formValues.collection_name ||
-          formValues.variant_name ||
-          formValues.roll_width_value ||
-          formValues.roll_length_value ||
-          formValues.roll_pricing_mode
-        );
-        if (hasRollData && !formValues.is_roll) {
-          formValues.is_roll = true;
-        }
+        // Respect explicit is_roll from DB/draft. Do NOT force roll mode from leftover
+        // roll_* columns — that made unchecking Roll Item appear to never persist.
         
         // Set form values (single reset for reliability)
         reset(formValues);
@@ -1220,6 +1226,9 @@ export default function CatalogItemNew() {
         roll_pricing_mode: values.is_roll ? (values.roll_pricing_mode === 'per_unit' ? 'per_linear_meter' : values.roll_pricing_mode) : null,
         color: !values.is_roll ? (values.color?.trim() || null) : null,
         cost_exw: values.cost_exw != null ? Number(values.cost_exw) : null,
+        purchase_mode: values.purchase_mode || null,
+        stock_basis: values.stock_basis || null,
+        purchase_uom: values.purchase_uom || null,
         purchase_unit: values.purchase_unit,
         units_per_purchase_unit: values.units_per_purchase_unit ? Number(values.units_per_purchase_unit) : 1,
         moq: Math.max(0, Number(values.moq ?? 0)),
@@ -1229,6 +1238,14 @@ export default function CatalogItemNew() {
         primary_location_id: primaryLocationId || null,
         updated_at: new Date().toISOString(),
       };
+
+      // Normalized meters are maintained by DB trigger when value+uom are present.
+      // That trigger does NOT clear them when values become null, so we must null
+      // them explicitly when leaving roll mode (otherwise reload resurrects Roll Item).
+      if (!values.is_roll) {
+        fullPayload.roll_width_m = null;
+        fullPayload.roll_length_m = null;
+      }
       
       // Defensive: derive itemId from URL if state is out of sync
       const routeMatch = window.location.pathname.match(/\/catalog\/items\/edit\/([^/]+)/);
@@ -1248,7 +1265,25 @@ export default function CatalogItemNew() {
             name: ['name'],
             collection_name: ['name', 'collection_name'],
             variant_name: ['name', 'variant_name'],
-            is_roll: ['is_roll', 'roll_type', 'collection_name', 'variant_name', 'roll_width_value', 'roll_width_uom', 'roll_length_value', 'roll_length_uom', 'roll_pricing_mode', 'color', 'measure_basis', 'unit_of_measure'],
+            is_roll: [
+              'is_roll',
+              'roll_type',
+              'collection_name',
+              'variant_name',
+              'roll_width_value',
+              'roll_width_uom',
+              'roll_width_m',
+              'roll_length_value',
+              'roll_length_uom',
+              'roll_length_m',
+              'roll_pricing_mode',
+              'color',
+              'measure_basis',
+              'unit_of_measure',
+              'purchase_mode',
+              'stock_basis',
+              'purchase_uom',
+            ],
           };
           const expandedKeys = new Set<string>();
           for (const k of dirtyKeys) {
@@ -1275,9 +1310,14 @@ export default function CatalogItemNew() {
             'color',
             'measure_basis',
             'unit_of_measure',
+            'purchase_mode',
+            'stock_basis',
+            'purchase_uom',
           ].forEach((k) => {
             payload[k] = fullPayload[k];
           });
+          if ('roll_width_m' in fullPayload) payload.roll_width_m = fullPayload.roll_width_m;
+          if ('roll_length_m' in fullPayload) payload.roll_length_m = fullPayload.roll_length_m;
         } else {
           payload = fullPayload;
         }
@@ -1742,6 +1782,13 @@ export default function CatalogItemNew() {
                   } else {
                     setValue('measure_basis', 'unit', { shouldDirty: true });
                     setValue('unit_of_measure', 'ea', { shouldDirty: true });
+                    // Clear roll-only fields so drafts/saves cannot resurrect Roll Item.
+                    setValue('roll_type', null, { shouldDirty: true });
+                    setValue('collection_name', null, { shouldDirty: true });
+                    setValue('variant_name', null, { shouldDirty: true });
+                    setValue('roll_width_value', null, { shouldDirty: true });
+                    setValue('roll_length_value', null, { shouldDirty: true });
+                    setValue('roll_pricing_mode', null, { shouldDirty: true });
                   }
                 }}
               />

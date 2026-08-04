@@ -471,11 +471,12 @@ export function useUpdateCatalogItem() {
       // IMPORTANT:
       // - Always scope writes by organization_id (multi-tenant safety + common RLS requirement)
       // - Do NOT rely on `.select().single()` for updates (RLS can allow update but block returning rows)
-      const { data, error } = await supabase
+      const { data, error, count } = await supabase
         .from('CatalogItems')
-        .update(itemData)
+        .update(itemData, { count: 'exact' })
         .eq('id', id)
-        .eq('organization_id', activeOrganizationId);
+        .eq('organization_id', activeOrganizationId)
+        .select('id');
 
       if (error) {
         console.error('❌ Supabase update error:', {
@@ -487,8 +488,15 @@ export function useUpdateCatalogItem() {
         throw error;
       }
 
+      const updatedRows = Array.isArray(data) ? data.length : (count ?? 0);
+      if (!updatedRows) {
+        throw new Error(
+          'Update did not change any catalog item. Check organization scope / permissions and try again.'
+        );
+      }
+
       if (import.meta.env.DEV) {
-        console.log('✅ Update successful, affected rows:', data);
+        console.log('✅ Update successful, affected rows:', updatedRows);
       }
 
       // Best-effort refetch (do not fail the save if this select is blocked)
