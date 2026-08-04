@@ -1311,7 +1311,7 @@ export default function CatalogItemNew() {
       
       // Sync ProductTypes (non-blocking)
       try {
-        if (selectedProductTypeIds.length > 0 && finalItemId) {
+        if (finalItemId) {
           await syncCatalogItemProductTypes(
             finalItemId,
             selectedProductTypeIds,
