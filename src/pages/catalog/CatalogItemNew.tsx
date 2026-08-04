@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { formatDateTime } from '../../lib/utils';
-import { useForm, Resolver } from 'react-hook-form';
+import { useForm, Resolver, FieldErrors } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQueryClient } from '@tanstack/react-query';
@@ -1501,6 +1501,53 @@ export default function CatalogItemNew() {
       setIsSaving(false);
     }
   };
+
+  const onInvalidSubmit = (fieldErrors: FieldErrors<CatalogItemFormValues>) => {
+    const labelByField: Record<string, string> = {
+      sku: 'SKU',
+      name: 'Name',
+      collection_name: 'Collection Name',
+      variant_name: 'Variant Name (Color)',
+      roll_type: 'Roll Type',
+      roll_pricing_mode: 'Roll Pricing Mode',
+      roll_width_value: 'Roll Width',
+      roll_length_value: 'Roll Length',
+    };
+
+    const flattenErrors = (errorsObj: Record<string, any>, parent = ''): Array<{ field: string; message: string }> => {
+      const entries: Array<{ field: string; message: string }> = [];
+      for (const [key, value] of Object.entries(errorsObj)) {
+        if (!value) continue;
+        const path = parent ? `${parent}.${key}` : key;
+        if (typeof value.message === 'string' && value.message.trim()) {
+          entries.push({ field: path, message: value.message });
+          continue;
+        }
+        if (typeof value === 'object') {
+          entries.push(...flattenErrors(value, path));
+        }
+      }
+      return entries;
+    };
+
+    const errorSummary = flattenErrors(fieldErrors as Record<string, any>);
+    const first = errorSummary[0];
+    const fieldLabel = first ? (labelByField[first.field] || first.field) : 'required fields';
+    const message = first?.message
+      ? `${fieldLabel}: ${first.message}`
+      : 'Please complete the required fields before saving.';
+
+    // Keep an inline alert visible even if toast is missed.
+    setSaveError(message);
+    // Most required fields live in Profile; switch there so the user sees them.
+    setActiveTab('profile');
+
+    useUIStore.getState().addNotification({
+      type: 'error',
+      title: 'Validation Failed',
+      message,
+    });
+  };
   
   // UOM options: unit = only ea (purchase unit has set/pack/box etc); linear/fabric = m, yd, ft, roll.
   const getUomOptions = (): string[] => {
@@ -1584,19 +1631,7 @@ export default function CatalogItemNew() {
             type="button"
             onClick={() => {
               shouldCloseAfterSaveRef.current = false;
-              handleSubmit(onSubmit, (fieldErrors) => {
-                // Log each field error safely (avoid circular refs)
-                const errorSummary = Object.entries(fieldErrors).map(([field, error]: [string, any]) => ({
-                  field,
-                  message: error?.message || error?.type || 'Invalid',
-                }));
-                console.error('❌ Validation errors:', errorSummary);
-                useUIStore.getState().addNotification({
-                  type: 'error',
-                  title: 'Validation Failed',
-                  message: `Errors in: ${errorSummary.map(e => e.field).join(', ')}`,
-                });
-              })();
+              handleSubmit(onSubmit, onInvalidSubmit)();
             }}
             disabled={isSaving || isReadOnly}
             className="btn-save px-4 py-1.5 rounded text-white text-sm hover:opacity-90 disabled:opacity-50"
@@ -1609,19 +1644,7 @@ export default function CatalogItemNew() {
             type="button"
             onClick={() => {
               shouldCloseAfterSaveRef.current = true;
-              handleSubmit(onSubmit, (fieldErrors) => {
-                // Log each field error safely (avoid circular refs)
-                const errorSummary = Object.entries(fieldErrors).map(([field, error]: [string, any]) => ({
-                  field,
-                  message: error?.message || error?.type || 'Invalid',
-                }));
-                console.error('❌ Validation errors:', errorSummary);
-                useUIStore.getState().addNotification({
-                  type: 'error',
-                  title: 'Validation Failed',
-                  message: `Errors in: ${errorSummary.map(e => e.field).join(', ')}`,
-                });
-              })();
+              handleSubmit(onSubmit, onInvalidSubmit)();
             }}
             disabled={isSaving || isReadOnly}
             className="btn-save-close px-4 py-1.5 rounded text-sm hover:opacity-90 disabled:opacity-50"
