@@ -1260,6 +1260,24 @@ export default function CatalogItemNew() {
           for (const k of expandedKeys) {
             if (k in fullPayload) payload[k] = fullPayload[k];
           }
+          // Persist roll contract fields on every edit (independent of dirtyFields).
+          // This prevents stale DB values from forcing Roll Item back to checked on reload.
+          [
+            'is_roll',
+            'roll_type',
+            'collection_name',
+            'variant_name',
+            'roll_width_value',
+            'roll_width_uom',
+            'roll_length_value',
+            'roll_length_uom',
+            'roll_pricing_mode',
+            'color',
+            'measure_basis',
+            'unit_of_measure',
+          ].forEach((k) => {
+            payload[k] = fullPayload[k];
+          });
         } else {
           payload = fullPayload;
         }
