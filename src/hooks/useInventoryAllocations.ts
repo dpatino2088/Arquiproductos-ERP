@@ -339,3 +339,212 @@ export function useSOFulfillmentSummary(salesOrderId: string | null) {
 
   return { summary, overallStatus, loading };
 }
+
+export interface MOMaterialSubstituteCandidate {
+  catalog_item_id: string;
+  sku: string;
+  name: string;
+  measure_basis: string;
+  part_roles: string[] | null;
+  /** parent | child | fabric | parent+child | role — from RPC slot fingerprint */
+  slot_hierarchy: string | null;
+  unit_cost: number;
+  available_qty: number;
+  on_hand_qty: number;
+  uom: string;
+}
+
+export interface MOMaterialSubstitutionRow {
+  id: string;
+  bom_instance_line_id: string;
+  original_catalog_item_id: string;
+  substitute_catalog_item_id: string;
+  qty: number;
+  original_unit_cost: number | null;
+  substitute_unit_cost: number | null;
+  created_at: string;
+  original_sku: string | null;
+  original_name: string | null;
+}
+
+const SUBSTITUTIONS_KEY = 'mo-material-substitutions';
+
+/** Latest substitution audit rows for an MO (for badges / tooltips). */
+export function useMOMaterialSubstitutions(moId: string | null) {
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: [SUBSTITUTIONS_KEY, moId],
+    queryFn: async (): Promise<MOMaterialSubstitutionRow[]> => {
+      if (!moId) return [];
+      const { data: rows, error } = await supabase
+        .from('MOMaterialSubstitutions')
+        .select(`
+          id,
+          bom_instance_line_id,
+          original_catalog_item_id,
+          substitute_catalog_item_id,
+          qty,
+          original_unit_cost,
+          substitute_unit_cost,
+          created_at,
+          original:CatalogItems!original_catalog_item_id ( sku, name )
+        `)
+        .eq('mo_id', moId)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return (rows ?? []).map((r: any) => ({
+        id: r.id,
+        bom_instance_line_id: r.bom_instance_line_id,
+        original_catalog_item_id: r.original_catalog_item_id,
+        substitute_catalog_item_id: r.substitute_catalog_item_id,
+        qty: Number(r.qty) || 0,
+        original_unit_cost: r.original_unit_cost != null ? Number(r.original_unit_cost) : null,
+        substitute_unit_cost: r.substitute_unit_cost != null ? Number(r.substitute_unit_cost) : null,
+        created_at: r.created_at,
+        original_sku: r.original?.sku ?? null,
+        original_name: r.original?.name ?? null,
+      }));
+    },
+    enabled: !!moId,
+  });
+
+  /** Map current (substitute) catalog_item_id → most recent original SKU info */
+  const bySubstituteId = new Map<string, MOMaterialSubstitutionRow>();
+  /** Map BIL id → most recent substitution (best for Line / WO / Workstation) */
+  const byBomInstanceLineId = new Map<string, MOMaterialSubstitutionRow>();
+  for (const row of data ?? []) {
+    if (!bySubstituteId.has(row.substitute_catalog_item_id)) {
+      bySubstituteId.set(row.substitute_catalog_item_id, row);
+    }
+    if (!byBomInstanceLineId.has(row.bom_instance_line_id)) {
+      byBomInstanceLineId.set(row.bom_instance_line_id, row);
+    }
+  }
+
+  return {
+    substitutions: data ?? [],
+    bySubstituteId,
+    byBomInstanceLineId,
+    loading: isLoading,
+    refetch,
+  };
+}
+
+export interface MOMaterialSubstituteListResult {
+  candidates: MOMaterialSubstituteCandidate[];
+  /** Locked roles from BIL for this SKU on the MO */
+  part_roles: string[] | null;
+  /** parent | child | fabric | … — slot fingerprint for the original SKU */
+  slot_hierarchy: string | null;
+}
+
+export function useListMOMaterialSubstitutes(
+  moId: string | null,
+  originalCatalogItemId: string | null,
+  warehouseId: string | null,
+  enabled = true,
+  /** Fallback role when list returns no candidates (still show Role · hierarchy hint) */
+  fallbackPartRole?: string | null,
+) {
+  const { data, isLoading, refetch, error } = useQuery({
+    queryKey: [SUBSTITUTIONS_KEY, 'candidates', moId, originalCatalogItemId, warehouseId, fallbackPartRole ?? ''],
+    queryFn: async (): Promise<MOMaterialSubstituteListResult> => {
+      if (!moId || !originalCatalogItemId || !warehouseId) {
+        return { candidates: [], part_roles: null, slot_hierarchy: null };
+      }
+      const { data: rows, error: e } = await supabase.rpc('list_mo_material_substitutes', {
+        p_mo_id: moId,
+        p_original_catalog_item_id: originalCatalogItemId,
+        p_warehouse_id: warehouseId,
+      });
+      if (e) throw e;
+      const candidates: MOMaterialSubstituteCandidate[] = (rows ?? []).map((r: any) => ({
+        catalog_item_id: r.catalog_item_id,
+        sku: r.sku ?? '',
+        name: r.name ?? '',
+        measure_basis: r.measure_basis ?? '',
+        part_roles: r.part_roles ?? null,
+        slot_hierarchy: r.slot_hierarchy ?? null,
+        unit_cost: Number(r.unit_cost) || 0,
+        available_qty: Number(r.available_qty) || 0,
+        on_hand_qty: Number(r.on_hand_qty) || 0,
+        uom: r.uom ?? 'ea',
+      }));
+
+      let part_roles = candidates[0]?.part_roles ?? null;
+      let slot_hierarchy = candidates[0]?.slot_hierarchy ?? null;
+
+      if (!slot_hierarchy || !part_roles?.length) {
+        const role = part_roles?.[0] || fallbackPartRole?.trim() || null;
+        if (role) {
+          const { data: mo } = await supabase
+            .from('ManufacturingOrders')
+            .select('organization_id')
+            .eq('id', moId)
+            .maybeSingle();
+          const orgId = (mo as { organization_id?: string } | null)?.organization_id;
+          if (orgId) {
+            if (!part_roles?.length) part_roles = [role];
+            if (!slot_hierarchy) {
+              const { data: slot } = await supabase.rpc('_mo_substitute_slot_label', {
+                p_org_id: orgId,
+                p_catalog_item_id: originalCatalogItemId,
+                p_part_role: role,
+              });
+              if (typeof slot === 'string' && slot) slot_hierarchy = slot;
+            }
+          }
+        }
+      }
+
+      return { candidates, part_roles, slot_hierarchy };
+    },
+    enabled: enabled && !!moId && !!originalCatalogItemId && !!warehouseId,
+  });
+
+  return {
+    candidates: data?.candidates ?? [],
+    part_roles: data?.part_roles ?? null,
+    slot_hierarchy: data?.slot_hierarchy ?? null,
+    loading: isLoading,
+    error: error ? (error as Error).message : null,
+    refetch,
+  };
+}
+
+export function useSubstituteMOMaterial() {
+  const [isSubstituting, setIsSubstituting] = useState(false);
+  const queryClient = useQueryClient();
+
+  const substitute = useCallback(async (params: {
+    moId: string;
+    warehouseId: string;
+    originalCatalogItemId: string;
+    substituteCatalogItemId: string;
+    bomInstanceLineIds?: string[];
+    reason?: string;
+  }) => {
+    setIsSubstituting(true);
+    try {
+      const { data, error } = await supabase.rpc('substitute_mo_material', {
+        p_mo_id: params.moId,
+        p_warehouse_id: params.warehouseId,
+        p_original_catalog_item_id: params.originalCatalogItemId,
+        p_substitute_catalog_item_id: params.substituteCatalogItemId,
+        p_bom_instance_line_ids: params.bomInstanceLineIds ?? null,
+        p_reason: params.reason ?? null,
+      });
+      if (error) throw error;
+      const result = data as { ok: boolean; error?: string; lines_updated?: number; allocated_qty?: number };
+      if (!result?.ok) throw new Error(result?.error ?? 'Substitution failed');
+      queryClient.invalidateQueries({ queryKey: [ALLOCATIONS_KEY] });
+      queryClient.invalidateQueries({ queryKey: [FULFILLMENT_KEY] });
+      queryClient.invalidateQueries({ queryKey: [SUBSTITUTIONS_KEY] });
+      queryClient.invalidateQueries({ queryKey: ['material-demand'] });
+      return result;
+    } finally {
+      setIsSubstituting(false);
+    }
+  }, [queryClient]);
+
+  return { substitute, isSubstituting };
+}

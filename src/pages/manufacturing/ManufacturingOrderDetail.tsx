@@ -818,7 +818,9 @@ export default function ManufacturingOrderDetail({ moId: propMoId }: Manufacturi
     );
   }
 
-  const POST_PRODUCTION_STATUSES = ['quality_check', 'ready_for_pickup', 'delivered', 'completed'];
+  // Once the MO itself has entered production (or later), never downgrade the
+  // displayed status from line aggregation — that incorrectly re-enabled Allocate/Replace.
+  const POST_PRODUCTION_STATUSES = ['in_production', 'quality_check', 'ready_for_pickup', 'delivered', 'completed'];
   const derivedStatusFromLines = (() => {
     if (POST_PRODUCTION_STATUSES.includes(mo.status)) return null;
     if (moLines.length === 0) return null;

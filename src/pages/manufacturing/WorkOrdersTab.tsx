@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase/client';
 import { formatDate } from '../../lib/utils';
 import { useWorkOrderTasks, type WorkOrderTask } from '../../hooks/useWorkOrderTasks';
 import { useMoMaterialReadiness } from '../../hooks/useManufacturing';
+import { useMOMaterialSubstitutions } from '../../hooks/useInventoryAllocations';
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useUIStore } from '../../stores/ui-store';
 import StatusBadge from '../../components/shared/StatusBadge';
@@ -30,10 +31,11 @@ interface WorkOrdersTabProps {
   moType?: string;
 }
 
-function StationCard({ task, moMeta, siblingTasks }: {
+function StationCard({ task, moMeta, siblingTasks, subByBil }: {
   task: WorkOrderTask;
   moMeta: { moNumber: string; customerName: string; productName: string; salesOrderNo?: string; isServiceMO?: boolean; claimNo?: string; moType?: string; productSpecs?: { widthMm?: number; heightMm?: number; openingDirection?: string; operatingSystem?: string; productLine?: string; panelCount?: number } };
   siblingTasks?: WorkOrderTask[];
+  subByBil?: Map<string, { original_sku: string | null }>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const completedCount = task.lines.filter((l) => l.completed).length;
@@ -164,7 +166,19 @@ function StationCard({ task, moMeta, siblingTasks }: {
                     ? <CheckCircle2 className="h-4 w-4 text-green-500" />
                     : <Circle className="h-4 w-4 text-gray-300" />}
                 </td>
-                <td className={`px-4 py-2 font-mono ${line.completed ? 'line-through text-gray-400' : 'text-gray-800'}`}>{line.sku || '—'}</td>
+                <td className={`px-4 py-2 font-mono ${line.completed ? 'line-through text-gray-400' : 'text-gray-800'}`}>
+                  <div className="flex flex-col gap-0.5">
+                    <span>{line.sku || '—'}</span>
+                    {line.bom_instance_line_id && subByBil?.get(line.bom_instance_line_id)?.original_sku && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-violet-700">
+                        <span className="px-1.5 py-0.5 rounded bg-violet-100">Substituted</span>
+                        <span className="text-gray-400 line-through font-normal">
+                          {subByBil.get(line.bom_instance_line_id)!.original_sku}
+                        </span>
+                      </span>
+                    )}
+                  </div>
+                </td>
                 <td className={`px-4 py-2 ${line.completed ? 'line-through text-gray-400' : 'text-gray-700'}`}>{line.item_name || '—'}</td>
                 <td className="px-4 py-2">
                   {line.component_role
@@ -460,6 +474,14 @@ function formatLineSize(widthM?: number | null, heightM?: number | null): string
 export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', dealerName = '', productName = '', salesOrderNo, moStatus, isServiceMO, claimNo, moType }: WorkOrdersTabProps) {
   const { tasks, loading, error, refetch: refetchTasks } = useWorkOrderTasks(moId);
   const { readiness: materialReadiness } = useMoMaterialReadiness(moId);
+  const { byBomInstanceLineId } = useMOMaterialSubstitutions(moId);
+  const subByBil = useMemo(() => {
+    const m = new Map<string, { original_sku: string | null }>();
+    byBomInstanceLineId.forEach((row, bilId) => {
+      m.set(bilId, { original_sku: row.original_sku });
+    });
+    return m;
+  }, [byBomInstanceLineId]);
   const { activeOrganizationId } = useOrganizationContext();
   const addNotification = useUIStore((s) => s.addNotification);
   const [operators, setOperators] = useState<OperatorOption[]>([]);
@@ -997,6 +1019,7 @@ export default function WorkOrdersTab({ moId, moNumber = '', customerName = '', 
                     task={task}
                     moMeta={{ moNumber, customerName, productName, salesOrderNo, isServiceMO, claimNo, moType, productSpecs }}
                     siblingTasks={group.tasks}
+                    subByBil={subByBil}
                   />
                 ))}
               </div>

@@ -7,11 +7,21 @@ import { useOrganizationContext } from '../../../context/OrganizationContext';
 import { useWarehouses } from '../../../hooks/useWarehouses';
 import { useInventoryAvailability } from '../../../hooks/useInventoryAvailability';
 import { InventoryAvailabilityBadge } from '../../inventory/InventoryAvailabilityBadge';
-import { useMOAllocations, useAllocateToMO, useReleaseMOAllocation, useAllMOAllocationsForItem, useTransferAllocation } from '../../../hooks/useInventoryAllocations';
+import {
+  useMOAllocations,
+  useAllocateToMO,
+  useReleaseMOAllocation,
+  useAllMOAllocationsForItem,
+  useTransferAllocation,
+  useMOMaterialSubstitutions,
+  useSubstituteMOMaterial,
+} from '../../../hooks/useInventoryAllocations';
+import type { MOMaterialSubstituteCandidate, MOMaterialSubstitutionRow } from '../../../hooks/useInventoryAllocations';
 import type { InventoryAvailabilityRow } from '../../../types/inventory';
 import { useUIStore } from '../../../stores/ui-store';
 import StatusBadge from '../../shared/StatusBadge';
-import { Package, XCircle, Loader2, ArrowRightLeft, ChevronRight, ChevronDown, Search, AlertTriangle, Calendar, ShieldAlert, ShoppingCart } from 'lucide-react';
+import ReplaceMaterialModal from '../ReplaceMaterialModal';
+import { Package, XCircle, Loader2, ArrowRightLeft, ChevronRight, ChevronDown, Search, AlertTriangle, Calendar, ShieldAlert, ShoppingCart, RefreshCw } from 'lucide-react';
 import { recomputeMoFabricPurchase } from '../../../lib/fabricNestPurchase';
 
 interface MaterialsTabProps {
@@ -149,13 +159,21 @@ export default function MaterialsTab({
   const { allocations, loading: allocLoading, refetch: refetchAllocations } = useMOAllocations(moId);
   const { allocate, isAllocating } = useAllocateToMO();
   const { release, isReleasing } = useReleaseMOAllocation();
+  const { bySubstituteId, refetch: refetchSubstitutions } = useMOMaterialSubstitutions(moId);
+  const { substitute, isSubstituting } = useSubstituteMOMaterial();
   const [showReleaseConfirm, setShowReleaseConfirm] = useState(false);
   const [allocSearch, setAllocSearch] = useState('');
   const [allocFilter, setAllocFilter] = useState<'all' | 'shortages' | 'ok'>('all');
   const [expandedSkuId, setExpandedSkuId] = useState<string | null>(null);
   const [materialSubTab, setMaterialSubTab] = useState<'materials' | 'allocation'>('materials');
+  const [replaceTarget, setReplaceTarget] = useState<AggregatedMaterial | null>(null);
 
   const canModifyAllocations = !readOnly && ['draft', 'confirmed', 'procurement', 'material_available', 'materials_ready'].includes(moStatus);
+  const allocationsLockedReason = readOnly
+    ? 'This manufacturing order is locked.'
+    : !canModifyAllocations
+      ? 'Cannot change allocations after the MO is In Production.'
+      : null;
 
   const allocationMap = useMemo(() => {
     const map = new Map<string, number>();
@@ -340,6 +358,46 @@ export default function MaterialsTab({
       addNotification({ type: 'error', title: 'Error', message: (err as Error).message });
     }
   }, [moId, release, addNotification, refetchAllocations]);
+
+  const handleConfirmSubstitute = useCallback(async (candidate: MOMaterialSubstituteCandidate, reason?: string) => {
+    if (!canModifyAllocations) {
+      addNotification({ type: 'error', title: 'Blocked', message: allocationsLockedReason ?? 'Cannot replace materials after In Production.' });
+      return;
+    }
+    if (!replaceTarget || !defaultWarehouse) return;
+    try {
+      const result = await substitute({
+        moId,
+        warehouseId: defaultWarehouse.id,
+        originalCatalogItemId: replaceTarget.catalog_item_id,
+        substituteCatalogItemId: candidate.catalog_item_id,
+        bomInstanceLineIds: replaceTarget.bomInstanceLineIds,
+        reason,
+      });
+      addNotification({
+        type: 'success',
+        title: 'Material replaced',
+        message: `${replaceTarget.sku} → ${candidate.sku} (${result.lines_updated ?? 0} line(s), ${result.allocated_qty ?? 0} allocated).`,
+      });
+      setReplaceTarget(null);
+      await Promise.all([refetchMaterials(), refetchAllocations(), refetchSubstitutions()]);
+      onExclusionsChanged?.();
+    } catch (err: unknown) {
+      addNotification({ type: 'error', title: 'Replace failed', message: (err as Error).message });
+    }
+  }, [
+    canModifyAllocations,
+    allocationsLockedReason,
+    replaceTarget,
+    defaultWarehouse,
+    substitute,
+    moId,
+    addNotification,
+    refetchMaterials,
+    refetchAllocations,
+    refetchSubstitutions,
+    onExclusionsChanged,
+  ]);
   const catalogItemIds = useMemo(
     () => [...new Set(materials.map((m) => m.catalog_item_id).filter(Boolean))],
     [materials]
@@ -1006,6 +1064,7 @@ export default function MaterialsTab({
                       const statusLabel = gap <= 0 ? 'OK' : allocated > 0 ? 'Partial' : 'Shortage';
                       const statusColor = gap <= 0 ? 'bg-green-100 text-green-700' : allocated > 0 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700';
                       const rowBg = gap <= 0 ? '' : 'bg-red-50/40';
+                      const substitution = bySubstituteId.get(agg.catalog_item_id) ?? null;
 
                       return (
                         <AllocationRow
@@ -1020,13 +1079,16 @@ export default function MaterialsTab({
                           isExpanded={isExpanded}
                           onToggle={() => setExpandedSkuId(isExpanded ? null : agg.catalog_item_id)}
                           onRelease={() => handleReleaseItem(agg.catalog_item_id)}
+                          onReplace={() => setReplaceTarget(agg)}
                           isReleasing={isReleasing}
                           canModify={canModifyAllocations}
+                          lockedReason={allocationsLockedReason}
                           moId={moId}
                           orgId={activeOrganizationId}
                           warehouseId={defaultWarehouse?.id ?? null}
                           availability={avail ?? null}
                           onTransferred={refetchAllocations}
+                          substitution={substitution}
                         />
                       );
                     })}
@@ -1037,6 +1099,20 @@ export default function MaterialsTab({
           </div>
         );
       })()}
+
+      {replaceTarget && defaultWarehouse && canModifyAllocations && (
+        <ReplaceMaterialModal
+          moId={moId}
+          warehouseId={defaultWarehouse.id}
+          target={replaceTarget}
+          requiredQty={requiredQtyForAgg(replaceTarget)}
+          canViewCosts={canViewCosts}
+          currency={currency}
+          isSubstituting={isSubstituting}
+          onClose={() => setReplaceTarget(null)}
+          onConfirm={handleConfirmSubstitute}
+        />
+      )}
 
       {showReleaseConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -1102,19 +1178,22 @@ interface AllocationRowProps {
   isExpanded: boolean;
   onToggle: () => void;
   onRelease: () => void;
+  onReplace: () => void;
   isReleasing: boolean;
   canModify: boolean;
+  lockedReason: string | null;
   moId: string;
   orgId: string | null;
   warehouseId: string | null;
   availability: InventoryAvailabilityRow | null;
   onTransferred: () => void;
+  substitution: MOMaterialSubstitutionRow | null;
 }
 
 function AllocationRow({
   agg, allocated, gap, onHand, statusLabel, statusColor, rowBg,
-  isExpanded, onToggle, onRelease, isReleasing, canModify,
-  moId, orgId, warehouseId, availability, onTransferred,
+  isExpanded, onToggle, onRelease, onReplace, isReleasing, canModify, lockedReason,
+  moId, orgId, warehouseId, availability, onTransferred, substitution,
 }: AllocationRowProps) {
   const fmt = (qty: number) => agg.uom === 'm' ? qty.toFixed(2) : qty.toFixed(0);
   const required = requiredQtyForAgg(agg);
@@ -1131,7 +1210,22 @@ function AllocationRow({
             : <ChevronRight className="w-4 h-4 text-gray-400" />
           }
         </td>
-        <td className="px-3 py-2 font-mono text-gray-900 text-xs">{agg.sku}</td>
+        <td className="px-3 py-2 font-mono text-gray-900 text-xs">
+          <div className="flex flex-col gap-0.5">
+            <span>{agg.sku}</span>
+            {substitution && (
+              <span
+                className="inline-flex items-center gap-1 text-[10px] font-medium text-violet-700"
+                title={`Replaced ${substitution.original_sku ?? 'original SKU'}${substitution.original_name ? ` — ${substitution.original_name}` : ''}`}
+              >
+                <span className="px-1.5 py-0.5 rounded bg-violet-100">Substituted</span>
+                {substitution.original_sku && (
+                  <span className="text-gray-400 line-through font-normal">{substitution.original_sku}</span>
+                )}
+              </span>
+            )}
+          </div>
+        </td>
         <td className="px-3 py-2 text-gray-700 text-xs truncate max-w-[200px]" title={agg.item_name}>{agg.item_name}</td>
         <td className="px-3 py-2 text-right tabular-nums text-xs">{fmt(required)}</td>
         <td className="px-3 py-2 text-right tabular-nums text-xs">{fmt(onHand)}</td>
@@ -1145,17 +1239,29 @@ function AllocationRow({
           <span className={`inline-block text-[10px] px-2 py-0.5 rounded-full font-medium ${statusColor}`}>{statusLabel}</span>
         </td>
         <td className="px-3 py-2 text-center" onClick={e => e.stopPropagation()}>
-          {canModify && allocated > 0 && (
+          <div className="flex items-center justify-center gap-2">
             <button
               type="button"
-              onClick={onRelease}
-              disabled={isReleasing}
-              className="text-[10px] text-red-600 hover:text-red-800 disabled:opacity-50"
-              title="Release allocation for this item"
+              onClick={onReplace}
+              disabled={!canModify}
+              className="inline-flex items-center gap-0.5 text-[10px] text-violet-700 hover:text-violet-900 disabled:text-gray-300 disabled:hover:text-gray-300 disabled:cursor-not-allowed"
+              title={canModify ? 'Replace with alternate SKU (same role / type)' : (lockedReason ?? 'Replace disabled')}
             >
-              Unassign
+              <RefreshCw className="w-3 h-3" />
+              Replace
             </button>
-          )}
+            {allocated > 0 && (
+              <button
+                type="button"
+                onClick={onRelease}
+                disabled={!canModify || isReleasing}
+                className="text-[10px] text-red-600 hover:text-red-800 disabled:text-gray-300 disabled:hover:text-gray-300 disabled:cursor-not-allowed disabled:opacity-100"
+                title={canModify ? 'Release allocation for this item' : (lockedReason ?? 'Unassign disabled')}
+              >
+                Unassign
+              </button>
+            )}
+          </div>
         </td>
       </tr>
       {isExpanded && (
@@ -1411,3 +1517,4 @@ function AllocationDetailPanel({
     </div>
   );
 }
+

@@ -6,6 +6,7 @@ import { useFilteredMfgSubmodules } from './manufacturingSubmodules';
 import { useUIStore } from '../../stores/ui-store';
 import DetailPageLayout from '../../components/shared/DetailPageLayout';
 import StatusBadge from '../../components/shared/StatusBadge';
+import { useMOMaterialSubstitutions } from '../../hooks/useInventoryAllocations';
 import { CheckCircle, Package, AlertTriangle } from 'lucide-react';
 import { normalizeUUID } from '../../utils/uuid';
 
@@ -105,6 +106,7 @@ export default function MOLineDetail({ moId: propMoId, lineId: propLineId }: MOL
   const mfgSubmodules = useFilteredMfgSubmodules();
   const { registerSubmodules } = useSubmoduleNav();
   const addNotification = useUIStore((s) => s.addNotification);
+  const { byBomInstanceLineId } = useMOMaterialSubstitutions(moId);
 
   useEffect(() => { registerSubmodules('Manufacturing', mfgSubmodules); }, [registerSubmodules, mfgSubmodules]);
 
@@ -391,6 +393,7 @@ export default function MOLineDetail({ moId: propMoId, lineId: propLineId }: MOL
                       if (uom === 'm2') return n.toFixed(2) + ' m²';
                       return n.toFixed(2) + (uom ? ` ${uom}` : '');
                     };
+                    const substitution = byBomInstanceLineId.get(m.bom_instance_line_id) ?? null;
 
                     return (
                       <tr key={m.bom_instance_line_id} className="border-t border-gray-100 hover:bg-gray-50/50">
@@ -398,7 +401,22 @@ export default function MOLineDetail({ moId: propMoId, lineId: propLineId }: MOL
                           <div className="font-medium text-gray-900 text-sm">{roleLabel}</div>
                           <div className="text-xs text-gray-500 mt-0.5 truncate max-w-[200px]">{m.item_name}</div>
                         </td>
-                        <td className="py-2.5 px-3 text-xs text-gray-500 font-mono">{m.sku || '—'}</td>
+                        <td className="py-2.5 px-3 text-xs text-gray-500 font-mono">
+                          <div className="flex flex-col gap-0.5">
+                            <span>{m.sku || '—'}</span>
+                            {substitution && (
+                              <span
+                                className="inline-flex items-center gap-1 text-[10px] font-medium text-violet-700"
+                                title={`Replaced ${substitution.original_sku ?? 'original SKU'}${substitution.original_name ? ` — ${substitution.original_name}` : ''}`}
+                              >
+                                <span className="px-1.5 py-0.5 rounded bg-violet-100">Substituted</span>
+                                {substitution.original_sku && (
+                                  <span className="text-gray-400 line-through font-normal">{substitution.original_sku}</span>
+                                )}
+                              </span>
+                            )}
+                          </div>
+                        </td>
                         <td className="py-2.5 px-3 text-right tabular-nums text-sm">{fmtQty(m.qty, m.uom)}</td>
                         <td className="py-2.5 px-3 text-right tabular-nums text-sm text-gray-600">{fmtQty(m.on_hand_qty, m.uom)}</td>
                         <td className="py-2.5 px-3 text-right tabular-nums text-sm text-gray-600">{fmtQty(m.on_order_qty, m.uom)}</td>

@@ -64,6 +64,8 @@ interface TaskLine {
   product_width_m: number | null;
   product_height_m: number | null;
   roll_width_m: number | null;
+  /** Original SKU when this BIL was substituted at allocate time */
+  substituted_from_sku?: string | null;
 }
 
 interface TaskWithMO {
@@ -303,6 +305,22 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
         }
       }
 
+      // Material substitutions (allocate-time Replace) — show original SKU on workstation
+      const moIdsForSubs = [...new Set(taskData.map((t: any) => t.manufacturing_order_id).filter(Boolean))] as string[];
+      const subByBil = new Map<string, string>();
+      if (moIdsForSubs.length > 0) {
+        const { data: subRows } = await supabase
+          .from('MOMaterialSubstitutions')
+          .select('bom_instance_line_id, original:CatalogItems!original_catalog_item_id(sku)')
+          .in('mo_id', moIdsForSubs)
+          .order('created_at', { ascending: false });
+        for (const row of subRows ?? []) {
+          const bilId = (row as any).bom_instance_line_id as string;
+          if (!bilId || subByBil.has(bilId)) continue;
+          subByBil.set(bilId, (row as any).original?.sku ?? '');
+        }
+      }
+
       const linesByTask: Record<string, TaskLine[]> = {};
       for (const l of (lineData ?? [])) {
         if (!linesByTask[l.task_id]) linesByTask[l.task_id] = [];
@@ -313,6 +331,7 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
           product_width_m: meta?.width_m ?? null,
           product_height_m: meta?.height_m ?? null,
           roll_width_m: l.catalog_item_id ? (catDimMap[l.catalog_item_id] ?? null) : null,
+          substituted_from_sku: l.bom_instance_line_id ? (subByBil.get(l.bom_instance_line_id) || null) : null,
         });
       }
 
@@ -1331,7 +1350,17 @@ export default function WorkstationView({ workCenterId }: WorkstationViewProps) 
                                   disabled={task.status !== 'in_progress'}
                                 />
                               </td>
-                              <td className={`px-4 py-2 font-mono ${line.completed ? 'line-through text-gray-400' : 'text-gray-800'}`}>{line.sku ?? '—'}</td>
+                              <td className={`px-4 py-2 font-mono ${line.completed ? 'line-through text-gray-400' : 'text-gray-800'}`}>
+                                <div className="flex flex-col gap-0.5">
+                                  <span>{line.sku ?? '—'}</span>
+                                  {line.substituted_from_sku && (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-medium text-violet-700">
+                                      <span className="px-1.5 py-0.5 rounded bg-violet-100">Substituted</span>
+                                      <span className="text-gray-400 line-through font-normal">{line.substituted_from_sku}</span>
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
                               <td className={`px-4 py-2 ${line.completed ? 'line-through text-gray-400' : 'text-gray-700'}`}>
                                 {line.item_name ?? '—'}
                                 {hasCut && (
