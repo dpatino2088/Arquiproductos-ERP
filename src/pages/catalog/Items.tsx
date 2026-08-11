@@ -185,7 +185,9 @@ export default function Items() {
   const canViewBOM = can('catalog.bom.read') || can('catalog.bom.write') || can('catalog.write');
   const { canCreate: canCreateCat, canArchive: canArchiveCat, canDelete: canDeleteCat } = useGranularAccess('catalog');
   // Cached React Query list (status 'all' => active + inactive; client-side filters/pagination below).
-  const catalogListFilters = useMemo(() => ({ status: 'all', pageSize: 3000 }), []);
+  // pageSize must cover the whole catalog (4,200+ items and growing); it also has
+  // to match CatalogModule's warm filters so both share the same query cache key.
+  const catalogListFilters = useMemo(() => ({ status: 'all', pageSize: 5000 }), []);
   const catalogList = useCatalogItemsList({ filters: catalogListFilters });
   const items = catalogList.items;
   const loading = catalogList.isInitialLoading; // blank only on cold first load (no cache)

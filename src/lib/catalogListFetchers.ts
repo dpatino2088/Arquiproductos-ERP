@@ -86,6 +86,40 @@ export async function fetchCatalogItemsList(
   const categoryId = filters?.categoryId;
   const searchTerm = filters?.q && filters.q.trim().length >= 2 ? `%${filters.q.trim()}%` : null;
 
+  // FAST PATH: full-org list (no server-side search/category filter — the Items
+  // page filters client-side). One RPC round-trip returns items + manufacturer
+  // name + MSRP already joined, replacing ~18 sequential/parallel requests
+  // (item pages of 1000 + MSRP .in() batches of 200) that took 6s+.
+  if (!searchTerm && !categoryId) {
+    const rpcStatus = status === 'active' || status === 'inactive' ? status : 'all';
+    const { data, error } = await supabase.rpc('catalog_items_list_json', {
+      p_org_id: orgId,
+      p_status: rpcStatus,
+    });
+    if (!error && Array.isArray(data)) {
+      const rows = (data as Record<string, unknown>[]).slice(0, targetSize);
+      const msrpMap = new Map<string, MsrpRow>();
+      for (const row of rows) {
+        // Adapt RPC shape to what enrichItems expects (embedded Manufacturers + MSRP map).
+        row.Manufacturers = row.manufacturer_name ? { name: row.manufacturer_name } : null;
+        if (row.id && row.msrp_value != null) {
+          msrpMap.set(row.id as string, {
+            dealer_price: Number(row.dealer_price_value ?? 0),
+            msrp: Number(row.msrp_value ?? 0),
+            total_cost: 0,
+            shipping_cost: 0,
+            import_tax_cost: 0,
+          });
+        }
+      }
+      return enrichItems(rows, msrpMap).filter((it) => it?.id && (it.sku || it.name || it.item_name));
+    }
+    if (import.meta.env.DEV && error) {
+      console.warn('catalog_items_list_json RPC unavailable, falling back to paged fetch:', error.message);
+    }
+    // RPC missing/failed → fall through to the legacy paged path below.
+  }
+
   const buildQuery = (from: number, to: number) => {
     let q = supabase
       .from('CatalogItems')

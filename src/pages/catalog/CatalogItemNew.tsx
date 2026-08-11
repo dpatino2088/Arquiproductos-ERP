@@ -249,7 +249,8 @@ export default function CatalogItemNew() {
     [activeOrganizationId, activeDealerId, userType]
   );
   const defaultListFilters = useMemo(
-    () => ({ q: '', categoryId: '', status: 'all', sortKey: 'sku', page: 1, pageSize: 3000 }),
+    // Must match Items.tsx catalogListFilters (same list query cache key).
+    () => ({ q: '', categoryId: '', status: 'all', sortKey: 'sku', page: 1, pageSize: 5000 }),
     []
   );
   // Bin locations across all warehouses (active only) for primary location selector

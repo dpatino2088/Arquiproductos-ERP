@@ -66,7 +66,8 @@ export default function CatalogModule({ activeTab }: Props) {
       activeDealerId: activeDealerId ?? null,
       userRole: userType,
     });
-    const filtersStable = { q: '', categoryId: '', status: 'all', sortKey: 'sku', page: 1, pageSize: 3000 };
+    // Must match Items.tsx catalogListFilters so the warmed cache key is reused.
+    const filtersStable = { q: '', categoryId: '', status: 'all', sortKey: 'sku', page: 1, pageSize: 5000 };
     warmModuleQueries(queryClient, [
       {
         queryKey: catalogItemsListKey(scopeKey, filtersStable),
