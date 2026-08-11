@@ -1298,6 +1298,15 @@ export default function Items() {
   const handleDuplicateItem = async (item: Item, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!activeOrganizationId) return;
+
+    const confirmed = await showConfirm({
+      title: 'Duplicar item',
+      message: `¿Deseas crear una copia de "${item.sku}"?`,
+      variant: 'info',
+      confirmText: 'Duplicar',
+    });
+    if (!confirmed) return;
+
     setIsDuplicating(true);
     try {
       const { data: original, error: fetchErr } = await supabase
@@ -1309,11 +1318,54 @@ export default function Items() {
       if (fetchErr || !original) throw fetchErr || new Error('Item not found');
 
       const { id, created_at, updated_at, ...rest } = original;
-      const newSku = `${original.sku}-Copy`;
+
+      // Pick the first "-Copy" suffix not used by an ACTIVE item. Items are
+      // identified by UUID, not by the public SKU, and deleting is a soft delete
+      // (is_active=false) — so a deleted copy must NOT reserve its SKU: if a
+      // deleted row still holds the chosen SKU (the unique index covers all rows),
+      // rename that row to free the SKU for the new copy.
+      const likePattern = `${String(original.sku).replace(/([%_\\])/g, '\\$1')}-Copy%`;
+      const { data: existingCopies } = await supabase
+        .from('CatalogItems')
+        .select('id, sku, is_active')
+        .eq('organization_id', activeOrganizationId)
+        .ilike('sku', likePattern);
+      const activeSkus = new Set(
+        (existingCopies || [])
+          .filter((r: { is_active?: boolean | null }) => r.is_active !== false)
+          .map((r: { sku?: string | null }) => String(r.sku || '').toLowerCase())
+      );
+      let copyN = 1;
+      let newSku = `${original.sku}-Copy`;
+      while (activeSkus.has(newSku.toLowerCase())) {
+        copyN += 1;
+        newSku = `${original.sku}-Copy ${copyN}`;
+      }
+      const copyLabel = copyN > 1 ? `(Copy ${copyN})` : '(Copy)';
+
+      // Free the SKU if a deleted (inactive) row still holds it.
+      const inactiveHolder = (existingCopies || []).find(
+        (r: { sku?: string | null; is_active?: boolean | null }) =>
+          r.is_active === false && String(r.sku || '').toLowerCase() === newSku.toLowerCase()
+      );
+      if (inactiveHolder) {
+        const { error: freeErr } = await supabase
+          .from('CatalogItems')
+          .update({
+            sku: `${inactiveHolder.sku}-deleted-${String(inactiveHolder.id).slice(0, 8)}`,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', inactiveHolder.id)
+          .eq('organization_id', activeOrganizationId);
+        if (freeErr) {
+          throw new Error(`No se pudo liberar el SKU "${newSku}" del item eliminado: ${freeErr.message}`);
+        }
+      }
+
       const derivedRollName = `${original.collection_name || ''} ${original.variant_name || ''}`.trim();
       const newName = original.is_roll
         ? (derivedRollName || original.name || newSku)
-        : (original.name ? `${original.name} (Copy)` : newSku);
+        : (original.name ? `${original.name} ${copyLabel}` : newSku);
       const sourceImageUrl = (original as any).image_url || item.image || null;
 
       // Preflight image validation: avoid duplicating with broken links.
