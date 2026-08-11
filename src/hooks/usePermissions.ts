@@ -142,6 +142,13 @@ export const MODULE_PERMS = {
     view: ['service.claims.read', 'sales.orders.read'],
     edit: ['service.claims.write', 'sales.orders.write'],
   },
+  // Internal-only analytics module. 'dashboard.read' acts as the fallback so
+  // existing internal roles see it without new RBAC rows; a dedicated
+  // 'reports.read' permission can narrow it later.
+  reports: {
+    view: ['reports.read', 'dashboard.read'],
+    edit: ['reports.write'],
+  },
 } as const;export type ModuleKey = keyof typeof MODULE_PERMS;
 
 /**

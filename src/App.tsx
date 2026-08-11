@@ -39,7 +39,7 @@ const TestDirectory = lazy(() => import('./pages/directory/TestDirectory'));
 
 
 
-const CompanyReports = lazy(() => import('./pages/reports/CompanyReports'));
+const ReportsModule = lazy(() => import('./pages/reports/ReportsModule'));
 
 const ServiceClaims = lazy(() => import('./pages/service/Claims'));
 const ServiceClaimNew = lazy(() => import('./pages/service/ClaimNew'));
@@ -1067,14 +1067,7 @@ function App() {
     // Reports routes
     router.addRoute('/reports', () => {
       if (isAuthenticated) {
-        setCurrentPage('company-reports');
-      } else {
-        setCurrentPage('login');
-      }
-    });
-    router.addRoute('/reports/company-reports', () => {
-      if (isAuthenticated) {
-        setCurrentPage('company-reports');
+        setCurrentPage('reports');
       } else {
         setCurrentPage('login');
       }
@@ -1553,9 +1546,7 @@ function App() {
         return <ServiceClaimDetail />;
 
       case 'reports':
-        return <CompanyReports />;
-      case 'company-reports':
-        return <CompanyReports />;
+        return <RequireModule module="reports"><ReportsModule /></RequireModule>;
       case 'company-settings':
         return <RequireModule module="settings"><CompanySettings /></RequireModule>;
       case 'organization-users':

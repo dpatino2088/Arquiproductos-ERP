@@ -16,6 +16,7 @@ export type ModuleKey =
   | "financials"
   | "partners"
   | "service"
+  | "reports"
   | "settings";
 
 type AccessContextState = {
@@ -293,7 +294,7 @@ export function useAccessContext(): AccessContextState {
   const allowedModules = useMemo<ModuleKey[]>(() => {
     if (userType === "portal") return PORTAL_ALLOWED_MODULES;
     if (userType === "internal") {
-      return ["dashboard", "directory", "sales", "catalog", "inventory", "manufacturing", "financials", "partners", "service", "settings"];
+      return ["dashboard", "directory", "sales", "catalog", "inventory", "manufacturing", "financials", "partners", "service", "reports", "settings"];
     }
     return ["dashboard"];
   }, [userType]);

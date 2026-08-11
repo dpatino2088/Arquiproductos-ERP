@@ -54,7 +54,8 @@ import {
   RefreshCw,
   Handshake,
   LifeBuoy,
-  Calculator
+  Calculator,
+  BarChart3
 } from 'lucide-react';
 import { useDirectoryLoadStore } from '../stores/directory-load-store';
 
@@ -88,6 +89,7 @@ const MODULE_TABS: Record<string, { label: string; href: string }[]> = {
     { label: 'Items', href: '/catalog/items' },
     { label: 'BOM', href: '/catalog/bom' },
   ],
+  '/reports': [],
   '/inventory': [
     { label: 'Warehouse', href: '/inventory/warehouse' },
     { label: 'Locations', href: '/inventory/locations' },
@@ -652,6 +654,9 @@ function Layout({ children }: LayoutProps) {
         : []),
       ...(userType === 'internal'
         ? [{ name: 'Accounting', href: '/accounting', icon: Calculator, module: 'financials' as const }]
+        : []),
+      ...(userType === 'internal'
+        ? [{ name: 'Reports', href: '/reports', icon: BarChart3, module: 'reports' as const }]
         : []),
       { name: 'Partners', href: '/partners', icon: Handshake, module: 'partners' },
     ];

@@ -330,3 +330,8 @@ export function accountingProfitLossKey(orgId: string, from: string, to: string)
 export function accountingBalanceSheetKey(orgId: string, asOf: string): unknown[] {
   return ['accounting', 'reports', 'balance-sheet', LIST_QUERY_VERSION, orgId, asOf];
 }
+
+/** Reports module: one aggregated payload per tab and date window (from/to = 'YYYY-MM-DD') */
+export function reportsTabKey(scopeKey: string, tab: string, from: string, to: string): unknown[] {
+  return ['reports', tab, 'list', LIST_QUERY_VERSION, scopeKey, from, to];
+}
