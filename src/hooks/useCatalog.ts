@@ -231,6 +231,47 @@ export function useCatalogItems(
           } as CatalogItem;
         });
         
+        // FAST PATH: one RPC round-trip (items + MSRP joined server-side) instead of
+        // sequential 1000-row pages + MSRP .in() batches. role/category/isRoll are
+        // filtered client-side on the returned rows. `family` is not a CatalogItems
+        // column, so if it's ever passed we keep the legacy path for parity.
+        if (!family) {
+          const { data: rpcData, error: rpcError } = await supabase.rpc('catalog_items_list_json', {
+            p_org_id: activeOrganizationId,
+            p_status: includeInactive ? 'all' : 'active',
+          });
+          if (!rpcError && Array.isArray(rpcData)) {
+            let rows = rpcData as any[];
+            if (role) rows = rows.filter((r) => r.item_role === role);
+            if (categoryId) rows = rows.filter((r) => r.category_id === categoryId);
+            if (isRoll === true) rows = rows.filter((r) => r.is_roll === true);
+            const rpcMsrpMap = new Map<string, MsrpRow>();
+            rows.forEach((r) => {
+              if (r?.id && r.msrp_value != null) {
+                rpcMsrpMap.set(r.id, {
+                  dealer_price: Number(r.dealer_price_value ?? 0),
+                  msrp: Number(r.msrp_value ?? 0),
+                  total_cost: 0,
+                  shipping_cost: 0,
+                  import_tax_cost: 0,
+                });
+              }
+            });
+            const validRpcItems = enrichItems(rows, rpcMsrpMap).filter(it => it?.id && (it.sku || it.name || it.item_name));
+            if (import.meta.env.DEV) console.log(`✅ useCatalogItems fast path: ${validRpcItems.length} items in one request`);
+            if (isMounted) {
+              setItems(validRpcItems);
+              setLoading(false);
+              setLoadingMore(false);
+            }
+            return;
+          }
+          if (import.meta.env.DEV && rpcError) {
+            console.warn('catalog_items_list_json RPC unavailable, falling back to paged fetch:', rpcError.message);
+          }
+          // RPC missing/failed → fall through to the legacy paged path below.
+        }
+
         // PASO 1: Cargar primeros 1000 items (o el máximo permitido por backend)
         const { data: initialData, error: initialError } = await buildQuery(0, INITIAL_LOAD_SIZE - 1);
         if (initialError) {
