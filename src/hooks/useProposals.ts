@@ -1273,7 +1273,21 @@ async function cloneProposalContent(
     .eq('deleted', false);
   if (linesErr) return { error: linesErr.message };
 
+  // Per-line quantity used to scale add-ons (installation is priced per product unit).
+  // Mirrors getProposalLineQty: custom → own qty; otherwise the frozen snapshot qty,
+  // falling back to the line qty. Without qty here, cloned add-ons would keep a stale
+  // (often unit-only) sale_amount and under/over-count on the new version.
+  const cloneLineQty = (ln: any): number => {
+    if (ln.line_type === 'custom') return Math.max(0, Number(ln.qty) || 0);
+    const snapQty = Number((ln.quote_line_snapshot as { qty?: number } | null)?.qty);
+    if (snapQty > 0) return snapQty;
+    const lq = Number(ln.qty);
+    if (lq > 0) return lq;
+    return 1;
+  };
+
   const idMap = new Map<string, string>();
+  const qtyByOldLine = new Map<string, number>();
   for (const ln of srcLines ?? []) {
     const { id: oldId, ...rest } = ln as any;
     const { data: newLine, error: e } = await supabase
@@ -1289,6 +1303,7 @@ async function cloneProposalContent(
       .single();
     if (e || !newLine) return { error: e?.message || 'Failed to copy proposal line' };
     idMap.set(oldId, newLine.id);
+    qtyByOldLine.set(oldId, cloneLineQty(ln));
   }
 
   if (idMap.size > 0) {
@@ -1298,11 +1313,20 @@ async function cloneProposalContent(
       .in('proposal_line_id', Array.from(idMap.keys()))
       .eq('deleted', false);
     for (const ad of srcAddons ?? []) {
-      const newLineId = idMap.get((ad as any).proposal_line_id);
+      const oldLineId = (ad as any).proposal_line_id;
+      const newLineId = idMap.get(oldLineId);
       if (!newLineId) continue;
       const { proposal_line_id: _omitLineId, ...rest } = ad as any;
+      // Recompute sale_amount from the destination line qty so cloned versions scale
+      // by product quantity (same formula as upsertAddOn). fixed_price keeps its total.
+      const qty = Math.max(1, qtyByOldLine.get(oldLineId) ?? 1);
+      const recomputedSale =
+        rest.pricing_mode === 'fixed_price' && rest.sale_amount != null
+          ? Number(rest.sale_amount)
+          : (Number(rest.cost_amount) || 0) * (1 + (Number(rest.markup_pct) || 0) / 100) * qty;
       await supabase.from('ProposalLineAddOns').insert({
         ...rest,
+        sale_amount: recomputedSale,
         organization_id: src.organization_id,
         dealer_id: src.dealer_id,
         proposal_id: newId,
