@@ -112,7 +112,7 @@ export default function Proposals() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [statusTab, setStatusTab] = useState(() => {
     const raw = new URLSearchParams(window.location.search).get('status')?.toLowerCase() ?? 'all';
-    if (raw === 'draft' || raw === 'sent' || raw === 'accepted' || raw === 'rejected' || raw === 'expired' || raw === 'archived' || raw === 'all') {
+    if (raw === 'draft' || raw === 'sent' || raw === 'accepted' || raw === 'rejected' || raw === 'expired' || raw === 'cancelled' || raw === 'archived' || raw === 'all') {
       return raw;
     }
     return 'all';
@@ -165,9 +165,11 @@ export default function Proposals() {
   }, []);
 
   const proposalStatusCounts = useMemo(() => {
-    const c: Record<string, number> = { all: nonArchivedList.length };
+    const c: Record<string, number> = { all: 0 };
     nonArchivedList.forEach((p) => {
       c[p.status] = (c[p.status] || 0) + 1;
+      // Cancelled (superseded) versions live in their own tab, not in "All".
+      if (p.status !== 'cancelled') c.all += 1;
     });
     return c;
   }, [nonArchivedList]);
@@ -180,6 +182,7 @@ export default function Proposals() {
       { label: 'Accepted', value: 'accepted', count: proposalStatusCounts.accepted || 0 },
       { label: 'Rejected', value: 'rejected', count: proposalStatusCounts.rejected || 0 },
       { label: 'Expired', value: 'expired', count: proposalStatusCounts.expired || 0 },
+      { label: 'Cancelled', value: 'cancelled', count: proposalStatusCounts.cancelled || 0 },
       { label: 'Archived', value: 'archived', count: archivedCount },
     ],
     [proposalStatusCounts, archivedCount]
@@ -199,7 +202,11 @@ export default function Proposals() {
     let result =
       statusTab === 'archived' ? list.filter((p) => p.archived) : nonArchivedList;
 
-    if (statusTab !== 'all' && statusTab !== 'archived') {
+    if (statusTab === 'all') {
+      // Cancelled versions are hidden from "All": they have their own tab and
+      // still show as older versions under the family chevron.
+      result = result.filter((p) => p.status !== 'cancelled');
+    } else if (statusTab !== 'archived') {
       result = result.filter((p) => p.status === statusTab);
     }
 

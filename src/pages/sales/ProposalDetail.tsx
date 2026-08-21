@@ -2209,8 +2209,11 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
   // any internal user with write access. Blocked if a Sales Order already exists.
   const isAdminDealer = userType === 'portal' && portalRole === 'dealer_manager';
   const canRevertStatus = isAccepted && !proposal?.archived && (isAdminDealer || userType === 'internal') && !hasDownstreamSO;
+  // Cancelling is an annulment, not a reopen-for-editing: allowed even when a
+  // downstream Sales Order exists (the SO is managed on its own).
+  const canCancelStatus = isAccepted && !proposal?.archived && (isAdminDealer || userType === 'internal');
   const contentReadOnly = readOnly || !!isAccepted;
-  const statusDropdownDisabled = contentReadOnly && !canRevertStatus;
+  const statusDropdownDisabled = contentReadOnly && !canRevertStatus && !canCancelStatus;
 
   const contactDisplay = (contact?.contact_name ?? '').trim();
   const linkedQuoteId = quote?.id ?? proposal.quote_id ?? null;
@@ -2342,7 +2345,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
       <button
         type="button"
         onClick={handleSave}
-        disabled={saving || (contentReadOnly && !canRevertStatus)}
+        disabled={saving || (contentReadOnly && !canRevertStatus && !canCancelStatus)}
         className="btn-save px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
         title="Save"
       >
@@ -2351,7 +2354,7 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
       <button
         type="button"
         onClick={handleSaveAndClose}
-        disabled={saving || (contentReadOnly && !canRevertStatus)}
+        disabled={saving || (contentReadOnly && !canRevertStatus && !canCancelStatus)}
         className="btn-save-close px-3 py-1.5 rounded text-white transition-colors text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {saving ? 'Saving...' : 'Save and Close'}
@@ -2522,12 +2525,20 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                         value={headerForm.status}
                         onValueChange={(v) => {
                           const next = v as Proposal['status'];
-                          // Reopening an accepted proposal is an exceptional correction: confirm.
                           if (proposal?.status === 'accepted' && next !== 'accepted') {
-                            const ok = window.confirm(
-                              'You are about to reopen an ACCEPTED proposal and return it to editing. Use this only to fix a mistake. For color/measurement changes, create a new version instead. Continue?'
-                            );
-                            if (!ok) return;
+                            if (next === 'cancelled') {
+                              // Cancelling = annulling the commitment. Distinct from reopening.
+                              const ok = window.confirm(
+                                'You are about to CANCEL this accepted proposal. It will no longer be a valid commitment. Any existing sales order is NOT affected and must be handled separately. Continue?'
+                              );
+                              if (!ok) return;
+                            } else {
+                              // Reopening an accepted proposal is an exceptional correction: confirm.
+                              const ok = window.confirm(
+                                'You are about to reopen an ACCEPTED proposal and return it to editing. Use this only to fix a mistake. For color/measurement changes, create a new version instead. Continue?'
+                              );
+                              if (!ok) return;
+                            }
                           }
                           setHeaderForm((f) => ({ ...f, status: next }));
                           setHeaderDirty(true);
@@ -2538,14 +2549,18 @@ export default function ProposalDetail({ proposalIdOverride }: ProposalDetailPro
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {PROPOSAL_STATUS_OPTIONS.map((o) => (
+                          {PROPOSAL_STATUS_OPTIONS.filter(
+                            // With a downstream SO the proposal can't be reopened for editing,
+                            // but it can still be cancelled (annulled).
+                            (o) => !(isAccepted && !canRevertStatus) || o.value === 'accepted' || o.value === 'cancelled'
+                          ).map((o) => (
                             <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
                           ))}
                         </SelectContent>
                       </SelectShadcn>
                       {isAccepted && hasDownstreamSO && (
                         <p className="text-[11px] text-amber-600 mt-1">
-                          Cannot reopen: a sales order already exists. Create a new version if you need changes.
+                          A sales order already exists: this proposal can be cancelled but not reopened for editing. Create a new version if you need changes.
                         </p>
                       )}
                     </div>
