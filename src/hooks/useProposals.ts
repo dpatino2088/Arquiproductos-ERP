@@ -1505,7 +1505,26 @@ export function useProposalsByQuote(quoteId: string | null) {
         setProposals([]);
         return;
       }
-      setProposals((data || []) as ProposalListItem[]);
+      const rows = (data || []) as ProposalListItem[];
+
+      // Same rule as the main Proposals list: drafts (and proposals whose frozen
+      // snapshot was never computed) show the LIVE total via proposal_list_totals,
+      // otherwise they render $0.00 until accepted.
+      const liveIds = rows
+        .filter((r) => r.status === 'draft' || r.total_amount == null)
+        .map((r) => r.id);
+      if (liveIds.length > 0) {
+        try {
+          const totals = await fetchProposalTotalsMap(liveIds);
+          rows.forEach((r) => {
+            const live = totals.get(r.id);
+            if (live != null) r.total_amount = live;
+          });
+        } catch {
+          // Keep frozen totals if the live aggregation fails.
+        }
+      }
+      setProposals(rows);
     } catch {
       setProposals([]);
     } finally {

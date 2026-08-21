@@ -166,7 +166,15 @@ export default function ProposalProfitabilityTab({
     for (const [lineId, addons] of addonsMap) {
       const line = lines.find((l) => l.id === lineId);
       const ql = line?.quote_line_id ? quoteLinesMap.get(line.quote_line_id) : undefined;
-      const lineQty = Number(line?.qty ?? ql?.quantity ?? 1) || 1;
+      // Product quantity rule (mirrors getProposalLineQty / cloneLineQty):
+      // ProposalLines.qty is always 1 for from_quote lines — the real qty lives in
+      // the quote-line snapshot (or QuoteLines.quantity). Using line.qty here
+      // under-counted addon costs for multi-unit lines (e.g. 2 curtains).
+      const snapQty = Number((line?.quote_line_snapshot as { qty?: number } | null | undefined)?.qty);
+      const lineQty =
+        line?.line_type === 'custom'
+          ? (Number(line?.qty) || 1)
+          : (snapQty > 0 ? snapQty : (Number(ql?.quantity) || Number(line?.qty) || 1));
       const hostName = ql?.name || ql?.sku || line?.description || 'Line';
       addons.forEach((a) => {
         const cost = (Number(a.cost_amount) || 0) * lineQty;
