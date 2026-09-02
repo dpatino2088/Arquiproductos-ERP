@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase/client";
 import { useAuthSession } from "./useAuthSession";
 import { useOrganizationContext } from "../context/OrganizationContext";
+import { useActingAsDealer } from "./useActingAsDealer";
 
 type AccessUserType = "internal" | "portal" | "unknown";
 export type PortalRole = "dealer_member" | "dealer_manager";
@@ -19,13 +20,21 @@ export type ModuleKey =
   | "reports"
   | "settings";
 
+export type PortalMembership = {
+  dealerId: string;
+  roleCode: string | null;
+};
+
 type AccessContextState = {
   loading: boolean;
   userType: AccessUserType;
 
   activeOrganizationId: string | null;
-  /** When userType === 'portal', the dealer_id for the current dealer user (from AppUsers/DealerUsers). */
+  /** When userType === 'portal', the ACTIVE dealer_id for the current dealer user
+   *  (follows the selected membership when the user belongs to several dealers). */
   portalDealerId: string | null;
+  /** All dealer memberships of the portal user (1 row per dealer). Empty for internal users. */
+  portalMemberships: PortalMembership[];
 
   internalRole?: string | null;
   portalRole?: PortalRole | null;
@@ -65,6 +74,11 @@ export function useAccessContext(): AccessContextState {
   const [portalRole, setPortalRole] = useState<PortalRole | null>(null);
   const [portalOrgId, setPortalOrgId] = useState<string | null>(null);
   const [portalDealerId, setPortalDealerId] = useState<string | null>(null);
+  const [portalMemberships, setPortalMemberships] = useState<PortalMembership[]>([]);
+
+  // Active dealer (DB-persisted). For multi-dealer portal users this is the
+  // membership they selected in the header switcher.
+  const { activeDealerId: actingDealerId } = useActingAsDealer();
 
   useEffect(() => {
     let cancelled = false;
@@ -86,6 +100,7 @@ export function useAccessContext(): AccessContextState {
           setPortalRole(null);
           setPortalOrgId(null);
           setPortalDealerId(null);
+          setPortalMemberships([]);
           setLoading(false);
           setAccessResolved(true);
         }
@@ -103,17 +118,17 @@ export function useAccessContext(): AccessContextState {
       const appUserOrFilter =
         appUserOr.length > 0 ? appUserOr.join(",") : "id.eq.00000000-0000-0000-0000-000000000000";
 
-      const { data: appUserRow, error: appUserErr } = await supabase
+      // One row per dealer membership (a portal user may belong to several dealers).
+      const { data: appUserRows, error: appUserErr } = await supabase
         .from("AppUsers")
         .select("id, organization_id, dealer_id, role_code, status, deleted, email")
         .eq("user_type", "dealer")
         .eq("deleted", false)
         .in("status", ["active", "invited"])
         .or(appUserOrFilter)
-        .order("created_at", { ascending: true })
-        .limit(1)
-        .maybeSingle();
+        .order("created_at", { ascending: true });
 
+      const appUserRow = (appUserRows ?? [])[0] ?? null;
       if (!cancelled && appUserRow && !appUserErr) {
         if (import.meta.env.DEV) {
           console.log("[useAccessContext] Portal user from AppUsers (role_code):", {
@@ -122,10 +137,19 @@ export function useAccessContext(): AccessContextState {
             organization_id: appUserRow.organization_id,
             email: appUserRow.email,
             status: appUserRow.status,
+            memberships: (appUserRows ?? []).length,
           });
         }
         setUserType("portal");
         setInternalRole(null);
+        setPortalMemberships(
+          (appUserRows ?? [])
+            .filter((r: { dealer_id: string | null }) => r.dealer_id)
+            .map((r: { dealer_id: string | null; role_code: string | null }) => ({
+              dealerId: r.dealer_id as string,
+              roleCode: r.role_code ?? null,
+            }))
+        );
         setPortalDealerId(appUserRow.dealer_id ?? null);
         const normalizedRole = roleCodeToPortalRole(appUserRow.role_code);
         setPortalRole(normalizedRole);
@@ -178,6 +202,9 @@ export function useAccessContext(): AccessContextState {
           }
           setUserType("portal");
           setInternalRole(null);
+          setPortalMemberships(
+            cpuRow.dealer_id ? [{ dealerId: cpuRow.dealer_id, roleCode: cpuRow.role ?? null }] : []
+          );
           setPortalDealerId(cpuRow.dealer_id ?? null);
           const normalizedRole = roleCodeToPortalRole(cpuRow.role);
           setPortalRole(normalizedRole);
@@ -218,6 +245,7 @@ export function useAccessContext(): AccessContextState {
         setPortalRole(null);
         setPortalOrgId(null);
         setPortalDealerId(null);
+        setPortalMemberships([]);
 
         if (!activeOrganizationId && appUserOrgRow.organization_id) {
           setActiveOrganizationId(appUserOrgRow.organization_id);
@@ -247,6 +275,7 @@ export function useAccessContext(): AccessContextState {
         setPortalRole(null);
         setPortalOrgId(null);
         setPortalDealerId(null);
+        setPortalMemberships([]);
         if (!activeOrganizationId && ouRow.organization_id) {
           setActiveOrganizationId(ouRow.organization_id);
         }
@@ -267,6 +296,7 @@ export function useAccessContext(): AccessContextState {
         setPortalRole(null);
         setPortalOrgId(null);
         setPortalDealerId(null);
+        setPortalMemberships([]);
         setAccessResolved(true);
         setLoading(false);
       }
@@ -291,6 +321,22 @@ export function useAccessContext(): AccessContextState {
 
   const resolvedOrgId = activeOrganizationId ?? portalOrgId ?? null;
 
+  // Multi-dealer portal users: the effective dealer (and its role — a user can be
+  // manager at one dealer and member at another) follows the ACTIVE membership
+  // selected via the header switcher (persisted in DB by set_acting_dealer).
+  const activeMembership = useMemo(() => {
+    if (userType !== "portal" || portalMemberships.length === 0) return null;
+    return (
+      (actingDealerId ? portalMemberships.find((m) => m.dealerId === actingDealerId) : null) ??
+      portalMemberships[0]
+    );
+  }, [userType, portalMemberships, actingDealerId]);
+
+  const effectivePortalDealerId = activeMembership?.dealerId ?? portalDealerId;
+  const effectivePortalRole = activeMembership
+    ? roleCodeToPortalRole(activeMembership.roleCode) ?? portalRole
+    : portalRole;
+
   const allowedModules = useMemo<ModuleKey[]>(() => {
     if (userType === "portal") return PORTAL_ALLOWED_MODULES;
     if (userType === "internal") {
@@ -300,14 +346,14 @@ export function useAccessContext(): AccessContextState {
   }, [userType]);
 
   const canApprove = useMemo(() => {
-    if (userType === "portal") return portalRole === "dealer_manager";
+    if (userType === "portal") return effectivePortalRole === "dealer_manager";
     return true; // Internal users: approve logic tied to permissions
-  }, [userType, portalRole]);
+  }, [userType, effectivePortalRole]);
 
   const canSeeAllDealerQuotes = useMemo(() => {
     // Only dealer_manager portal users can see all dealer quotes
-    return userType === "portal" && portalRole === "dealer_manager";
-  }, [userType, portalRole]);
+    return userType === "portal" && effectivePortalRole === "dealer_manager";
+  }, [userType, effectivePortalRole]);
 
   const canEditDirectory = useMemo(() => {
     // Both portal roles (dealer_member and dealer_manager) can edit Directory
@@ -332,10 +378,11 @@ export function useAccessContext(): AccessContextState {
     userType,
 
     activeOrganizationId: resolvedOrgId,
-    portalDealerId: userType === "portal" ? portalDealerId : null,
+    portalDealerId: userType === "portal" ? effectivePortalDealerId : null,
+    portalMemberships: userType === "portal" ? portalMemberships : [],
 
     internalRole,
-    portalRole,
+    portalRole: effectivePortalRole,
 
     allowedModules,
     canApprove,

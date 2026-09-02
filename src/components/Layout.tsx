@@ -10,6 +10,7 @@ import { useCurrentOrgRole } from '../hooks/useCurrentOrgRole';
 import { usePermissions, MODULE_PERMS, canReadPath } from '../hooks/usePermissions';
 import { useAccessContext, ModuleKey } from '../hooks/useAccessContext';
 import { useActiveDealer } from '../hooks/useActiveDealer';
+import { usePortalDealerMemberships } from '../hooks/usePortalDealerMemberships';
 import { useNotifications } from '../hooks/useNotifications';
 import { useOrganizationContext } from '../context/OrganizationContext';
 import { OrganizationSwitcher } from './layout/OrganizationSwitcher';
@@ -55,7 +56,8 @@ import {
   Handshake,
   LifeBuoy,
   Calculator,
-  BarChart3
+  BarChart3,
+  ChevronDown
 } from 'lucide-react';
 import { useDirectoryLoadStore } from '../stores/directory-load-store';
 
@@ -335,7 +337,24 @@ function Layout({ children }: LayoutProps) {
   const showDealerSwitcher =
     userType === 'internal' &&
     (isSuperAdminUser || currentRole === 'admin' || currentRole === 'sales_coordinator');
-  const { activeDealerId, activeDealer } = useActiveDealer();
+  const { activeDealerId, activeDealer, setActiveDealerId, isSwitching, dealers: orgDealers } = useActiveDealer();
+  // Portal users always see their dealer(s) in the user menu so it is obvious
+  // which one they are working in; with more than one they can switch there.
+  const { memberships: portalMemberships } = usePortalDealerMemberships(userType === 'portal');
+  const showPortalDealerSwitcher = userType === 'portal' && portalMemberships.length > 0;
+  // Switch workspace from the user menu. Mirrors ActingAsSwitcher: after changing
+  // scope, leave read-only sales detail routes (the record may belong to the old dealer).
+  const switchWorkspace = useCallback((dealerId: string | null) => {
+    setIsUserMenuOpen(false);
+    setActiveDealerId(dealerId);
+    const path = window.location.pathname;
+    const salesDetailMatch = path.match(/^\/sales\/(quotes|proposals|orders)\/[0-9a-f-]+$/i);
+    if (salesDetailMatch) {
+      router.navigate(`/sales/${salesDetailMatch[1]}`);
+    }
+  }, [setActiveDealerId]);
+  const activePortalDealerId =
+    activeDealerId ?? portalMemberships.find((m) => m.is_active)?.dealer_id ?? portalMemberships[0]?.dealer_id ?? null;
   const normalizeDisplayName = (value: string | null | undefined) =>
     String(value ?? '')
       .toLowerCase()
@@ -1414,6 +1433,31 @@ function Layout({ children }: LayoutProps) {
                 <HelpCircle style={{ width: '16px', height: '16px' }} />
               </button>
 
+              {/* Active dealer chip — always visible for portal users so it is clear
+                  which dealer they are working in; opens the switcher in the menu. */}
+              {showPortalDealerSwitcher && (() => {
+                const active = portalMemberships.find((m) => m.dealer_id === activePortalDealerId);
+                if (!active) return null;
+                return (
+                  <button
+                    onClick={() => setIsUserMenuOpen(true)}
+                    className="flex items-center gap-1.5 pl-1.5 pr-2.5 py-1 rounded-full border border-gray-200 bg-gray-50 hover:bg-gray-100 transition-colors"
+                    title={portalMemberships.length > 1 ? 'Click to switch dealer' : 'Current dealer'}
+                    aria-label={`Current dealer: ${active.dealer_name}`}
+                  >
+                    <span className="w-5 h-5 rounded-full bg-gray-800 text-white flex items-center justify-center text-[9px] font-semibold uppercase">
+                      {(active.dealer_name || '?').slice(0, 2)}
+                    </span>
+                    <span className="text-xs font-medium text-gray-800 max-w-[140px] truncate">
+                      {active.dealer_name}
+                    </span>
+                    {portalMemberships.length > 1 && (
+                      <ChevronDown style={{ width: '12px', height: '12px' }} className="text-gray-500" aria-hidden="true" />
+                    )}
+                  </button>
+                );
+              })()}
+
               <span className="font-medium" style={{ color: 'var(--gray-950)', fontSize: '14px' }}>
                 {user?.name || user?.email || getViewModeLabel(viewMode)}
               </span>
@@ -1459,6 +1503,120 @@ function Layout({ children }: LayoutProps) {
                         </div>
                       )}
                     </div>
+
+                    {/* Workspace switcher — the account(s) the user can work in, with the
+                        active one clearly checked (only one is active at a time).
+                        Portal users: their dealer memberships. Internal users: the org's
+                        dealers (acting-as filter) plus "All dealers". */}
+                    {(showPortalDealerSwitcher || (userType === 'internal' && orgDealers.length > 0)) && (
+                      <div className="px-3 py-3 border-b border-gray-100">
+                        <div className="px-1 pb-2 text-[11px] font-semibold uppercase tracking-widest text-gray-400">
+                          Workspace
+                        </div>
+                        <div className="rounded-md bg-gray-50 border border-gray-100 overflow-hidden max-h-72 overflow-y-auto">
+                          {userType === 'portal' ? (
+                            portalMemberships.map((m) => {
+                              const isActive = m.dealer_id === activePortalDealerId;
+                              const roleLabel =
+                                (m.role_code ?? '').toLowerCase() === 'dealer_manager' ? 'Manager' : 'Member';
+                              const canSwitch = portalMemberships.length > 1 && !isActive;
+                              return (
+                                <button
+                                  key={m.dealer_id}
+                                  className={`w-full px-3 py-2.5 text-left flex items-center gap-3 transition-colors ${
+                                    canSwitch ? 'hover:bg-white cursor-pointer' : 'cursor-default'
+                                  } ${isSwitching ? 'opacity-50' : ''}`}
+                                  disabled={isSwitching || !canSwitch}
+                                  onClick={() => switchWorkspace(m.dealer_id)}
+                                  role="menuitem"
+                                  aria-label={isActive ? `${m.dealer_name} (current dealer)` : `Switch to ${m.dealer_name}`}
+                                >
+                                  <span
+                                    className={`w-9 h-9 rounded flex items-center justify-center text-xs font-semibold uppercase shrink-0 ${
+                                      isActive ? 'bg-gray-800 text-white' : 'bg-gray-200 text-gray-600'
+                                    }`}
+                                    aria-hidden="true"
+                                  >
+                                    {(m.dealer_name || '?').slice(0, 2)}
+                                  </span>
+                                  <span className="flex-1 min-w-0">
+                                    <span className={`block text-sm truncate ${isActive ? 'font-semibold text-gray-900' : 'text-gray-700'}`}>
+                                      {m.dealer_name}
+                                    </span>
+                                    <span className="block text-xs text-gray-500">{roleLabel}</span>
+                                  </span>
+                                  {isActive && (
+                                    <Check style={{ width: '16px', height: '16px' }} className="text-gray-900 shrink-0" aria-hidden="true" />
+                                  )}
+                                </button>
+                              );
+                            })
+                          ) : (
+                            <>
+                              {/* All dealers (org-wide view) */}
+                              <button
+                                className={`w-full px-3 py-2.5 text-left flex items-center gap-3 transition-colors hover:bg-white ${isSwitching ? 'opacity-50' : ''}`}
+                                disabled={isSwitching || !activeDealerId}
+                                onClick={() => switchWorkspace(null)}
+                                role="menuitem"
+                                aria-label={!activeDealerId ? 'All dealers (current view)' : 'Switch to all dealers'}
+                              >
+                                <span
+                                  className={`w-9 h-9 rounded flex items-center justify-center text-xs font-semibold uppercase shrink-0 ${
+                                    !activeDealerId ? 'bg-gray-800 text-white' : 'bg-gray-200 text-gray-600'
+                                  }`}
+                                  aria-hidden="true"
+                                >
+                                  <Building2 style={{ width: '16px', height: '16px' }} />
+                                </span>
+                                <span className="flex-1 min-w-0">
+                                  <span className={`block text-sm truncate ${!activeDealerId ? 'font-semibold text-gray-900' : 'text-gray-700'}`}>
+                                    All dealers
+                                  </span>
+                                  <span className="block text-xs text-gray-500">Entire organization</span>
+                                </span>
+                                {!activeDealerId && (
+                                  <Check style={{ width: '16px', height: '16px' }} className="text-gray-900 shrink-0" aria-hidden="true" />
+                                )}
+                              </button>
+                              {orgDealers.map((d) => {
+                                const isActive = d.id === activeDealerId;
+                                return (
+                                  <button
+                                    key={d.id}
+                                    className={`w-full px-3 py-2.5 text-left flex items-center gap-3 transition-colors ${
+                                      isActive ? 'cursor-default' : 'hover:bg-white cursor-pointer'
+                                    } ${isSwitching ? 'opacity-50' : ''}`}
+                                    disabled={isSwitching || isActive}
+                                    onClick={() => switchWorkspace(d.id)}
+                                    role="menuitem"
+                                    aria-label={isActive ? `${d.dealer_name} (current dealer)` : `Switch to ${d.dealer_name}`}
+                                  >
+                                    <span
+                                      className={`w-9 h-9 rounded flex items-center justify-center text-xs font-semibold uppercase shrink-0 ${
+                                        isActive ? 'bg-gray-800 text-white' : 'bg-gray-200 text-gray-600'
+                                      }`}
+                                      aria-hidden="true"
+                                    >
+                                      {(d.dealer_name || '?').slice(0, 2)}
+                                    </span>
+                                    <span className="flex-1 min-w-0">
+                                      <span className={`block text-sm truncate ${isActive ? 'font-semibold text-gray-900' : 'text-gray-700'}`}>
+                                        {d.dealer_name}
+                                      </span>
+                                      <span className="block text-xs text-gray-500">Dealer</span>
+                                    </span>
+                                    {isActive && (
+                                      <Check style={{ width: '16px', height: '16px' }} className="text-gray-900 shrink-0" aria-hidden="true" />
+                                    )}
+                                  </button>
+                                );
+                              })}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Menu Items */}
                     <div className="py-1">

@@ -18,7 +18,7 @@ import { supabase } from '../../lib/supabase/client';
 import { formatDate } from '../../lib/utils';
 import { router } from '../../lib/router';
 import { fetchRolesByType, useRolesForUserType, type AppUserRole } from '../../lib/roles';
-import { User, Mail, Phone, Shield, Plus, X, Send, CheckCircle, MoreVertical, Edit, Trash2, Archive, Copy, Check, Search, Filter, List, Grid3X3 } from 'lucide-react';
+import { User, Mail, Phone, Shield, Plus, X, Send, CheckCircle, MoreVertical, Edit, Trash2, Archive, Copy, Check, Search, Filter, List, Grid3X3, Building2 } from 'lucide-react';
 import Input from '../../components/ui/Input';
 import Label from '../../components/ui/Label';
 import { normalizeRole, getRoleLabel, getRoleDescription, type CompanyPortalRole } from '../../portal/portalAccess';
@@ -71,12 +71,23 @@ interface CreateDealerUserModalProps {
   singleDealerId?: string | null;
 }
 
+/** One user account (grouped by auth user / email) with all its dealer memberships. */
+export interface GroupedDealerUser {
+  key: string;
+  /** Oldest membership row — carries the account-level name/email/status shown in the list. */
+  primary: DealerAppUserWithDealer;
+  /** One row per dealer the user can access, oldest first. */
+  memberships: DealerAppUserWithDealer[];
+}
+
 interface EditDealerUserModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
   organizationId: string;
-  user: DealerAppUserWithDealer | null;
+  user: GroupedDealerUser | null;
+  /** Internal users can add/remove dealer access; portal managers only edit role at their dealer. */
+  allowDealerManagement: boolean;
 }
 
 
@@ -412,7 +423,16 @@ function CreateDealerUserModal({ isOpen, onClose, onSuccess, organizationId, sin
   );
 }
 
-function EditDealerUserModal({ isOpen, onClose, onSuccess, organizationId, user }: EditDealerUserModalProps) {
+type MembershipEdit = {
+  /** AppUsers row id (existing membership) or null when the dealer is being added. */
+  rowId: string | null;
+  dealerId: string;
+  dealerName: string;
+  role: string;
+  removed: boolean;
+};
+
+function EditDealerUserModal({ isOpen, onClose, onSuccess, organizationId, user, allowDealerManagement }: EditDealerUserModalProps) {
   const { user: currentUser } = useAuthStore();
   const { addNotification } = useUIStore();
 
@@ -422,25 +442,23 @@ function EditDealerUserModal({ isOpen, onClose, onSuccess, organizationId, user 
     (r) => r.code === 'dealer_manager' || r.code === 'dealer_member'
   );
 
-  // Form state
+  // Account-level fields (shared across all memberships of this account)
   const [user_name, setUser_name] = useState<string>('');
   const [user_email, setUser_email] = useState<string>('');
-  const [dealer_id, setDealer_id] = useState<string>('');
-  const [role, setRole] = useState<string>('dealer_member');
   const [status, setStatus] = useState<string>('active');
+  // One entry per dealer the user can access (role can differ per dealer)
+  const [membershipEdits, setMembershipEdits] = useState<MembershipEdit[]>([]);
+  const [addDealerId, setAddDealerId] = useState('');
+  const [addRole, setAddRole] = useState('dealer_member');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Dropdown data: Dealers
+  // Dropdown data: Dealers (for adding access; internal users only)
   const [dealers, setDealers] = useState<Array<{ id: string; dealer_name: string }>>([]);
-
-  // Loading states
   const [loadingDealers, setLoadingDealers] = useState(false);
 
-  // Load dealers (de la organization actual)
   const loadDealers = useCallback(async () => {
-    if (!organizationId) return;
-    
+    if (!organizationId || !allowDealerManagement) return;
     setLoadingDealers(true);
     try {
       const { data, error } = await supabase
@@ -449,69 +467,73 @@ function EditDealerUserModal({ isOpen, onClose, onSuccess, organizationId, user 
         .eq('organization_id', organizationId)
         .eq('deleted', false)
         .order('dealer_name', { ascending: true });
-
-      if (error) {
-        console.error('Error loading dealers:', error);
-        setDealers([]);
-      } else {
-        setDealers(data || []);
-      }
-    } catch (err) {
-      console.error('Error loading dealers:', err);
+      setDealers(error ? [] : data || []);
+    } catch {
       setDealers([]);
     } finally {
       setLoadingDealers(false);
     }
-  }, [organizationId]);
+  }, [organizationId, allowDealerManagement]);
 
-  // Load data when modal opens or user changes (AppUsers: display_name, email, role_code, status)
   useEffect(() => {
     if (isOpen && user) {
       loadDealers();
-      setUser_name(user.display_name || '');
-      setUser_email(user.email || '');
-      setDealer_id(user.dealer_id || '');
-      const rc = (user.role_code ?? '').toLowerCase();
-      setRole(rc === 'dealer_manager' ? 'dealer_manager' : 'dealer_member');
-      const st = (user.status ?? 'active').toLowerCase();
+      setUser_name(user.primary.display_name || '');
+      setUser_email(user.primary.email || '');
+      const st = (user.primary.status ?? 'active').toLowerCase();
       setStatus(st === 'disabled' ? 'disabled' : st === 'invited' ? 'active' : st);
+      setMembershipEdits(
+        user.memberships.map((m) => ({
+          rowId: m.id,
+          dealerId: m.dealer_id,
+          dealerName: m.dealer_name || '-',
+          role: (m.role_code ?? '').toLowerCase() === 'dealer_manager' ? 'dealer_manager' : 'dealer_member',
+          removed: false,
+        }))
+      );
+      setAddDealerId('');
+      setAddRole('dealer_member');
       setSubmitError(null);
     }
   }, [isOpen, user, loadDealers]);
 
+  const activeEdits = membershipEdits.filter((m) => !m.removed);
+  const availableDealers = dealers.filter(
+    (d) => !membershipEdits.some((m) => !m.removed && m.dealerId === d.id)
+  );
+
+  const handleAddDealer = () => {
+    if (!addDealerId) return;
+    const dealer = dealers.find((d) => d.id === addDealerId);
+    if (!dealer) return;
+    // Re-adding a dealer that was just marked removed simply un-removes it.
+    const existing = membershipEdits.find((m) => m.dealerId === addDealerId);
+    if (existing) {
+      setMembershipEdits((prev) =>
+        prev.map((m) => (m.dealerId === addDealerId ? { ...m, removed: false, role: addRole } : m))
+      );
+    } else {
+      setMembershipEdits((prev) => [
+        ...prev,
+        { rowId: null, dealerId: addDealerId, dealerName: dealer.dealer_name, role: addRole, removed: false },
+      ]);
+    }
+    setAddDealerId('');
+    setAddRole('dealer_member');
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!user?.id) {
-      setSubmitError('User ID is required');
-      return;
-    }
+    if (!user) return;
 
-    // Validate required fields
     const trimmedName = user_name.trim();
     const trimmedEmail = user_email.trim();
-    
-    if (!trimmedName) {
-      setSubmitError('Name is required');
-      return;
-    }
-
-    if (!trimmedEmail) {
-      setSubmitError('Email is required');
-      return;
-    }
-
-    // Basic email validation
+    if (!trimmedName) { setSubmitError('Name is required'); return; }
+    if (!trimmedEmail) { setSubmitError('Email is required'); return; }
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(trimmedEmail)) {
-      setSubmitError('Please enter a valid email address');
-      return;
-    }
-
-    if (!currentUser?.id) {
-      setSubmitError('You must be logged in to edit dealer users');
-      return;
-    }
+    if (!emailRegex.test(trimmedEmail)) { setSubmitError('Please enter a valid email address'); return; }
+    if (!currentUser?.id) { setSubmitError('You must be logged in to edit dealer users'); return; }
+    if (activeEdits.length === 0) { setSubmitError('The user must keep access to at least one dealer'); return; }
 
     setIsSubmitting(true);
     setSubmitError(null);
@@ -519,34 +541,65 @@ function EditDealerUserModal({ isOpen, onClose, onSuccess, organizationId, user 
     try {
       // Dealer users only use 'active' or 'disabled'
       const normalizedStatus = (status || '').toLowerCase().trim();
-      const validStatuses = ['active', 'disabled'];
-      const finalStatus = validStatuses.includes(normalizedStatus) ? normalizedStatus : 'active';
+      const finalStatus = ['active', 'disabled'].includes(normalizedStatus) ? normalizedStatus : 'active';
+      const now = new Date().toISOString();
+      const existingIds = user.memberships.map((m) => m.id);
 
-      // Validar que dealer_id existe (requerido en nuevo schema)
-      if (!dealer_id) {
-        setSubmitError('Dealer is required');
-        setIsSubmitting(false);
-        return;
+      // 1) Account-level fields on every membership row of this account.
+      if (existingIds.length > 0) {
+        const { error: accErr } = await supabase
+          .from('AppUsers')
+          .update({ display_name: trimmedName || null, email: trimmedEmail, status: finalStatus, updated_at: now })
+          .in('id', existingIds)
+          .eq('organization_id', organizationId)
+          .eq('user_type', 'dealer');
+        if (accErr) throw new Error(accErr.message);
       }
 
-      const finalRoleCode = (role?.trim() === 'dealer_manager' ? 'dealer_manager' : 'dealer_member') as string;
+      // 2) Per-dealer role changes.
+      for (const m of membershipEdits) {
+        if (!m.rowId || m.removed) continue;
+        const original = user.memberships.find((x) => x.id === m.rowId);
+        const originalRole =
+          (original?.role_code ?? '').toLowerCase() === 'dealer_manager' ? 'dealer_manager' : 'dealer_member';
+        if (originalRole !== m.role) {
+          const { error: roleErr } = await supabase
+            .from('AppUsers')
+            .update({ role_code: m.role, updated_at: now })
+            .eq('id', m.rowId)
+            .eq('organization_id', organizationId);
+          if (roleErr) throw new Error(roleErr.message);
+        }
+      }
 
-      const { error: updateError } = await supabase
-        .from('AppUsers')
-        .update({
-          display_name: trimmedName || null,
-          email: trimmedEmail,
-          dealer_id,
-          role_code: finalRoleCode,
-          status: finalStatus,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', user.id)
-        .eq('organization_id', organizationId)
-        .eq('user_type', 'dealer');
+      // 3) Removed dealers -> soft delete those membership rows.
+      const removedIds = membershipEdits.filter((m) => m.removed && m.rowId).map((m) => m.rowId as string);
+      if (removedIds.length > 0) {
+        const { error: delErr } = await supabase
+          .from('AppUsers')
+          .update({ deleted: true, updated_at: now })
+          .in('id', removedIds)
+          .eq('organization_id', organizationId);
+        if (delErr) throw new Error(delErr.message);
+      }
 
-      if (updateError) {
-        throw new Error(updateError.message || 'Failed to update dealer user');
+      // 4) Added dealers -> new membership rows (same account, different dealer).
+      const additions = membershipEdits.filter((m) => !m.rowId && !m.removed);
+      if (additions.length > 0) {
+        const { error: insErr } = await supabase.from('AppUsers').insert(
+          additions.map((m) => ({
+            organization_id: organizationId,
+            user_type: 'dealer',
+            dealer_id: m.dealerId,
+            auth_user_id: user.primary.auth_user_id ?? null,
+            email: trimmedEmail,
+            display_name: trimmedName || null,
+            role_code: m.role,
+            status: finalStatus,
+            deleted: false,
+          }))
+        );
+        if (insErr) throw new Error(insErr.message);
       }
 
       addNotification({
@@ -554,12 +607,7 @@ function EditDealerUserModal({ isOpen, onClose, onSuccess, organizationId, user 
         title: 'Dealer User Updated',
         message: 'The dealer user has been updated successfully.',
       });
-
-      // Close modal first
       onClose();
-      
-      // Immediately refresh the list to show updated data
-      // The verification above should have confirmed the update worked
       onSuccess();
     } catch (err: any) {
       const errorMessage = err.message || 'Error updating dealer user';
@@ -627,65 +675,105 @@ function EditDealerUserModal({ isOpen, onClose, onSuccess, organizationId, user 
             />
           </div>
 
-          {/* Company Selection (Required) */}
+          {/* Dealer access — one entry per dealer the user can work in, each with its own role */}
           <div>
-            <Label htmlFor="edit_dealer_id">Dealer *</Label>
-            {loadingDealers ? (
-              <div className="text-sm text-gray-500 py-2">Loading dealers...</div>
-            ) : (
-              <select
-                id="edit_dealer_id"
-                value={dealer_id}
-                onChange={(e) => setDealer_id(e.target.value)}
-                required
-                disabled={isSubmitting}
-                className="w-full px-2.5 py-1.5 text-xs border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 disabled:bg-gray-50 disabled:cursor-not-allowed"
-              >
-                <option value="">Select a dealer</option>
-                {dealers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.dealer_name}
-                  </option>
-                ))}
-              </select>
-            )}
-            {dealers.length === 0 && !loadingDealers && (
-              <p className="text-xs text-gray-500 mt-1">No dealers available. Create a dealer first.</p>
-            )}
-          </div>
-
-          {/* Role: only Dealer Manager and Dealer Member for portal dealer users */}
-          <div>
-            <Label htmlFor="edit_role">Role *</Label>
-            <select
-              id="edit_role"
-              value={role}
-              onChange={(e) => setRole(e.target.value)}
-              required
-              disabled={isSubmitting || loadingRoles}
-              className="w-full px-2.5 py-1.5 text-xs border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 disabled:bg-gray-50 disabled:cursor-not-allowed"
-            >
-              {loadingRoles && <option value="">Loading roles…</option>}
-              {!loadingRoles && portalDealerRoles.length === 0 && (
-                <option value="">No roles configured for this user type</option>
-              )}
-              {!loadingRoles && portalDealerRoles.length > 0 && (
-                <>
-                  {!portalDealerRoles.some((r) => r.code === role) && role && (
-                    <option value={role} disabled>Unknown role: {role}</option>
+            <Label>Dealer access *</Label>
+            <p className="text-xs text-gray-500 mb-2">
+              Dealers this user can work in. With more than one, the user switches between them from the account menu (top right).
+            </p>
+            <div className="border border-gray-200 rounded-md divide-y divide-gray-100">
+              {activeEdits.map((m) => (
+                <div key={m.dealerId} className="flex items-center gap-3 px-3 py-2">
+                  <div className="w-7 h-7 rounded bg-gray-800 text-white flex items-center justify-center text-[11px] font-semibold uppercase shrink-0">
+                    {(m.dealerName || '?').slice(0, 2)}
+                  </div>
+                  <span className="flex-1 text-sm text-gray-900 truncate">{m.dealerName}</span>
+                  <select
+                    value={m.role}
+                    onChange={(e) =>
+                      setMembershipEdits((prev) =>
+                        prev.map((x) => (x.dealerId === m.dealerId ? { ...x, role: e.target.value } : x))
+                      )
+                    }
+                    disabled={isSubmitting || loadingRoles}
+                    className="px-2 py-1 text-xs border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    aria-label={`Role at ${m.dealerName}`}
+                  >
+                    {portalDealerRoles.length === 0 ? (
+                      <>
+                        <option value="dealer_member">Dealer Member</option>
+                        <option value="dealer_manager">Dealer Manager</option>
+                      </>
+                    ) : (
+                      portalDealerRoles.map((r) => (
+                        <option key={r.code} value={r.code}>{r.name}</option>
+                      ))
+                    )}
+                  </select>
+                  {allowDealerManagement && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setMembershipEdits((prev) =>
+                          prev
+                            .map((x) => (x.dealerId === m.dealerId ? { ...x, removed: true } : x))
+                            // Un-saved additions disappear immediately; existing rows stay marked for soft-delete on save.
+                            .filter((x) => x.rowId || !x.removed)
+                        )
+                      }
+                      disabled={isSubmitting || activeEdits.length <= 1}
+                      className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      title={activeEdits.length <= 1 ? 'The user needs at least one dealer' : 'Remove access to this dealer'}
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
                   )}
-                  {portalDealerRoles.map((r) => (
-                    <option key={r.code} value={r.code}>{r.name}</option>
-                  ))}
-                </>
+                </div>
+              ))}
+              {allowDealerManagement && (
+                <div className="flex items-center gap-2 px-3 py-2 bg-gray-50">
+                  <select
+                    value={addDealerId}
+                    onChange={(e) => setAddDealerId(e.target.value)}
+                    disabled={isSubmitting || loadingDealers || availableDealers.length === 0}
+                    className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:bg-gray-100"
+                    aria-label="Add dealer"
+                  >
+                    <option value="">{availableDealers.length === 0 ? 'No more dealers available' : 'Add dealer…'}</option>
+                    {availableDealers.map((d) => (
+                      <option key={d.id} value={d.id}>{d.dealer_name}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={addRole}
+                    onChange={(e) => setAddRole(e.target.value)}
+                    disabled={isSubmitting || !addDealerId}
+                    className="px-2 py-1 text-xs border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:bg-gray-100"
+                    aria-label="Role at new dealer"
+                  >
+                    {portalDealerRoles.length === 0 ? (
+                      <>
+                        <option value="dealer_member">Dealer Member</option>
+                        <option value="dealer_manager">Dealer Manager</option>
+                      </>
+                    ) : (
+                      portalDealerRoles.map((r) => (
+                        <option key={r.code} value={r.code}>{r.name}</option>
+                      ))
+                    )}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={handleAddDealer}
+                    disabled={isSubmitting || !addDealerId}
+                    className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add
+                  </button>
+                </div>
               )}
-            </select>
-            {!loadingRoles && portalDealerRoles.length === 0 && (
-              <p className="text-xs text-amber-600 mt-1">No roles configured for this user type.</p>
-            )}
-            {portalDealerRoles.length > 0 && (
-              <p className="text-xs text-gray-500 mt-1">{getRoleDescription(role as CompanyPortalRole)}</p>
-            )}
+            </div>
           </div>
 
           {/* Status */}
@@ -778,7 +866,7 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
   const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
-  const [editingUser, setEditingUser] = useState<DealerAppUserWithDealer | null>(null);
+  const [editingUser, setEditingUser] = useState<GroupedDealerUser | null>(null);
   const [authorizingId, setAuthorizingId] = useState<string | null>(null);
   const [invitingId, setInvitingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -800,8 +888,36 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
   const isLegacyUser = useCallback((user: DealerAppUserWithDealer) => user.source === 'legacy' || user.id.startsWith('legacy:'), []);
   const legacyUsersCount = useMemo(() => users.filter((u) => isLegacyUser(u)).length, [users, isLegacyUser]);
 
-  const handleAuthorize = async (userId: string) => {
-    if (userId.startsWith('legacy:')) {
+  // One row per ACCOUNT: a user with access to several dealers has one AppUsers
+  // row per dealer; group them so the list shows the person once with all their
+  // dealers, instead of confusing duplicate rows.
+  const groupedUsers = useMemo<GroupedDealerUser[]>(() => {
+    const map = new Map<string, DealerAppUserWithDealer[]>();
+    for (const u of filteredUsers) {
+      const key = u.auth_user_id || (u.email || '').toLowerCase() || u.id;
+      const arr = map.get(key) ?? [];
+      arr.push(u);
+      map.set(key, arr);
+    }
+    const groups: GroupedDealerUser[] = [];
+    map.forEach((rows, key) => {
+      const sorted = [...rows].sort((a, b) => {
+        const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return ta - tb;
+      });
+      groups.push({ key, primary: sorted[0], memberships: sorted });
+    });
+    // Newest account first (matches previous list order by created_at desc).
+    return groups.sort((a, b) => {
+      const ta = a.primary.created_at ? new Date(a.primary.created_at).getTime() : 0;
+      const tb = b.primary.created_at ? new Date(b.primary.created_at).getTime() : 0;
+      return tb - ta;
+    });
+  }, [filteredUsers]);
+
+  const handleAuthorize = async (group: GroupedDealerUser) => {
+    if (isLegacyUser(group.primary)) {
       addNotification({
         type: 'warning',
         title: 'Legacy user',
@@ -811,11 +927,11 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
     }
     if (!activeOrganizationId) return;
     try {
-      setAuthorizingId(userId);
+      setAuthorizingId(group.primary.id);
       const { error } = await supabase
         .from('AppUsers')
         .update({ status: 'active' })
-        .eq('id', userId)
+        .in('id', group.memberships.map((m) => m.id))
         .eq('organization_id', activeOrganizationId)
         .eq('user_type', 'dealer');
       if (error) throw error;
@@ -828,8 +944,8 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
     }
   };
 
-  const handleEdit = (user: DealerAppUserWithDealer) => {
-    if (isLegacyUser(user)) {
+  const handleEdit = (group: GroupedDealerUser) => {
+    if (isLegacyUser(group.primary)) {
       addNotification({
         type: 'warning',
         title: 'Legacy user',
@@ -838,14 +954,15 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
       return;
     }
     if (useInlineEdit) {
-      router.navigate(`/partners/dealer-users/edit/${user.id}`);
+      router.navigate(`/partners/dealer-users/edit/${group.primary.id}`);
       return;
     }
-    setEditingUser(user);
+    setEditingUser(group);
     setIsEditOpen(true);
   };
 
-  const handleArchive = async (user: DealerAppUserWithDealer) => {
+  const handleArchive = async (group: GroupedDealerUser) => {
+    const user = group.primary;
     if (isLegacyUser(user)) {
       addNotification({
         type: 'warning',
@@ -869,7 +986,7 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
       const { error } = await supabase
         .from('AppUsers')
         .update({ status: 'disabled', updated_at: new Date().toISOString() })
-        .eq('id', user.id)
+        .in('id', group.memberships.map((m) => m.id))
         .eq('organization_id', activeOrganizationId)
         .eq('user_type', 'dealer');
       if (error) throw error;
@@ -883,7 +1000,8 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
     }
   };
 
-  const handleDelete = async (user: DealerAppUserWithDealer) => {
+  const handleDelete = async (group: GroupedDealerUser) => {
+    const user = group.primary;
     if (isLegacyUser(user)) {
       addNotification({
         type: 'warning',
@@ -895,7 +1013,7 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
     if (!activeOrganizationId) return;
     const confirmed = await showConfirm({
       title: 'Delete Dealer User',
-      message: `Are you sure you want to permanently delete "${user.display_name || user.email || 'this user'}"? This will also remove the user from authentication so the email can be re-invited. This action cannot be undone.`,
+      message: `Are you sure you want to permanently delete "${user.display_name || user.email || 'this user'}"? This removes their access to every dealer and also removes the user from authentication so the email can be re-invited. This action cannot be undone.`,
       variant: 'danger',
       confirmText: 'Delete',
       cancelText: 'Cancel',
@@ -904,15 +1022,27 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
     setDeletingId(user.id);
     setLoading(true);
     try {
-      const duQuery = supabase
-        .from('DealerUsers')
+      // Soft-delete every membership row of the account.
+      const { error: auErr } = await supabase
+        .from('AppUsers')
         .update({ deleted: true, updated_at: new Date().toISOString() })
+        .in('id', group.memberships.map((m) => m.id))
         .eq('organization_id', activeOrganizationId)
-        .eq('dealer_id', user.dealer_id);
-      const { error: duErr } = user.auth_user_id
-        ? await duQuery.eq('user_id', user.auth_user_id)
-        : await duQuery.ilike('portal_user_email', user.email);
-      if (duErr) throw duErr;
+        .eq('user_type', 'dealer');
+      if (auErr) throw auErr;
+
+      // Legacy DealerUsers rows: one per dealer.
+      for (const m of group.memberships) {
+        const duQuery = supabase
+          .from('DealerUsers')
+          .update({ deleted: true, updated_at: new Date().toISOString() })
+          .eq('organization_id', activeOrganizationId)
+          .eq('dealer_id', m.dealer_id);
+        const { error: duErr } = user.auth_user_id
+          ? await duQuery.eq('user_id', user.auth_user_id)
+          : await duQuery.ilike('portal_user_email', user.email);
+        if (duErr) throw duErr;
+      }
 
       if (user.auth_user_id) {
         const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -1066,7 +1196,7 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
           <div>
             <h1 className="text-xl font-semibold text-foreground mb-1">Dealer Users</h1>
             <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-              Manage dealer user access and permissions ({filteredUsers.length} total)
+              Manage dealer user access and permissions ({groupedUsers.length} total)
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -1179,7 +1309,7 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {filteredUsers.length === 0 ? (
+              {groupedUsers.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="py-12 px-6 text-center">
                   <User className="w-12 h-12 text-gray-400 mx-auto mb-4" />
@@ -1190,8 +1320,10 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
                 </td>
               </tr>
             ) : (
-              filteredUsers.map((user: DealerAppUserWithDealer) => (
-                  <tr key={user.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors cursor-pointer">
+              groupedUsers.map((group) => {
+                const user = group.primary;
+                return (
+                  <tr key={group.key} className="border-b border-gray-100 hover:bg-gray-50 transition-colors cursor-pointer">
                     <td className="py-4 px-6 text-gray-900 text-sm whitespace-nowrap">
                       <div className="flex items-center gap-3">
                         <div className="flex-shrink-0 h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center">
@@ -1207,26 +1339,40 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
                         )}
                       </div>
                     </td>
-                    <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap truncate">
-                      {user.dealer_name || '-'}
+                    {/* Dealers: one chip per dealer the account can work in */}
+                    <td className="py-4 px-6 text-gray-600 text-sm">
+                      <div className="flex flex-col gap-1">
+                        {group.memberships.map((m) => (
+                          <span
+                            key={m.id}
+                            className="inline-flex items-center gap-1.5 w-fit px-2 py-0.5 rounded bg-gray-50 border border-gray-200 text-xs text-gray-700"
+                          >
+                            <Building2 className="w-3 h-3 text-gray-400" />
+                            {m.dealer_name || '-'}
+                          </span>
+                        ))}
+                      </div>
                     </td>
                     <td className="py-4 px-6 text-gray-600 text-sm whitespace-nowrap truncate">
                       {user.email || '-'}
                     </td>
-                    <td className="py-4 px-6 whitespace-nowrap">
-                      {(() => {
-                        const role = roleCodeToPortalRole(user.role_code);
-                        const roleColors: Record<string, { bg: string; text: string; border: string }> = {
-                          dealer_manager: { bg: 'bg-purple-50', text: 'text-purple-700', border: 'border border-purple-200' },
-                          dealer_member: { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border border-blue-200' },
-                        };
-                        const colors = roleColors[role] ?? roleColors.dealer_member;
-                        return (
-                          <span className={`px-2 py-1 rounded text-xs font-medium ${colors.bg} ${colors.text} ${colors.border}`}>
-                            {getRoleLabel(role)}
-                          </span>
-                        );
-                      })()}
+                    {/* Role per dealer (aligned with the dealer chips) */}
+                    <td className="py-4 px-6">
+                      <div className="flex flex-col gap-1">
+                        {group.memberships.map((m) => {
+                          const role = roleCodeToPortalRole(m.role_code);
+                          const roleColors: Record<string, { bg: string; text: string; border: string }> = {
+                            dealer_manager: { bg: 'bg-purple-50', text: 'text-purple-700', border: 'border border-purple-200' },
+                            dealer_member: { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border border-blue-200' },
+                          };
+                          const colors = roleColors[role] ?? roleColors.dealer_member;
+                          return (
+                            <span key={m.id} className={`w-fit px-2 py-0.5 rounded text-xs font-medium ${colors.bg} ${colors.text} ${colors.border}`}>
+                              {getRoleLabel(role)}
+                            </span>
+                          );
+                        })}
+                      </div>
                     </td>
                     <td className="py-4 px-6 whitespace-nowrap">
                       <StatusBadge status={user.status ?? 'disabled'} />
@@ -1246,7 +1392,7 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleAuthorize(user.id);
+                              handleAuthorize(group);
                             }}
                             disabled={authorizingId === user.id}
                             className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
@@ -1301,17 +1447,17 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleEdit(user);
+                                handleEdit(group);
                               }}
                               className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600"
-                              title="Edit user"
+                              title="Edit user & dealer access"
                             >
                               <Edit className="w-4 h-4" />
                             </button>
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleArchive(user);
+                                handleArchive(group);
                               }}
                               disabled={archivingId === user.id || user.status === 'disabled'}
                               className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 disabled:opacity-50"
@@ -1322,7 +1468,7 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleDelete(user);
+                                handleDelete(group);
                               }}
                               disabled={deletingId === user.id}
                               className="p-1.5 hover:bg-gray-100 rounded transition-colors text-red-600 disabled:opacity-50"
@@ -1335,7 +1481,8 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
                       </div>
                     </td>
                   </tr>
-                ))
+                );
+              })
               )}
             </tbody>
           </table>
@@ -1345,7 +1492,7 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
       {/* Summary - hide when section header is hidden to match Dealers format */}
       {!hideSectionHeader && users.length > 0 && (
         <div className="mt-4 text-sm text-gray-600">
-          Showing {users.length} dealer user{users.length !== 1 ? 's' : ''}
+          Showing {groupedUsers.length} dealer user{groupedUsers.length !== 1 ? 's' : ''}
         </div>
       )}
 
@@ -1375,9 +1522,9 @@ const DealerUsers = forwardRef<DealerUsersRef, DealerUsersProps>(function Dealer
           }}
           organizationId={activeOrganizationId ?? ''}
           user={editingUser}
+          allowDealerManagement={canManageDealerUsersInternal}
         />
       )}
-
 
       {/* Confirm Dialog */}
       <ConfirmDialog
