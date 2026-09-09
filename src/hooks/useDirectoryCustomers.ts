@@ -307,7 +307,7 @@ export function useDirectoryCustomers(params?: { organizationId?: string | null;
       });
 
       if (!orgId) {
-        throw new Error('No hay organización activa. Selecciona una organización o inicia sesión en el portal.');
+        throw new Error('No active organization. Select an organization or sign in to the portal.');
       }
 
       const payload: Record<string, unknown> = {
@@ -359,7 +359,7 @@ export function useDirectoryCustomers(params?: { organizationId?: string | null;
       if (insertError) {
         const isRls = insertError.message?.toLowerCase().includes('row-level security') || insertError.code === '42501';
         if (isRls) {
-          throw new Error('No tienes permisos para crear clientes en este dealer. Comprueba que tu usuario portal esté vinculado (email coincida).');
+          throw new Error('You do not have permission to create customers in this dealer. If you just switched dealers, refresh the page and try again.');
         }
         throw insertError;
       }

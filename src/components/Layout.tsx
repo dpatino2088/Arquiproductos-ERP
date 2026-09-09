@@ -342,13 +342,15 @@ function Layout({ children }: LayoutProps) {
   // which one they are working in; with more than one they can switch there.
   const { memberships: portalMemberships } = usePortalDealerMemberships(userType === 'portal');
   const showPortalDealerSwitcher = userType === 'portal' && portalMemberships.length > 0;
-  // Switch workspace from the user menu. Mirrors ActingAsSwitcher: after changing
-  // scope, leave read-only sales detail routes (the record may belong to the old dealer).
+  // Switch workspace from the user menu. After changing scope, leave sales detail
+  // AND edit routes: the open record belongs to the previous dealer and is no
+  // longer accessible under the new context (RLS scopes portal access to the
+  // active dealer), so staying would only produce save errors.
   const switchWorkspace = useCallback((dealerId: string | null) => {
     setIsUserMenuOpen(false);
     setActiveDealerId(dealerId);
     const path = window.location.pathname;
-    const salesDetailMatch = path.match(/^\/sales\/(quotes|proposals|orders)\/[0-9a-f-]+$/i);
+    const salesDetailMatch = path.match(/^\/sales\/(quotes|proposals|orders)\/[0-9a-f-]+(\/edit)?$/i);
     if (salesDetailMatch) {
       router.navigate(`/sales/${salesDetailMatch[1]}`);
     }

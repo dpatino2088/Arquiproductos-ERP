@@ -29,12 +29,14 @@ export async function getEffectiveOrgAndDealer(
     return { orgId: null, dealerId: null };
   }
 
-  // Para portal, incluir auth.uid() en la key para que cada usuario tenga su propio cache
+  // Para portal, incluir auth.uid() en la key para que cada usuario tenga su propio cache.
+  // También incluir activeDealerId: usuarios multi-dealer cambian de dealer en la misma
+  // sesión y un cache sin dealer devolvería el dealer ANTERIOR (RLS rechazaría el insert).
   let cacheKey = `${CACHE_KEY_PREFIX}${activeOrgId}_${userType}_${activeDealerId ?? ''}`;
   if (userType === 'portal') {
     const { data: { user } } = await supabase.auth.getUser();
     const uid = user?.id ?? 'anon';
-    cacheKey = `${CACHE_KEY_PREFIX}${activeOrgId}_portal_${uid}`;
+    cacheKey = `${CACHE_KEY_PREFIX}${activeOrgId}_portal_${uid}_${activeDealerId ?? ''}`;
   }
 
   const cached = cache.get(cacheKey);

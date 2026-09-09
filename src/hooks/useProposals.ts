@@ -953,15 +953,29 @@ export async function createProposalFromQuote(
     const authContext = await fetchAuthContext(supabase);
     if (authContext.is_portal_user && authContext.dealer_id) {
       portalDealerId = authContext.dealer_id;
-      const { data: du } = await supabase
-        .from('DealerUsers')
+      // Membership check: AppUsers (multi-dealer memberships) first; the legacy
+      // DealerUsers row only exists for the user's original dealer, so it stays
+      // as fallback for accounts that predate AppUsers.
+      const { data: membership } = await supabase
+        .from('AppUsers')
         .select('id')
+        .eq('auth_user_id', userId)
+        .eq('user_type', 'dealer')
         .eq('dealer_id', authContext.dealer_id)
-        .eq('user_id', userId)
         .eq('deleted', false)
         .limit(1)
-        .single();
-      if (!du) return { error: 'Dealer user not found' };
+        .maybeSingle();
+      if (!membership) {
+        const { data: du } = await supabase
+          .from('DealerUsers')
+          .select('id')
+          .eq('dealer_id', authContext.dealer_id)
+          .eq('user_id', userId)
+          .eq('deleted', false)
+          .limit(1)
+          .maybeSingle();
+        if (!du) return { error: 'Dealer user not found' };
+      }
       createdByUserId = userId;
     } else {
       createdByUserId = userId;

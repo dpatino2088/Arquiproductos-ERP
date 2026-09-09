@@ -859,25 +859,35 @@ export function useCreateQuote() {
 
       let finalDealerId = quoteData.dealer_id;
 
-      const { data: portalUser, error: portalError } = await supabase
-        .from('DealerUsers')
-        .select('id, dealer_id')
-        .eq('user_id', user.id)
-        .or('deleted.is.false,deleted.is.null')
-        .in('status', ['active', 'invited'])
-        .maybeSingle();
-
-      if (!portalError && portalUser) {
-        if (!finalDealerId && portalUser.dealer_id) {
-          finalDealerId = portalUser.dealer_id;
+      // No dealer in the payload: resolve the ACTIVE dealer (multi-dealer aware).
+      // The legacy DealerUsers row always points to the user's original dealer, so it
+      // is only a last resort for accounts that predate AppUsers memberships.
+      if (!finalDealerId) {
+        const { data: activeDealer } = await supabase.rpc('get_current_dealer_id');
+        if (activeDealer) {
+          finalDealerId = activeDealer as string;
           if (import.meta.env.DEV) {
-            console.log('[useCreateQuote] Auto-detected dealer_id from Dealer User:', finalDealerId);
+            console.log('[useCreateQuote] Auto-detected dealer_id from active dealer:', finalDealerId);
           }
         }
       }
 
-      if (!finalDealerId && quoteData.dealer_id) {
-        finalDealerId = quoteData.dealer_id;
+      if (!finalDealerId) {
+        const { data: portalUser, error: portalError } = await supabase
+          .from('DealerUsers')
+          .select('id, dealer_id')
+          .eq('user_id', user.id)
+          .or('deleted.is.false,deleted.is.null')
+          .in('status', ['active', 'invited'])
+          .limit(1)
+          .maybeSingle();
+
+        if (!portalError && portalUser?.dealer_id) {
+          finalDealerId = portalUser.dealer_id;
+          if (import.meta.env.DEV) {
+            console.log('[useCreateQuote] Auto-detected dealer_id from legacy Dealer User:', finalDealerId);
+          }
+        }
       }
 
       const normalizedInternalRole = (internalRole ?? '').toString().trim().toLowerCase();
@@ -985,6 +995,13 @@ export function useUpdateQuote() {
             throw new Error(`Quote number "${(quoteData as any).quote_no}" already exists. Please use a different quote number.`);
           }
           throw new Error('This record already exists. Please check your input and try again.');
+        }
+        // PGRST116: the UPDATE matched 0 rows — usually the quote belongs to a
+        // dealer other than the currently active one (multi-dealer users).
+        if (error.code === 'PGRST116') {
+          throw new Error(
+            'This quote belongs to a different dealer than the one you are currently working in. Switch to that dealer (top-right menu) and try again.'
+          );
         }
         throw error;
       }

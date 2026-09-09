@@ -1164,28 +1164,38 @@ export default function QuoteNew() {
 
       try {
         if (isPortal) {
-          // Portal user: get their assigned dealer
-          const { data: { user } } = await supabase.auth.getUser();
-          if (!user) return;
+          // Portal user: use the ACTIVE dealer (workspace switcher / current_dealer_id).
+          // Multi-dealer users switch dealers in-session, so the quote must follow the
+          // active one — NOT the legacy DealerUsers row, which always points to the
+          // original dealer. Legacy lookup remains only as fallback for accounts that
+          // predate AppUsers memberships (no active dealer resolved).
+          let targetDealerId: string | null = filterDealerId ?? null;
 
-          const { data: portalUser, error: portalError } = await supabase
-            .from('DealerUsers')
-            .select('dealer_id')
-            .eq('user_id', user.id)
-            .eq('deleted', false)
-            .in('status', ['active', 'invited'])
-            .maybeSingle();
+          if (!targetDealerId) {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
 
-          if (portalError) {
-            console.error('Error loading portal user dealer:', portalError);
-            return;
+            const { data: portalUser, error: portalError } = await supabase
+              .from('DealerUsers')
+              .select('dealer_id')
+              .eq('user_id', user.id)
+              .eq('deleted', false)
+              .in('status', ['active', 'invited'])
+              .limit(1)
+              .maybeSingle();
+
+            if (portalError) {
+              console.error('Error loading portal user dealer:', portalError);
+              return;
+            }
+            targetDealerId = portalUser?.dealer_id ?? null;
           }
 
-          if (portalUser?.dealer_id) {
+          if (targetDealerId) {
             const { data: dealer, error: dealerError } = await supabase
               .from('Dealers')
               .select('id, dealer_name, dealer_no, dealer_tier_id')
-              .eq('id', portalUser.dealer_id)
+              .eq('id', targetDealerId)
               .eq('organization_id', activeOrganizationId)
               .eq('deleted', false)
               .maybeSingle();

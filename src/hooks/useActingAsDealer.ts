@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase, initSessionContext } from '../lib/supabase/client';
 import { useOrganizationContext } from '../context/OrganizationContext';
+import { clearDirectoryContextCache } from '../lib/directoryContext';
 
 const ACTING_DEALER_KEY = ['actingAsDealer'] as const;
 
@@ -64,6 +65,10 @@ export function useActingAsDealer() {
     mutationFn: callSetActingDealer,
     onSuccess: (activeDealerId) => {
       queryClient.setQueryData(ACTING_DEALER_KEY, activeDealerId);
+      // The effective org/dealer cache (getEffectiveOrgAndDealer) must not survive a
+      // dealer switch: creates would keep sending the PREVIOUS dealer_id and RLS
+      // (scoped to the active dealer) would reject them.
+      clearDirectoryContextCache();
       if (typeof window !== 'undefined' && activeOrganizationId) {
         try {
           window.localStorage.setItem(LAST_ACTIVE_ORG_KEY, activeOrganizationId);
