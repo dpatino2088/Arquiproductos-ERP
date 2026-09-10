@@ -292,6 +292,9 @@ function buildConfigSnapshotFromProductConfig(productConfig: any): Record<string
     fabricDrop: configAny.fabricDrop ?? configAny.fabric_drop ?? null,
     installationType: configAny.installationType ?? configAny.installation_type ?? null,
     installationLocation: configAny.installationLocation ?? configAny.installation_location ?? null,
+    // Awning: frontal projection (mirrored into height_mm) and system (extensible/vertical)
+    projection_mm: configAny.projection_mm ?? null,
+    system: configAny.system ?? (productConfig.productType === 'awning' ? 'extensible' : productConfig.productType === 'awning-vertical' ? 'vertical' : null),
     drive_side: configAny.driveSide || configAny.drive_side || null,
     opening_direction: configAny.openingDirection || configAny.opening_direction || null,
     manufacturer: configAny.manufacturer || null,
@@ -6289,6 +6292,10 @@ export default function QuoteNew() {
         const unitPrice = line.unit_msrp != null ? Number(line.unit_msrp) : (line.msrp != null && qty > 0 ? Number(line.msrp) / qty : 0);
         const lineTotal = line.msrp != null ? Number(line.msrp) : unitPrice * qty;
         const isFilmPreview = line.product_type === 'window_film';
+        const previewProductType = String(line.product_type || config.productType || '').toLowerCase().replace(/_/g, '-');
+        const isAwningExtensiblePreview = previewProductType === 'awning';
+        const isAwningFamilyPreview = isAwningExtensiblePreview || previewProductType === 'awning-vertical';
+        const projectionMmPreview = Number(config.projection_mm) || (line.height_m ? Math.round(line.height_m * 1000) : null);
         const filmSnap = line.config_snapshot ?? {};
         const rawLinearLenM = Number(filmSnap.linear_length_m) || 0;
         const normalizedLinearLenM = rawLinearLenM > 100 ? rawLinearLenM / 1000 : rawLinearLenM;
@@ -6355,8 +6362,10 @@ export default function QuoteNew() {
                       {spec('Position', line.position != null && String(line.position).trim() !== '' ? String(line.position).trim() : '—')}
                       {spec('Mounting', mountingDisplay)}
                       {!isFilmPreview && spec('Drive Type', driveDisplay)}
-                      {!isFilmPreview && spec('Fabric Drop', (() => { const fd = config.fabricDrop ?? config.fabric_drop; return fd ? String(fd).charAt(0).toUpperCase() + String(fd).slice(1) : '—'; })())}
-                      {!isFilmPreview && spec('Hardware Color', hardwareColorDisplay)}
+                      {isAwningFamilyPreview && spec('System', isAwningExtensiblePreview ? 'Retractable' : 'Vertical')}
+                      {isAwningExtensiblePreview && projectionMmPreview != null && spec('Projection', `${projectionMmPreview} mm`)}
+                      {!isFilmPreview && !isAwningFamilyPreview && spec('Fabric Drop', (() => { const fd = config.fabricDrop ?? config.fabric_drop; return fd ? String(fd).charAt(0).toUpperCase() + String(fd).slice(1) : '—'; })())}
+                      {!isFilmPreview && !isAwningFamilyPreview && spec('Hardware Color', hardwareColorDisplay)}
                     </div>
                     <div className="space-y-0">
                       {isFilmPreview ? (
@@ -6368,15 +6377,15 @@ export default function QuoteNew() {
                         </>
                       ) : (
                         <>
-                          {spec('Dimensions', (
+                          {spec(isAwningExtensiblePreview ? 'Line × Projection' : 'Dimensions', (
                             <span className="block pb-2 min-h-[1.5rem]">
                               <DimensionsStackView source={dimensionsSource} />
                             </span>
                           ))}
-                          {fabricM2 != null && spec('Total tela', `${fabricM2.toFixed(2)} m²`)}
+                          {fabricM2 != null && spec('Total fabric', `${fabricM2.toFixed(2)} m²`)}
                           {spec('Accessories', accessoriesLabel)}
-                          {spec('Cassette', hasCassette ? 'Yes' : 'No')}
-                          {spec('Side Channel', hasSideChannel ? 'Yes' : 'No')}
+                          {!isAwningFamilyPreview && spec('Cassette', hasCassette ? 'Yes' : 'No')}
+                          {!isAwningFamilyPreview && spec('Side Channel', hasSideChannel ? 'Yes' : 'No')}
                         </>
                       )}
                     </div>

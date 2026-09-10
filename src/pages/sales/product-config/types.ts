@@ -9,6 +9,7 @@ export type ProductType =
   | 'triple-shade'
   | 'drapery'
   | 'awning'
+  | 'awning-vertical'
   | 'window-film'
   | 'honey-comb'
   | 'vertical'
@@ -228,12 +229,16 @@ export interface DraperyConfig extends BaseProductConfig {
 }
 
 // Awning Configuration
+// 'awning'          = Extensible / Monobloc (Line × Projection, no height)
+// 'awning-vertical' = Vertical drop awning (Width × Height, roller-like)
 export interface AwningConfig extends BaseProductConfig {
-  productType: 'awning';
+  productType: 'awning' | 'awning-vertical';
+  // Which awning system this line is (persisted to config_snapshot as `system`)
+  system?: 'extensible' | 'vertical';
   // Measurements
-  width_mm?: number;
-  projection_mm?: number; // How far it extends
-  height_mm?: number;
+  width_mm?: number;      // Line (total width including caps) for extensible; width for vertical
+  projection_mm?: number; // Extensible only: frontal projection (salida). Stored in height_m for the 2D cut engine.
+  height_mm?: number;     // Vertical: drop height. Extensible: mirrors projection_mm.
   // Fabric
   fabric?: {
     manufacturer?: 'coulisse' | 'vertilux';

@@ -22,6 +22,7 @@ const PT_MAP: Record<string, string> = {
   TRIPLE: 'triple-shade',
   DRAPERY: 'drapery',
   AWNING: 'awning',
+  AWNING_VERTICAL: 'awning-vertical',
   FILM: 'window-film',
   WINDOW_FILM: 'window-film',
   CATALOG: 'catalog',
@@ -515,6 +516,15 @@ export async function getConfigFromQuoteLine(
   // ── 8. Derive width_m / height_m ──────────────────────────────────
   if (config.width_mm != null) config.width_m = config.width_mm / 1000;
   if (config.height_mm != null) config.height_m = config.height_mm / 1000;
+
+  // ── 8b. Awning: restore projection (salida) and system for the configurator ──
+  // Extensible awnings store the projection in height_m; mirror it back.
+  if (productTypeUI === 'awning') {
+    if (config.projection_mm == null && config.height_mm != null) config.projection_mm = config.height_mm;
+    if (!config.system) config.system = 'extensible';
+  } else if (productTypeUI === 'awning-vertical') {
+    config.system = 'vertical';
+  }
 
   // Log solo primitivos (evitar [circular])
   console.log('[getConfigFromQuoteLine] RESULT', lineId, String(cpId ?? 'NONE'), snapshotApplied, String(config.hardware_color ?? 'MISSING'), String(config.bottom_bar_sku ?? 'MISSING'), String(config.bottom_bar_item_id ?? 'MISSING'));

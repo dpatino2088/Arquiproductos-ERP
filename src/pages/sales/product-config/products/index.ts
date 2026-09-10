@@ -9,5 +9,6 @@ import './dual-shade';
 import './triple-shade';
 import './drapery';
 import './awning';
+import './awning-vertical';
 import './window-film';
 

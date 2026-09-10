@@ -44,7 +44,8 @@ export default function MeasurementsStep({ config, onUpdate }: MeasurementsStepP
   const productType = (config as any).productType;
   const isTripleShade = productType === 'triple-shade';
   const isDrapery = productType === 'drapery';
-  const hideFabricDrop = isTripleShade || isDrapery;
+  const isAwningVertical = productType === 'awning-vertical';
+  const hideFabricDrop = isTripleShade || isDrapery || isAwningVertical;
 
   // Support legacy snapshot keys (snake_case) so Edit always shows previous selection.
   const currentFabricDrop = (config as any).fabricDrop ?? (config as any).fabric_drop;

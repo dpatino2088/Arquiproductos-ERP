@@ -25,6 +25,12 @@ import { supabase } from '../../../lib/supabase/client';
 import { useOrganizationContext } from '../../../context/OrganizationContext';
 import { useUIStore } from '../../../stores/ui-store';
 import { prefetchImageUrls } from '../../../lib/imagePrefetch';
+import {
+  awningArmsForLine,
+  awningTubeDiameter,
+  awningMotorNmSuggestion,
+  AWNING_MAGNUM_PROJECTION_MM,
+} from '../product-config/measurementValidation';
 
 interface OperatingSystemStepProps {
   config: CurtainConfiguration | ProductConfig;
@@ -134,6 +140,13 @@ export default function OperatingSystemStep({
 
   const productType = (config as any).productType;
   const isDrapery = productType === 'drapery';
+
+  // Awning (extensible/monobloc): abaco hints — tube Ø and motor torque per line × projection
+  const isAwningExtensible = productType === 'awning';
+  const awningLineMm = isAwningExtensible ? Number((config as any).width_mm) || 0 : 0;
+  const awningProjectionMm = isAwningExtensible
+    ? Number((config as any).projection_mm) || Number((config as any).height_mm) || 0
+    : 0;
   
   // ✅ CRÍTICO: Determinar si ya hay CUALQUIER selección de operación
   const hasAnyOperationSelection = !!(operationType || motorItemId || driveItemId);
@@ -1050,6 +1063,44 @@ export default function OperatingSystemStep({
             Select the operating system type and choose the specific components.
           </p>
         </div>
+
+        {/* Awning abaco hints: recommended tube Ø + motor torque (Epsylon tables) */}
+        {isAwningExtensible && awningLineMm > 0 && awningProjectionMm > 0 && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <p className="text-sm font-medium text-blue-900 mb-1">Recommended system (Epsylon abaco)</p>
+            <ul className="text-xs text-blue-800 space-y-0.5 list-disc list-inside">
+              <li>
+                Tube diameter: Ø{awningTubeDiameter(awningLineMm)} mm
+                {' '}(Ø70 up to 4.0 m line, Ø80 above)
+              </li>
+              <li>Arms: {awningArmsForLine(awningLineMm)}</li>
+              {(() => {
+                const nm = awningMotorNmSuggestion(awningLineMm, awningProjectionMm);
+                return nm ? <li>Suggested motor torque: {nm} Nm (if motorized)</li> : null;
+              })()}
+              {awningProjectionMm >= AWNING_MAGNUM_PROJECTION_MM && (
+                <li className="text-amber-700">
+                  Projection is 3.75 m or more — Magnum reinforcement kit required.
+                </li>
+              )}
+              {(() => {
+                // Warn when the selected tube diameter contradicts the abaco recommendation
+                const selectedTubeSku = (config as any).tube_sku as string | null | undefined;
+                if (!selectedTubeSku) return null;
+                const diaMatch = String(selectedTubeSku).match(/(\d{2,3})(?!.*\d)/);
+                const selectedDia = diaMatch ? Number(diaMatch[1]) : null;
+                const recommendedDia = awningTubeDiameter(awningLineMm);
+                if (!selectedDia || selectedDia === recommendedDia) return null;
+                return (
+                  <li className="text-red-700 font-medium">
+                    Selected tube ({selectedTubeSku}) is Ø{selectedDia} mm, but this line requires
+                    Ø{recommendedDia} mm per the abaco — please change the tube selection.
+                  </li>
+                );
+              })()}
+            </ul>
+          </div>
+        )}
 
         {/* Drive Side (Left/Right) — hidden for drapery since it's in MeasurementsStep */}
         {(() => {

@@ -1,29 +1,28 @@
 /**
- * Awning Product Module — EXTENSIBLE (Monobloc)
- * Line × Projection system (no height). The projection is mirrored into
- * height_m so persistence and the 2D cut engine work unchanged.
- * The Vertical drop awning is a separate module: products/awning-vertical.
+ * Awning Product Module — VERTICAL (drop screen)
+ * Width × Height system, roller-like. Uses the standard MeasurementsStep
+ * (fabric drop cards are hidden for this product type).
  */
 
 import { AwningConfig, ProductConfig } from '../../types';
 import { registerProduct, ProductStep } from '../../product-registry';
 import ManufacturerStepComponent from '../../../curtain-config/ManufacturerStep';
-import AwningMeasurementsStepComponent from '../../../curtain-config/AwningMeasurementsStep';
+import AwningVerticalMeasurementsStepComponent from '../../../curtain-config/AwningVerticalMeasurementsStep';
 import VariantsStepComponent from '../../../curtain-config/VariantsStep';
 import OperatingSystemStepComponent from '../../../curtain-config/OperatingSystemStep';
 import ReviewStepComponent from '../../../curtain-config/ReviewStep';
 import { validateMeasurements } from '../../measurementValidation';
 
-const AWNING_STEPS: ProductStep[] = [
+const AWNING_VERTICAL_STEPS: ProductStep[] = [
   { id: 'manufacturer', label: 'MANUFACTURER', component: ManufacturerStepComponent, isRequired: true },
-  { id: 'measurements', label: 'MEASUREMENTS', component: AwningMeasurementsStepComponent, isRequired: true },
+  { id: 'measurements', label: 'MEASUREMENTS', component: AwningVerticalMeasurementsStepComponent, isRequired: true },
   { id: 'variants', label: 'VARIANTS', component: VariantsStepComponent },
   { id: 'operating-system', label: 'OPERATING SYSTEM', component: OperatingSystemStepComponent },
   { id: 'review', label: 'REVIEW', component: ReviewStepComponent },
 ];
 
 function validateStep(stepId: string, config: ProductConfig): boolean {
-  if (config.productType !== 'awning') return false;
+  if (config.productType !== 'awning-vertical') return false;
   const awningConfig = config as AwningConfig;
   const cfg = awningConfig as any;
 
@@ -31,13 +30,10 @@ function validateStep(stepId: string, config: ProductConfig): boolean {
     case 'manufacturer':
       return !!cfg.manufacturer;
 
-    case 'measurements': {
-      const projection = Number(awningConfig.projection_mm) || Number(awningConfig.height_mm) || 0;
-      return !!(awningConfig.width_mm && projection > 0) && validateMeasurements(cfg).valid;
-    }
+    case 'measurements':
+      return !!(awningConfig.width_mm && awningConfig.height_mm) && validateMeasurements(cfg).valid;
 
     case 'variants': {
-      // Dealer-supplied (ghost) fabric: no fabric selection required
       if (cfg.dealer_supply_fabric) return true;
       const hasCollection = !!(cfg.collectionName || cfg.collection_name || cfg.collectionId);
       const hasVariant = !!(cfg.variantId || cfg.fabric_catalog_item_id || cfg.fabric_variant_id);
@@ -61,10 +57,10 @@ function validateStep(stepId: string, config: ProductConfig): boolean {
   }
 }
 
-// Register Retractable (extensible/monobloc) Awning product
+// Register Vertical Awning product
 registerProduct({
-  type: 'awning',
-  name: 'Retractable Awning',
-  steps: AWNING_STEPS,
+  type: 'awning-vertical',
+  name: 'Vertical Awning',
+  steps: AWNING_VERTICAL_STEPS,
   validateStep,
 });

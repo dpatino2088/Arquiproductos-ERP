@@ -19,6 +19,7 @@ const PRODUCT_TYPE_IMAGES: Record<string, string> = {
   'Triple Shade': '/images/Triple Shade.png',
   'Drapery': '/images/Drapery.png',
   'Awning': '/images/Awning.png',
+  'Vertical Awning': '/images/Awning.png',
   'Window Film': '/images/Window Film.png',
   'Honey Comb': '/images/Honey Comb.png',
   'Vertical': '/images/Vertical.png',
@@ -94,14 +95,25 @@ const PRODUCT_UI_METADATA: Record<string, {
       'Wide range of fabric options'
     ]
   },
-  // DB code: AWNING
+  // DB code: AWNING (extensible / monobloc — Line × Projection)
   AWNING: {
     uiCode: 'awning',
-    maxWidth: 4000,
-    maxHeight: 5000,
+    maxWidth: 13000,
+    maxHeight: 4000,
     variations: 'Manual, Electric',
     additionalInfo: [
       'Outdoor protection solution',
+      'Weather resistant materials'
+    ]
+  },
+  // DB code: AWNING_VERTICAL (vertical drop screen — Width × Height)
+  AWNING_VERTICAL: {
+    uiCode: 'awning-vertical',
+    maxWidth: 5800,
+    maxHeight: 4000,
+    variations: 'Manual, Electric',
+    additionalInfo: [
+      'Vertical drop screen for terraces and windows',
       'Weather resistant materials'
     ]
   },
@@ -292,6 +304,33 @@ export default function ProductStep({ config, onUpdate, policy: policyProp, poli
       cards: productCards.map(c => ({ code: c?.code, name: c?.name, id: c?.id })),
     });
   }
+
+  // ── Awning family ──
+  // The Awning grid card selects the extensible (monobloc) type directly.
+  // The Extensible / Vertical sub-selection lives INSIDE the Measurements step
+  // (AwningSystemSelector). The vertical awning type never shows as a top-level
+  // grid card, but the Awning card stays highlighted when either system is active.
+  const awningExtensibleCard = useMemo(
+    () => productCards.find((c) => c?.uiCode === 'awning') || null,
+    [productCards]
+  );
+  const awningVerticalCard = useMemo(
+    () => productCards.find((c) => c?.uiCode === 'awning-vertical') || null,
+    [productCards]
+  );
+
+  const gridProductCards = useMemo(
+    () => visibleProductCards.filter((c) => c?.uiCode !== 'awning-vertical'),
+    [visibleProductCards]
+  );
+
+  const selectedProductTypeIdForFamily = (config as any).product_type_id || (config as any).productTypeId || null;
+  const isAwningFamilySelected =
+    (config as any).productType === 'awning' ||
+    (config as any).productType === 'awning-vertical' ||
+    (!!selectedProductTypeIdForFamily &&
+      (selectedProductTypeIdForFamily === awningExtensibleCard?.id ||
+        selectedProductTypeIdForFamily === awningVerticalCard?.id));
   
   // FASE 1: Handle product type selection
   const handleProductTypeSelect = (selectedProductTypeId: string, uiCode: string) => {
@@ -371,15 +410,18 @@ export default function ProductStep({ config, onUpdate, policy: policyProp, poli
         <Label className="text-sm font-medium mb-4 block">PRODUCT TYPE</Label>
 
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {visibleProductCards.map((product) => {
+          {gridProductCards.map((product) => {
             if (!product) return null;
             
             const isComingSoon = product.status === 'coming_soon';
             const selectedProductTypeId = (config as any).product_type_id || (config as any).productTypeId || null;
+            const isAwningFamilyCard = product.uiCode === 'awning';
             // Selection priority: if product_type_id exists, trust it as source of truth.
             // This prevents dual-highlight when legacy productType text is out of sync in edit mode.
             const isSelected = !isComingSoon && (
-              selectedProductTypeId
+              isAwningFamilyCard
+                ? isAwningFamilySelected
+                : selectedProductTypeId
                 ? selectedProductTypeId === product.id
                 : config.productType === product.uiCode
             );
@@ -392,6 +434,8 @@ export default function ProductStep({ config, onUpdate, policy: policyProp, poli
                   if (isSelected) {
                     handleProductTypeDeselect();
                   } else {
+                    // Awning card selects the extensible system by default; the
+                    // Extensible/Vertical choice happens in the Measurements step.
                     handleProductTypeSelect(product.id, product.uiCode);
                   }
                 }}
@@ -469,7 +513,7 @@ export default function ProductStep({ config, onUpdate, policy: policyProp, poli
             </div>
           )}
         </div>
-        
+
         {/* BOM Template Selection - SOLO en modo DEBUG para admin/superadmin */}
         {showTemplatePicker && productTypeId && bomTemplates.length > 0 && (
           <div className="mt-6 p-3 bg-yellow-50 border border-yellow-200 rounded">

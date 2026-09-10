@@ -132,6 +132,7 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
     'drive_item_id', 'drive_sku', 'motor_item_id', 'motor_sku', 'bracket_item_id', 'bracket_sku', 'operation_type', 'drive_type',
     '_manufacturer_filtered_templates', '_hardware_filtered_templates',
     'measurements', 'panels', 'bottom_bar_wrapped', 'dealer_supply_fabric',
+    'projection_mm', 'system',
   ] as const;
 
   // Any update to these fields can change BOM template resolution.
@@ -573,6 +574,47 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
   // CRITICAL: Use useCallback to stabilize the function reference
   // ✅ Soporte para función o objeto (MERGE SIEMPRE)
   const handleUpdate = useCallback((updatesOrFn: Partial<ProductConfig> | ((prev: Partial<ProductConfig>) => Partial<ProductConfig>)) => {
+    // ✅ Awning family: system switch (Extensible ↔ Vertical) requested from the
+    // MEASUREMENTS step. This is the ONLY place where a step other than ProductStep
+    // may change productType. Both awning flows share the same step layout, so we
+    // stay on the current step and keep the neutral context (manufacturer, width…).
+    if (typeof updatesOrFn !== 'function') {
+      const switchReq = (updatesOrFn as any)._awning_system_switch as
+        | { productType: string; productTypeId: string }
+        | undefined;
+      if (switchReq?.productType && switchReq?.productTypeId &&
+          (switchReq.productType === 'awning' || switchReq.productType === 'awning-vertical')) {
+        const nextType = switchReq.productType as ProductType;
+        setProductType(nextType);
+        autoCommittedRef.current = null;
+        setConfig(prev => {
+          const p = prev as any;
+          if (p.productType === nextType) return prev;
+          return {
+            productType: nextType,
+            productTypeId: switchReq.productTypeId,
+            product_type_id: switchReq.productTypeId,
+            // Shared context preserved across the awning family
+            quote_line_id: p.quote_line_id,
+            position: p.position ?? '',
+            quantity: p.quantity ?? 1,
+            area: p.area ?? null,
+            manufacturer: p.manufacturer ?? null,
+            installationLocation: p.installationLocation ?? null,
+            width_mm: p.width_mm ?? null,
+            width_m: p.width_m ?? null,
+            // Height/projection semantics differ between systems → cleared
+            height_mm: null,
+            height_m: null,
+            projection_mm: null,
+            panels: null,
+            measurements: null,
+            bom_template_id: null,
+          } as Partial<ProductConfig>;
+        });
+        return;
+      }
+    }
     setConfig(prev => {
       // ✅ Resolver updates (función o objeto)
       const updates = typeof updatesOrFn === "function" ? updatesOrFn(prev) : updatesOrFn;
@@ -1017,7 +1059,9 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
           }
         }
       }
-      if (questions.selectQuestions.hardware_color && !normalizedConfig.hardware_color && !configAny.hardwareColor && !configAny.operatingSystemColor) {
+      // Awning flows have no Hardware step (structure color comes from the BOM template)
+      const isAwningFamily = productType === 'awning' || productType === 'awning-vertical';
+      if (questions.selectQuestions.hardware_color && !isAwningFamily && !normalizedConfig.hardware_color && !configAny.hardwareColor && !configAny.operatingSystemColor) {
         errors.push('Hardware color is required');
       }
     }
@@ -1241,6 +1285,9 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
             system_size: configAny.systemSize || configAny.system_size || null,
             opening_direction: configAny.openingDirection || configAny.opening_direction || null,
             drive_side: configAny.driveSide || configAny.drive_side || null,
+            // Awning: frontal projection (mirrored into height_mm) and system (extensible/vertical)
+            projection_mm: configAny.projection_mm ?? null,
+            system: configAny.system ?? (productType === 'awning' ? 'extensible' : productType === 'awning-vertical' ? 'vertical' : null),
             force_track_join: configAny.forceTrackJoin ?? configAny.force_track_join ?? false,
             bottom_hem_cm: configAny.bottom_hem_cm ?? null,
             bottom_hem_profile: configAny.bottom_hem_profile ?? null,
@@ -1380,6 +1427,10 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
       if (configAny.height_mm != null) (finalNormalizedConfig as any).height_mm = configAny.height_mm;
       if (Array.isArray(configAny.panels)) (finalNormalizedConfig as any).panels = configAny.panels;
       if (configAny.measurements) (finalNormalizedConfig as any).measurements = configAny.measurements;
+      // Awning: projection (salida) and system (extensible/vertical)
+      if (configAny.projection_mm != null) (finalNormalizedConfig as any).projection_mm = configAny.projection_mm;
+      const derivedAwningSystem = productType === 'awning' ? 'extensible' : productType === 'awning-vertical' ? 'vertical' : null;
+      if (configAny.system != null || derivedAwningSystem) (finalNormalizedConfig as any).system = configAny.system ?? derivedAwningSystem;
 
       // ✅ CRITICAL: Carry over hardware and component selections so Edit Save and getConfigFromQuoteLine get full config.
       // normalizeConfig does not include these; without this, saved lines lose card selections when reopening.
@@ -1494,7 +1545,7 @@ export default function ProductConfigurator({ quoteId, onComplete, onClose, init
     
     if (newProductType) {
       // Validate that it's a valid ProductType (including 'catalog' for catalog item flow)
-      const validTypes: ProductType[] = ['roller-shade', 'dual-shade', 'triple-shade', 'drapery', 'awning', 'window-film', 'honey-comb', 'vertical', 'wood', 'roman-shade', 'catalog'];
+      const validTypes: ProductType[] = ['roller-shade', 'dual-shade', 'triple-shade', 'drapery', 'awning', 'awning-vertical', 'window-film', 'honey-comb', 'vertical', 'wood', 'roman-shade', 'catalog'];
       if (validTypes.includes(newProductType)) {
         handleProductTypeSelect(newProductType as ProductType, newProductTypeId);
       }

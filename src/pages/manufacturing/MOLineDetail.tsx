@@ -9,6 +9,7 @@ import StatusBadge from '../../components/shared/StatusBadge';
 import { useMOMaterialSubstitutions } from '../../hooks/useInventoryAllocations';
 import { CheckCircle, Package, AlertTriangle } from 'lucide-react';
 import { normalizeUUID } from '../../utils/uuid';
+import { isProjectionProduct } from '../../lib/dimensionLabels';
 
 interface MOLineDetailProps {
   moId?: string;
@@ -296,7 +297,10 @@ export default function MOLineDetail({ moId: propMoId, lineId: propLineId }: MOL
         { label: 'Location', value: [sol?.area, sol?.position].filter(Boolean).join(' / ') || '—' },
         { label: 'Qty', value: String(sol?.quantity ?? line.quantity ?? '—') },
         ...(sol?.width_m && sol?.height_m ? [
-          { label: 'Dimensions', value: `${Math.round(sol.width_m * 1000)} × ${Math.round(sol.height_m * 1000)} mm` },
+          {
+            label: isProjectionProduct(sol?.product_type) ? 'Line × Projection' : 'Dimensions',
+            value: `${Math.round(sol.width_m * 1000)} × ${Math.round(sol.height_m * 1000)} mm`,
+          },
         ] : []),
       ]}
       tabs={tabs}
@@ -476,7 +480,9 @@ export default function MOLineDetail({ moId: propMoId, lineId: propLineId }: MOL
             )}
             {sol?.width_m && sol?.height_m && (
               <div>
-                <span className="text-gray-500">Dimensions (W × H)</span>
+                <span className="text-gray-500">
+                  {isProjectionProduct(sol?.product_type) ? 'Dimensions (Line × Projection)' : 'Dimensions (W × H)'}
+                </span>
                 <p className="font-medium text-gray-900">{Math.round(sol.width_m * 1000)} × {Math.round(sol.height_m * 1000)} mm</p>
               </div>
             )}

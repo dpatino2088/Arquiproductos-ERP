@@ -440,8 +440,15 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
             const qtyMin = Number(comp.qty_min);
             if (comp.qty_min != null && !Number.isNaN(qtyMin) && qty < qtyMin) qty = qtyMin;
           } else if (qtyType === 'per_joint') {
-            // N panels produce N-1 joints (intermediates).
-            qty = Math.max(0, panelCount - 1) * (Number(comp.qty_value) || 1);
+            const jointSpacing = Number(comp.qty_spacing_mm);
+            if (comp.qty_spacing_mm != null && !Number.isNaN(jointSpacing) && jointSpacing > 0) {
+              // Width-based joints (e.g. awning center support): CEIL(width/spacing) - 1,
+              // mirroring SQL calc_bom_qty / build_bom_preview_snapshot.
+              qty = Math.max(0, Math.ceil(Math.max(0, widthMm + deltaMm) / jointSpacing) - 1) * (Number(comp.qty_value) || 1);
+            } else {
+              // N panels produce N-1 joints (intermediates).
+              qty = Math.max(0, panelCount - 1) * (Number(comp.qty_value) || 1);
+            }
           }
           return qty;
         };
@@ -1054,12 +1061,15 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
             {/* Dimensions card */}
             {(() => {
               const pt = (config as any).productType || (config as any).product_type || '';
-              const isShadeProduct = ['roller-shade', 'dual-shade', 'triple-shade', 'drapery', 'awning'].includes(pt);
+              const isShadeProduct = ['roller-shade', 'dual-shade', 'triple-shade', 'drapery', 'awning', 'awning-vertical'].includes(pt);
+              const isAwningExtensible = pt === 'awning';
               return (
               <div className="border border-gray-200 rounded-lg px-4 py-3 space-y-2.5">
                 <div className="flex items-start justify-between gap-6">
                   <div>
-                    <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Panels (mm)</span>
+                    <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                      {isAwningExtensible ? 'Line × Projection (mm)' : 'Panels (mm)'}
+                    </span>
                     <div className="mt-1 text-gray-900 text-sm">
                       <DimensionsStackView source={dimensionsSource} />
                     </div>
@@ -1069,10 +1079,40 @@ export default function ReviewStep({ config, onUpdate }: ReviewStepProps) {
                       <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Total</span>
                       <div className="mt-1 text-sm tabular-nums text-gray-900">
                         {Math.round(widthTotalMm)} × {Math.round(heightMm)} mm
+                        {isAwningExtensible && <span className="text-gray-400"> (line × projection)</span>}
                       </div>
                     </div>
                   )}
                 </div>
+
+                {/* Awning canvas (lona) estimate: fabric panels + seams from roll width */}
+                {isAwningExtensible && hasTotalDimensions && (() => {
+                  // Provisional confection values (to be tuned): wrap + hem allowance and seam overlap
+                  const AWNING_FABRIC_LENGTH_ALLOWANCE_MM = 600;
+                  const AWNING_SEAM_OVERLAP_MM = 40;
+                  const DEFAULT_ROLL_WIDTH_MM = 1200;
+                  const rollW = rollWidthMm != null && rollWidthMm > 0 ? rollWidthMm : DEFAULT_ROLL_WIDTH_MM;
+                  // Canvas finished width = tube cut (line − drive-side deduction estimate)
+                  const opType = String((config as any).operation_type || (config as any).drive_type || '').toLowerCase();
+                  const driveDeduction = opType === 'manual' ? 117 : 105;
+                  const canvasWidthMm = Math.max(0, Math.round(widthTotalMm) - driveDeduction);
+                  const panelLengthMm = Math.round(heightMm) + AWNING_FABRIC_LENGTH_ALLOWANCE_MM;
+                  const fabricPanels = canvasWidthMm <= rollW
+                    ? 1
+                    : 1 + Math.ceil((canvasWidthMm - rollW) / Math.max(rollW - AWNING_SEAM_OVERLAP_MM, 1));
+                  const seams = Math.max(0, fabricPanels - 1);
+                  return (
+                    <div className="border-t border-gray-100 pt-2.5 space-y-1 text-sm">
+                      <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Canvas (lona) estimate</span>
+                      <div className="flex flex-wrap gap-x-6 gap-y-1 text-gray-700">
+                        <span>Canvas width ≈ <span className="tabular-nums font-medium">{canvasWidthMm} mm</span> (tube cut)</span>
+                        <span>Panel length ≈ <span className="tabular-nums font-medium">{panelLengthMm} mm</span> (projection + {AWNING_FABRIC_LENGTH_ALLOWANCE_MM} mm wrap/hem)</span>
+                        <span>Fabric panels: <span className="tabular-nums font-medium">{fabricPanels}</span> (roll {Math.round(rollW)} mm)</span>
+                        <span>Seams: <span className="tabular-nums font-medium">{seams}</span>{seams > 0 ? ` (${AWNING_SEAM_OVERLAP_MM} mm overlap)` : ''}</span>
+                      </div>
+                    </div>
+                  );
+                })()}
                 {isShadeProduct && rollWidthMm != null && hasRollData && (() => {
                   const fc = snapshotTotals?.fabric_calc;
                   const autoRotated = fc?.is_rotated === true;
