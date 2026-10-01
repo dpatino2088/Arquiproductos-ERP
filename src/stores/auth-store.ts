@@ -143,11 +143,24 @@ export const useAuthStore = create<AuthState>()(
             return;
           }
 
-          // Get user from Supabase (with short timeout)
-          const { data: { user: sbUser }, error: userError } = await supabase.auth.getUser();
+          // ✅ Session FIRST: getSession() reads from local storage (no network).
+          // getUser() hits /auth/v1/user over the network, and any blip (offline,
+          // 429, 5xx, slow WiFi) used to be treated as "signed out", which made the
+          // app flap between connected and disconnected. Never sign the user out
+          // because of a transient network failure.
+          const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
-          if (userError || !sbUser) {
-            // No user => signed out
+          if (sessionError) {
+            // Could not read the session: transient. Keep current state, stop loading.
+            console.warn("[auth-store] getSession warning:", sessionError.message);
+            set({ isLoading: false });
+            return;
+          }
+
+          const sbUser = session?.user ?? null;
+
+          if (!sbUser) {
+            // Genuinely no session => signed out
             set({
               isLoading: false,
               isAuthenticated: false,
@@ -158,8 +171,6 @@ export const useAuthStore = create<AuthState>()(
             return;
           }
 
-          // Get session for token
-          const { data: { session } } = await supabase.auth.getSession();
           const token = session?.access_token ?? null;
 
           // Set basic user first (fast UI update)
@@ -207,13 +218,10 @@ export const useAuthStore = create<AuthState>()(
         } catch (error) {
           console.error("[auth-store] init error:", error);
           logger.error("Error initializing auth", error as Error);
-          set({
-            isLoading: false,
-            isAuthenticated: false,
-            user: null,
-            accessToken: null,
-            error: error instanceof Error ? error.message : "Failed to initialize auth",
-          });
+          // ✅ Do NOT wipe the session on an unexpected error. A thrown fetch
+          // (offline, DNS, CORS) is not a sign-out; clearing auth here caused the
+          // "disconnects and reconnects" loop. Only stop the loading state.
+          set({ isLoading: false });
         }
       },
 

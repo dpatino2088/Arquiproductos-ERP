@@ -38,6 +38,29 @@ export default function AuthGate({ children }: Props) {
   useEffect(() => {
     let mounted = true;
     let hasCompletedOnce = false;
+    // Last successfully resolved context. Used to survive transient network
+    // failures instead of kicking the user out to /access-denied.
+    let lastGoodCtx: AuthContextRow | null = null;
+
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    /**
+     * get_auth_context() is a network RPC. A single failure used to be treated as
+     * "no membership", which logged users out on every WiFi hiccup. Retry a few
+     * times with backoff before giving up.
+     */
+    async function fetchAuthContextWithRetry(attempts = 3): Promise<AuthContextRow> {
+      let lastErr: unknown;
+      for (let i = 0; i < attempts; i++) {
+        try {
+          return await fetchAuthContext(supabase);
+        } catch (e) {
+          lastErr = e;
+          if (i < attempts - 1) await sleep(400 * 2 ** i);
+        }
+      }
+      throw lastErr;
+    }
 
     async function run(isInitial: boolean) {
       try {
@@ -64,15 +87,28 @@ export default function AuthGate({ children }: Props) {
           return;
         }
 
-        const row = await fetchAuthContext(supabase);
+        const row = await fetchAuthContextWithRetry();
 
         if (!mounted) return;
+        lastGoodCtx = row;
         setCtx(row);
         setInitialLoading(false);
         hasCompletedOnce = true;
       } catch (e: any) {
         console.error('[AuthGate] Error:', e);
         if (!mounted) return;
+
+        // ✅ If we already resolved access once, a later failure is almost always
+        // a network blip. Keep the user in the app instead of bouncing them to
+        // /access-denied and back — that flapping is what users reported as
+        // "the app keeps disconnecting and reconnecting".
+        if (lastGoodCtx) {
+          console.warn('[AuthGate] Keeping previous auth context after transient error');
+          setInitialLoading(false);
+          hasCompletedOnce = true;
+          return;
+        }
+
         setError(e?.message ?? 'Unknown error');
         setInitialLoading(false);
         hasCompletedOnce = true;

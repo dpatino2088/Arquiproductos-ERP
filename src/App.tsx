@@ -1289,11 +1289,21 @@ function App() {
 
     // Check on initial load and when URL changes
     handleLocationChange();
-    
-    // Set up interval to check for URL changes (fallback for direct navigation)
-    const interval = setInterval(handleLocationChange, 100);
-    
-    return () => clearInterval(interval);
+
+    // ✅ Event-driven instead of a 100ms polling loop. The old interval woke the
+    // main thread 10x/second forever, which starved the tab (and the Supabase
+    // token refresh / realtime heartbeats) on slower machines.
+    window.addEventListener('popstate', handleLocationChange);
+    window.addEventListener('hashchange', handleLocationChange);
+
+    // Slow fallback for programmatic history.pushState that doesn't emit events.
+    const interval = setInterval(handleLocationChange, 1000);
+
+    return () => {
+      window.removeEventListener('popstate', handleLocationChange);
+      window.removeEventListener('hashchange', handleLocationChange);
+      clearInterval(interval);
+    };
   }, [isAuthenticated, currentPage]);
 
   // Redirect to login if not authenticated (except for auth pages and error pages)

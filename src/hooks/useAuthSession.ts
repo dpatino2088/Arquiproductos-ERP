@@ -78,7 +78,10 @@ export function useAuthSession(timeoutMs: number = 8000): AuthState {
         const msg =
           typeof e?.message === "string" ? e.message : "Failed to load session";
         console.warn("[auth] loadSession:error", msg);
-        setSession(null);
+        // ✅ A timeout or network error is NOT a sign-out. Nulling the session here
+        // made every consumer flip to "logged out" on a slow request, then flip back
+        // on the next successful load — the reported disconnect/reconnect loop.
+        // Only Supabase's SIGNED_OUT event may clear the session.
         setError(msg);
       } finally {
         if (!mountedRef.current) return;
@@ -104,7 +107,10 @@ export function useAuthSession(timeoutMs: number = 8000): AuthState {
       setSession(nextSession);
       setLoading(false); // IMPORTANT: no dejes loading true por eventos
       setError(null);
-      if (nextSession) {
+      // ✅ Only re-seed the DB session context when the identity actually changes.
+      // TOKEN_REFRESHED fires on every tab focus and hourly; re-running the RPC
+      // there was pure extra load and changed nothing (same user/org/dealer).
+      if (nextSession && event !== 'TOKEN_REFRESHED') {
         void initSessionContext();
       }
       if (import.meta.env.DEV) console.log("[auth] onAuthStateChange", event);
