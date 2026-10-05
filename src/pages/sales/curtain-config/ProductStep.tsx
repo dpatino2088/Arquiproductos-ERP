@@ -23,8 +23,7 @@ const PRODUCT_TYPE_IMAGES: Record<string, string> = {
   'Window Film': '/images/Window Film.png',
   'Honey Comb': '/images/Honey Comb.png',
   'Vertical': '/images/Vertical.png',
-  'Blinds': '/images/Wood.png',
-  'Wood': '/images/Wood.png',
+  'Blinds': '/images/Blinds.png',
   'Roman Shade': '/images/Roman Shade.png',
   'Accessories': '/images/Accessories.png',
 };
@@ -145,13 +144,14 @@ const PRODUCT_UI_METADATA: Record<string, {
     variations: 'Manual, Electric',
     additionalInfo: ['Vertical slats for wide openings'],
   },
-  // DB code: WOOD
+  // DB code: WOOD — shown as "Blinds"; the code stays 'wood' because dealer
+  // policies store it and existing quote lines resolve through it.
   WOOD: {
     uiCode: 'wood',
     maxWidth: 2400,
     maxHeight: 3000,
     variations: 'Manual',
-    additionalInfo: ['Natural wood blinds'],
+    additionalInfo: ['Horizontal slat blinds'],
   },
   // DB code: ROMAN_SHADE
   ROMAN_SHADE: {
