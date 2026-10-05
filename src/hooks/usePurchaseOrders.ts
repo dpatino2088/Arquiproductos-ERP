@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
 import { useOrganizationContext } from '../context/OrganizationContext';
 import { purchaseOrdersListKey, purchaseOrderDetailKey } from '../lib/queryKeys';
+import { useDirectoryVendors } from './useDirectoryVendors';
 import { generateNextPurchaseOrderNumber } from '../lib/sequential-numbers';
 import { resolveInventoryUnitModel, type MeasureBasis } from '../lib/inventoryUnitModel';
 
@@ -112,6 +113,14 @@ export async function resolvePurchaseTaxPct(params: {
   return Number.isFinite(pct) && pct > 0 ? pct : 0;
 }
 
+/**
+ * PostgREST reads `or()` arguments as a comma-separated filter list, so commas and
+ * parentheses coming from user input would be parsed as syntax instead of text.
+ */
+function sanitizePoSearchTerm(raw: string | undefined): string {
+  return (raw ?? '').replace(/[(),]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 export function usePurchaseOrders(filters?: {
   status?: PurchaseOrderStatus;
   warehouseId?: string;
@@ -119,9 +128,31 @@ export function usePurchaseOrders(filters?: {
 }) {
   const { activeOrganizationId } = useOrganizationContext();
   const scopeKey = activeOrganizationId ?? 'none';
+  const { vendors } = useDirectoryVendors();
+
+  const search = sanitizePoSearchTerm(filters?.search);
+
+  // Vendor names live in DirectoryVendors and PostgREST cannot OR a filter on the
+  // parent table with one on an embedded table. Resolve the term against the cached
+  // vendor list and search by the resulting ids instead.
+  const matchingVendorIds = useMemo(() => {
+    if (!search) {
+      return [] as string[];
+    }
+    const needle = search.toLowerCase();
+    return vendors
+      .filter(v => `${v.name ?? ''} ${v.vendor_name ?? ''}`.toLowerCase().includes(needle))
+      .map(v => v.id);
+  }, [vendors, search]);
 
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: [...purchaseOrdersListKey(scopeKey), filters?.status, filters?.warehouseId, filters?.search],
+    queryKey: [
+      ...purchaseOrdersListKey(scopeKey),
+      filters?.status,
+      filters?.warehouseId,
+      search,
+      matchingVendorIds.join(','),
+    ],
     queryFn: async (): Promise<PurchaseOrder[]> => {
       if (!activeOrganizationId) return [];
       let q = supabase
@@ -132,8 +163,12 @@ export function usePurchaseOrders(filters?: {
 
       if (filters?.status) q = q.eq('status', filters.status);
       if (filters?.warehouseId) q = q.eq('warehouse_id', filters.warehouseId);
-      if (filters?.search && filters.search.trim()) {
-        q = q.ilike('po_number', `%${filters.search.trim()}%`);
+      if (search) {
+        const clauses = [`po_number.ilike.%${search}%`];
+        if (matchingVendorIds.length > 0) {
+          clauses.push(`vendor_id.in.(${matchingVendorIds.join(',')})`);
+        }
+        q = q.or(clauses.join(','));
       }
 
       const { data: rows, error: e } = await q;
