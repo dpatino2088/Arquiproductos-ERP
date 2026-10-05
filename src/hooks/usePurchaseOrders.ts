@@ -117,8 +117,21 @@ export async function resolvePurchaseTaxPct(params: {
  * PostgREST reads `or()` arguments as a comma-separated filter list, so commas and
  * parentheses coming from user input would be parsed as syntax instead of text.
  */
-function sanitizePoSearchTerm(raw: string | undefined): string {
-  return (raw ?? '').replace(/[(),]/g, ' ').replace(/\s+/g, ' ').trim();
+function sanitizePoNumberTerm(raw: string): string {
+  return raw.replace(/["(),]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Vendor names are matched in memory, so punctuation and accents can be folded away:
+ * "Lutron Electronics Co., Inc" is then reachable by typing "co inc" or "Lutrón".
+ */
+function normalizeForVendorMatch(raw: string): string {
+  return raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
 }
 
 export function usePurchaseOrders(filters?: {
@@ -130,18 +143,19 @@ export function usePurchaseOrders(filters?: {
   const scopeKey = activeOrganizationId ?? 'none';
   const { vendors } = useDirectoryVendors();
 
-  const search = sanitizePoSearchTerm(filters?.search);
+  const search = (filters?.search ?? '').trim();
+  const poNumberTerm = sanitizePoNumberTerm(search);
 
   // Vendor names live in DirectoryVendors and PostgREST cannot OR a filter on the
   // parent table with one on an embedded table. Resolve the term against the cached
   // vendor list and search by the resulting ids instead.
   const matchingVendorIds = useMemo(() => {
-    if (!search) {
+    const needle = normalizeForVendorMatch(search);
+    if (!needle) {
       return [] as string[];
     }
-    const needle = search.toLowerCase();
     return vendors
-      .filter(v => `${v.name ?? ''} ${v.vendor_name ?? ''}`.toLowerCase().includes(needle))
+      .filter(v => normalizeForVendorMatch(`${v.name ?? ''} ${v.vendor_name ?? ''}`).includes(needle))
       .map(v => v.id);
   }, [vendors, search]);
 
@@ -164,9 +178,16 @@ export function usePurchaseOrders(filters?: {
       if (filters?.status) q = q.eq('status', filters.status);
       if (filters?.warehouseId) q = q.eq('warehouse_id', filters.warehouseId);
       if (search) {
-        const clauses = [`po_number.ilike.%${search}%`];
+        const clauses: string[] = [];
+        if (poNumberTerm) {
+          clauses.push(`po_number.ilike.%${poNumberTerm}%`);
+        }
         if (matchingVendorIds.length > 0) {
           clauses.push(`vendor_id.in.(${matchingVendorIds.join(',')})`);
+        }
+        // Punctuation-only term that matched no vendor: nothing can satisfy it.
+        if (clauses.length === 0) {
+          return [];
         }
         q = q.or(clauses.join(','));
       }
