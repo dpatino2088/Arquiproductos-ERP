@@ -23,6 +23,7 @@ const PRODUCT_TYPE_IMAGES: Record<string, string> = {
   'Window Film': '/images/Window Film.png',
   'Honey Comb': '/images/Honey Comb.png',
   'Vertical': '/images/Vertical.png',
+  'Blinds': '/images/Wood.png',
   'Wood': '/images/Wood.png',
   'Roman Shade': '/images/Roman Shade.png',
   'Accessories': '/images/Accessories.png',
