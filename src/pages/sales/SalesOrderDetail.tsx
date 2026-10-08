@@ -11,7 +11,7 @@ import { router } from '../../lib/router';
 import { getReturnToFromCurrentQuery, navigateBackContextual, withReturnTo } from '../../lib/navigation/returnTo';
 import { formatCurrency, formatDate } from '../../lib/utils';
 import { useSOActions } from '../../hooks/useSOActions';
-import { ChevronDown, FileText, ShoppingBag, CreditCard, Factory, Package, CheckCircle2, AlertTriangle, XCircle, ArrowLeft, Eye, Loader2, CalendarDays } from 'lucide-react';
+import { ChevronDown, FileText, ShoppingBag, CreditCard, Factory, Package, CheckCircle2, AlertTriangle, XCircle, ArrowLeft, Eye, Loader2, CalendarDays, LockOpen } from 'lucide-react';
 import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { useSOFulfillmentSummary } from '../../hooks/useInventoryAllocations';
 import { usePayments } from '../../hooks/usePayments';
@@ -60,6 +60,20 @@ interface FinancialSummary {
   latest_invoice_id: string | null;
   latest_invoice_number: string | null;
   delivery_financials_ok: boolean | null;
+}
+
+interface DeliveryGate {
+  balance_due: number;
+  payment_complete: boolean;
+  has_active_override: boolean;
+  delivery_allowed: boolean;
+}
+
+interface ActiveDeliveryOverride {
+  id: string;
+  reason: string | null;
+  authorized_by_name: string | null;
+  authorized_at: string;
 }
 
 interface SalesOrderLine {
@@ -220,6 +234,8 @@ export default function SalesOrderDetail() {
   const [mos, setMos] = useState<ManufacturingOrder[]>([]);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [financialSummary, setFinancialSummary] = useState<FinancialSummary | null>(null);
+  const [deliveryGate, setDeliveryGate] = useState<DeliveryGate | null>(null);
+  const [activeDeliveryOverride, setActiveDeliveryOverride] = useState<ActiveDeliveryOverride | null>(null);
   const [linkedInvoices, setLinkedInvoices] = useState<SOInvoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -247,7 +263,7 @@ export default function SalesOrderDetail() {
     setLoading(true);
     setError(null);
     try {
-      const [soRes, linesRes, mosRes, timelineRes, financialRes, invoicesRes] = await Promise.all([
+      const [soRes, linesRes, mosRes, timelineRes, financialRes, invoicesRes, gateRes, overrideRes] = await Promise.all([
         supabase
           .from('SalesOrders')
           .select(`
@@ -298,6 +314,18 @@ export default function SalesOrderDetail() {
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false)
           .order('issue_date', { ascending: false }),
+        // Same gate Financials uses for the padlock, so an authorized override
+        // releases production here too instead of only releasing dispatch.
+        supabase.rpc('get_sales_order_delivery_gate', { p_sales_order_id: salesOrderId }),
+        supabase
+          .from('SalesOrderDeliveryOverrides')
+          .select('id, reason, authorized_by_name, authorized_at')
+          .eq('sales_order_id', salesOrderId)
+          .eq('status', 'active')
+          .eq('deleted', false)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
       ]);
 
       if (soRes.error) throw soRes.error;
@@ -398,6 +426,16 @@ export default function SalesOrderDetail() {
         setTimeline((timelineRes.data ?? []) as TimelineEvent[]);
       }
       setFinancialSummary((financialRes.data as FinancialSummary | null) ?? null);
+      if (gateRes.error) {
+        if (import.meta.env.DEV) {
+          console.warn('[SalesOrderDetail] Delivery gate error:', gateRes.error);
+        }
+        setDeliveryGate(null);
+      } else {
+        const gateRows = gateRes.data as DeliveryGate[] | DeliveryGate | null;
+        setDeliveryGate((Array.isArray(gateRows) ? gateRows[0] : gateRows) ?? null);
+      }
+      setActiveDeliveryOverride((overrideRes.data as ActiveDeliveryOverride | null) ?? null);
       if (invoicesRes.error) {
         if (import.meta.env.DEV) console.warn('[SalesOrderDetail] DealerInvoices error:', invoicesRes.error);
         setLinkedInvoices([]);
@@ -886,7 +924,11 @@ export default function SalesOrderDetail() {
 
   const soStatus = (so.status || 'draft').toLowerCase();
   const MIN_PAYMENT_PCT = 0.15;
-  const hasPaidAmount = isZeroValueOrder || totalPaid >= orderTotal * MIN_PAYMENT_PCT;
+  const hasMinimumPayment = isZeroValueOrder || totalPaid >= orderTotal * MIN_PAYMENT_PCT;
+  // A Financials-authorized override is the sanctioned way to release an order
+  // with a pending balance, so it lifts the deposit requirement as well.
+  const hasFinancialOverride = deliveryGate?.has_active_override === true;
+  const hasPaidAmount = hasMinimumPayment || hasFinancialOverride;
 
   const manufacturingProgressCard = (
     <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
@@ -1414,8 +1456,23 @@ export default function SalesOrderDetail() {
                       </div>
                     ) : (
                       <>
-                        {!hasPaidAmount && (
+                        {!hasMinimumPayment && !hasFinancialOverride && (
                           <p className="text-xs text-amber-600 mb-2">At least 15% of the order total must be paid before creating a Manufacturing Order.</p>
+                        )}
+                        {!hasMinimumPayment && hasFinancialOverride && (
+                          <p className="text-xs text-amber-700 mb-2 flex items-start gap-1.5">
+                            <LockOpen className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                            <span>
+                              Deposit requirement released by a Financials override
+                              {activeDeliveryOverride?.authorized_by_name
+                                ? ` authorized by ${activeDeliveryOverride.authorized_by_name}`
+                                : ''}
+                              {activeDeliveryOverride?.authorized_at
+                                ? ` on ${formatDate(activeDeliveryOverride.authorized_at)}`
+                                : ''}
+                              .
+                            </span>
+                          </p>
                         )}
                         <p className="text-xs text-gray-500 mb-2">This action creates one Manufacturing Order for the Sales Order.</p>
                         <button
