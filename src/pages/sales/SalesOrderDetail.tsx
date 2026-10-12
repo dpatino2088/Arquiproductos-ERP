@@ -62,11 +62,15 @@ interface FinancialSummary {
   delivery_financials_ok: boolean | null;
 }
 
-interface DeliveryGate {
-  balance_due: number;
-  payment_complete: boolean;
+interface ProductionGate {
+  so_total: number;
+  total_paid: number;
+  min_deposit_pct: number;
+  required_deposit: number;
+  deposit_met: boolean;
+  financials_settled: boolean;
   has_active_override: boolean;
-  delivery_allowed: boolean;
+  production_allowed: boolean;
 }
 
 interface ActiveDeliveryOverride {
@@ -234,7 +238,7 @@ export default function SalesOrderDetail() {
   const [mos, setMos] = useState<ManufacturingOrder[]>([]);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [financialSummary, setFinancialSummary] = useState<FinancialSummary | null>(null);
-  const [deliveryGate, setDeliveryGate] = useState<DeliveryGate | null>(null);
+  const [productionGate, setProductionGate] = useState<ProductionGate | null>(null);
   const [activeDeliveryOverride, setActiveDeliveryOverride] = useState<ActiveDeliveryOverride | null>(null);
   const [linkedInvoices, setLinkedInvoices] = useState<SOInvoice[]>([]);
   const [loading, setLoading] = useState(true);
@@ -314,9 +318,9 @@ export default function SalesOrderDetail() {
           .eq('organization_id', activeOrganizationId)
           .eq('deleted', false)
           .order('issue_date', { ascending: false }),
-        // Same gate Financials uses for the padlock, so an authorized override
-        // releases production here too instead of only releasing dispatch.
-        supabase.rpc('get_sales_order_delivery_gate', { p_sales_order_id: salesOrderId }),
+        // The server enforces this same gate inside create_manufacturing_order,
+        // so the button and the RPC can never disagree on the deposit rule.
+        supabase.rpc('get_sales_order_production_gate', { p_sales_order_id: salesOrderId }),
         supabase
           .from('SalesOrderDeliveryOverrides')
           .select('id, reason, authorized_by_name, authorized_at')
@@ -428,12 +432,12 @@ export default function SalesOrderDetail() {
       setFinancialSummary((financialRes.data as FinancialSummary | null) ?? null);
       if (gateRes.error) {
         if (import.meta.env.DEV) {
-          console.warn('[SalesOrderDetail] Delivery gate error:', gateRes.error);
+          console.warn('[SalesOrderDetail] Production gate error:', gateRes.error);
         }
-        setDeliveryGate(null);
+        setProductionGate(null);
       } else {
-        const gateRows = gateRes.data as DeliveryGate[] | DeliveryGate | null;
-        setDeliveryGate((Array.isArray(gateRows) ? gateRows[0] : gateRows) ?? null);
+        const gateRows = gateRes.data as ProductionGate[] | ProductionGate | null;
+        setProductionGate((Array.isArray(gateRows) ? gateRows[0] : gateRows) ?? null);
       }
       setActiveDeliveryOverride((overrideRes.data as ActiveDeliveryOverride | null) ?? null);
       if (invoicesRes.error) {
@@ -923,11 +927,15 @@ export default function SalesOrderDetail() {
   ];
 
   const soStatus = (so.status || 'draft').toLowerCase();
-  const MIN_PAYMENT_PCT = 0.15;
-  const hasMinimumPayment = isZeroValueOrder || totalPaid >= orderTotal * MIN_PAYMENT_PCT;
-  // A Financials-authorized override is the sanctioned way to release an order
-  // with a pending balance, so it lifts the deposit requirement as well.
-  const hasFinancialOverride = deliveryGate?.has_active_override === true;
+  // The deposit rule and the override exception live in the production gate, which
+  // create_manufacturing_order enforces too. Only fall back to a local estimate
+  // when the gate could not be read, so the button still works offline-ish.
+  const FALLBACK_MIN_PAYMENT_PCT = 0.15;
+  const depositPct = productionGate?.min_deposit_pct ?? FALLBACK_MIN_PAYMENT_PCT;
+  const hasMinimumPayment = productionGate
+    ? productionGate.deposit_met
+    : isZeroValueOrder || totalPaid >= orderTotal * FALLBACK_MIN_PAYMENT_PCT;
+  const hasFinancialOverride = productionGate?.has_active_override === true;
   const hasPaidAmount = hasMinimumPayment || hasFinancialOverride;
 
   const manufacturingProgressCard = (
@@ -1457,7 +1465,11 @@ export default function SalesOrderDetail() {
                     ) : (
                       <>
                         {!hasMinimumPayment && !hasFinancialOverride && (
-                          <p className="text-xs text-amber-600 mb-2">At least 15% of the order total must be paid before creating a Manufacturing Order.</p>
+                          <p className="text-xs text-amber-600 mb-2">
+                            At least {Math.round(depositPct * 100)}% of the order total
+                            {productionGate ? ` (${formatCurrency(productionGate.required_deposit, currency)})` : ''} must be
+                            paid before creating a Manufacturing Order.
+                          </p>
                         )}
                         {!hasMinimumPayment && hasFinancialOverride && (
                           <p className="text-xs text-amber-700 mb-2 flex items-start gap-1.5">
