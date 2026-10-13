@@ -14,6 +14,7 @@ const ALL_MANUFACTURING_SUBMODULES: MfgSubmodule[] = [
   { id: 'calendar', label: 'Calendar', href: '/manufacturing/calendar', permissionKey: 'canViewCalendar' },
   { id: 'cut-optimization', label: 'Cut Optimization', href: '/manufacturing/cut-optimization', permissionKey: 'canViewCutOpt' },
   { id: 'finished-goods', label: 'Finished Goods', href: '/manufacturing/finished-goods', permissionKey: 'canViewWOs' },
+  { id: 'parts', label: 'Parts', href: '/manufacturing/parts', permissionKey: 'canViewMOs' },
 ];
 
 /** Static export for backward compatibility — all tabs, unfiltered */

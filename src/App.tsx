@@ -72,6 +72,7 @@ const WorkOrdersList = lazy(() => import('./pages/manufacturing/WorkOrdersList')
 const WorkOrderDetail = lazy(() => import('./pages/manufacturing/WorkOrderDetail'));
 const ProductionCalendar = lazy(() => import('./pages/manufacturing/ProductionCalendar'));
 const FinishedGoods = lazy(() => import('./pages/manufacturing/FinishedGoods'));
+const MfgParts = lazy(() => import('./pages/manufacturing/Parts'));
 const CutOptimization = lazy(() => import('./pages/manufacturing/CutOptimization'));
 const DeliveryNoteDetail = lazy(() => import('./pages/inventory/DeliveryNoteDetail'));
 
@@ -876,6 +877,13 @@ function App() {
         setCurrentPage('login');
       }
     });
+    router.addRoute('/manufacturing/parts', () => {
+      if (isAuthenticated) {
+        setCurrentPage('mfg-parts');
+      } else {
+        setCurrentPage('login');
+      }
+    });
     router.addRoute('/manufacturing/cut-optimization', () => {
       if (isAuthenticated) {
         setCurrentPage('cut-optimization');
@@ -1463,6 +1471,8 @@ function App() {
         return <RequireModule module="manufacturing"><ProductionCalendar /></RequireModule>;
       case 'finished-goods':
         return <RequireModule module="manufacturing"><FinishedGoods /></RequireModule>;
+      case 'mfg-parts':
+        return <RequireModule module="manufacturing"><MfgParts /></RequireModule>;
       case 'cut-optimization':
         return <RequireModule module="manufacturing"><CutOptimization /></RequireModule>;
       case 'delivery-note-new':

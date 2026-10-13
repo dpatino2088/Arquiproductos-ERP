@@ -139,7 +139,7 @@ export function computeNestPurchaseQty(params: {
   };
 }
 
-function rollLengthMmFromCatalog(ci?: {
+export function rollLengthMmFromCatalog(ci?: {
   roll_length_value?: number | null;
   roll_length_uom?: string | null;
   stock_length_mm?: number | null;
