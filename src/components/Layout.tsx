@@ -108,6 +108,7 @@ const MODULE_TABS: Record<string, { label: string; href: string }[]> = {
     { label: 'Calendar', href: '/manufacturing/calendar' },
     { label: 'Cut Optimization', href: '/manufacturing/cut-optimization' },
     { label: 'Finished Goods', href: '/manufacturing/finished-goods' },
+    { label: 'Parts', href: '/manufacturing/parts' },
   ],
   '/financials': [
     { label: 'Accounts Receivable', href: '/financials/accounts' },
@@ -201,6 +202,9 @@ function getManufacturingTabs(can: (permissionCode: string) => boolean): { label
     tabs.push({ label: 'Cut Optimization', href: '/manufacturing/cut-optimization' });
   }
   if (can('manufacturing.finished_goods.read')) tabs.push({ label: 'Finished Goods', href: '/manufacturing/finished-goods' });
+  if (can('manufacturing.mo.read')) {
+    tabs.push({ label: 'Parts', href: '/manufacturing/parts' });
+  }
   return tabs;
 }
 
