@@ -17,6 +17,7 @@ import { useSubmoduleNav } from '../../hooks/useSubmoduleNav';
 import { FileText, ShoppingBag, Edit, ArrowLeft, ShieldCheck, Unlock, Copy, RotateCcw } from 'lucide-react';
 import { duplicateQuote } from '../../hooks/useQuotes';
 import DuplicateQuoteModal, { type DuplicateQuoteMode } from '../../components/sales/DuplicateQuoteModal';
+import { useActiveDealer } from '../../hooks/useActiveDealer';
 import { getAppUsersDisplayNames } from '../../lib/appUsersDisplayNames';
 import QuoteAttachmentsTab from '../../components/sales/QuoteAttachmentsTab';
 import DimensionsStackView from '../../components/DimensionsStackView';
@@ -185,11 +186,19 @@ export default function QuoteDetail() {
   const { activeOrganizationId, loading: orgLoading } = useOrganizationContext();
   const { user } = useAuth();
   const { isPortal, isInternal } = useAccessContext();
+  const { activeDealerId, dealers: orgDealers } = useActiveDealer();
   // "Revert to Draft" is allowed for org users with the quotes edit permission
   // (superadmin/admin have it, plus any internal user granted the permission).
   const { canEdit: canEditQuotesPerm } = useGranularAccess('quotes');
   const addNotification = useUIStore((s) => s.addNotification);
   const { registerSubmodules } = useSubmoduleNav();
+  const duplicateDealerOptions = useMemo(
+    () =>
+      isInternal
+        ? orgDealers.map((d) => ({ id: d.id, label: d.dealer_name }))
+        : [],
+    [isInternal, orgDealers],
+  );
 
   useEffect(() => {
     registerSubmodules('Sales', SALES_SUBMODULES);
@@ -522,11 +531,20 @@ export default function QuoteDetail() {
     }
   }, [quoteId, user, acting, addNotification, refetch]);
 
-  const handleDuplicateConfirm = useCallback(async (mode: DuplicateQuoteMode, recalculate: boolean) => {
+  const handleDuplicateConfirm = useCallback(async (
+    mode: DuplicateQuoteMode,
+    recalculate: boolean,
+    dealerId: string | null,
+  ) => {
     if (!quote) return;
     setDuplicatingLoading(true);
     try {
-      const newId = await duplicateQuote(quote.id, mode, recalculate);
+      const newId = await duplicateQuote(
+        quote.id,
+        mode,
+        recalculate,
+        dealerId ?? activeDealerId,
+      );
       addNotification({
         type: 'success',
         title: mode === 'version' ? 'Version created' : 'Quote duplicated',
@@ -542,7 +560,7 @@ export default function QuoteDetail() {
     } finally {
       setDuplicatingLoading(false);
     }
-  }, [quote, addNotification]);
+  }, [quote, addNotification, activeDealerId]);
 
   // Load version siblings for the current family (so detail can link to other versions)
   useEffect(() => {
@@ -1411,6 +1429,13 @@ export default function QuoteDetail() {
             : null
         }
         isLoading={duplicatingLoading}
+        dealers={duplicateDealerOptions}
+        defaultDealerId={activeDealerId}
+        sourceDealerLabel={
+          quote.dealer_id
+            ? orgDealers.find((d) => d.id === quote.dealer_id)?.dealer_name ?? null
+            : null
+        }
       />
     </DetailPageLayout>
   );

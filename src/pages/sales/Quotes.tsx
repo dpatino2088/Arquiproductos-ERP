@@ -7,6 +7,7 @@ import DuplicateQuoteModal, { type DuplicateQuoteMode } from '../../components/s
 import { useOrganizationContext } from '../../context/OrganizationContext';
 import { useAccessContext } from '../../hooks/useAccessContext';
 import { useGranularAccess } from '../../hooks/usePermissions';
+import { useActiveDealer } from '../../hooks/useActiveDealer';
 import { supabase } from '../../lib/supabase/client';
 import { useUIStore } from '../../stores/ui-store';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
@@ -43,11 +44,19 @@ const normalizeSearchText = (value: unknown): string =>
 export default function Quotes() {
   const { activeOrganizationId } = useOrganizationContext();
   const { isInternal, portalRole } = useAccessContext();
+  const { activeDealerId, dealers: orgDealers } = useActiveDealer();
   const { canCreate: _canCreate, canArchive: _canArchive, canDelete: _canDelete } = useGranularAccess('quotes');
   const isDealerManager = portalRole === 'dealer_manager';
   const canCreateQuote  = _canCreate  || isDealerManager;
   const canArchiveQuote = _canArchive || isDealerManager;
   const canDeleteQuote  = _canDelete  || isDealerManager;
+  const duplicateDealerOptions = useMemo(
+    () =>
+      isInternal
+        ? orgDealers.map((d) => ({ id: d.id, label: d.dealer_name }))
+        : [],
+    [isInternal, orgDealers],
+  );
   const { dialogState, showConfirm, closeDialog, setLoading: setDialogLoading, handleConfirm } = useConfirmDialog();
 
   // Una sola fuente de verdad: filtro por dealer y enriquecimiento en useQuotes
@@ -434,11 +443,16 @@ export default function Quotes() {
   };
 
   const handleDuplicateConfirm = useCallback(
-    async (mode: DuplicateQuoteMode, recalculate: boolean) => {
+    async (mode: DuplicateQuoteMode, recalculate: boolean, dealerId: string | null) => {
       if (!duplicateTarget) return;
       setDuplicatingLoading(true);
       try {
-        const newId = await duplicateQuote(duplicateTarget.id, mode, recalculate);
+        const newId = await duplicateQuote(
+          duplicateTarget.id,
+          mode,
+          recalculate,
+          dealerId ?? activeDealerId,
+        );
         useUIStore.getState().addNotification({
           type: 'success',
           title: mode === 'version' ? 'Version created' : 'Quote duplicated',
@@ -460,7 +474,7 @@ export default function Quotes() {
         setDuplicatingLoading(false);
       }
     },
-    [duplicateTarget, refetch]
+    [duplicateTarget, refetch, activeDealerId]
   );
 
   const toggleGroup = (rootId: string) => {
@@ -1049,6 +1063,13 @@ export default function Quotes() {
             : null
         }
         isLoading={duplicatingLoading}
+        dealers={duplicateDealerOptions}
+        defaultDealerId={activeDealerId}
+        sourceDealerLabel={
+          duplicateTarget?.dealer_id
+            ? dealerById[duplicateTarget.dealer_id]?.dealer_name ?? null
+            : null
+        }
       />
     </div>
   );

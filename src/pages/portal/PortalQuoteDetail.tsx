@@ -223,10 +223,15 @@ export default function PortalQuoteDetail() {
   // Portal users can duplicate any quote they can view (mirrors internal behavior).
   const canDuplicate = canViewQuote(portalUser.portal_user_role, quote, user?.id);
 
-  const handleDuplicateConfirm = async (mode: DuplicateQuoteMode, recalculate: boolean) => {
+  const handleDuplicateConfirm = async (
+    mode: DuplicateQuoteMode,
+    recalculate: boolean,
+    _dealerId: string | null,
+  ) => {
     setDuplicatingLoading(true);
     try {
-      const newId = await duplicateQuote(quote.id, mode, recalculate);
+      // Portal: RPC resolves dealer via get_current_dealer_id() / portal membership.
+      const newId = await duplicateQuote(quote.id, mode, recalculate, null);
       addNotification({
         type: 'success',
         title: mode === 'version' ? 'Version created' : 'Quote duplicated',

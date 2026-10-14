@@ -1249,9 +1249,10 @@ export async function approveQuote(quoteId: string, organizationId: string): Pro
 
 /**
  * Duplicate a Quote. Two modes:
- *   - 'copy'    -> brand new QT-XXXXX number (independent quote)
+ *   - 'copy'    -> brand new QT-XXXXX number under `dealerId` (or the active dealer).
+ *                  Requires a dealer — will error if none is selected / active.
  *   - 'version' -> new _V<N> quote linked to original via parent_quote_id/root_quote_id.
- *                  The previous editable version is marked as 'superseded' automatically.
+ *                  Keeps the source dealer. Previous editable version is superseded.
  *
  * When `recalculate = true`, cloned lines are flagged with pricing_locked=false
  * and last_priced_at=NULL so the UI can prompt a fresh pricing pass.
@@ -1262,11 +1263,13 @@ export async function duplicateQuote(
   quoteId: string,
   mode: 'copy' | 'version',
   recalculate: boolean = true,
+  dealerId: string | null = null,
 ): Promise<string> {
   const { data, error } = await supabase.rpc('duplicate_quote', {
     p_quote_id: quoteId,
     p_mode: mode,
     p_recalculate: recalculate,
+    p_dealer_id: mode === 'copy' ? dealerId : null,
   });
 
   if (error) {

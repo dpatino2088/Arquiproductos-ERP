@@ -4,16 +4,31 @@ import Button from '../ui/Button';
 
 export type DuplicateQuoteMode = 'copy' | 'version';
 
+export interface DuplicateDealerOption {
+  id: string;
+  label: string;
+}
+
 export interface DuplicateQuoteModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: (mode: DuplicateQuoteMode, recalculate: boolean) => Promise<void> | void;
+  onConfirm: (
+    mode: DuplicateQuoteMode,
+    recalculate: boolean,
+    dealerId: string | null,
+  ) => Promise<void> | void;
   sourceQuoteNo?: string | null;
   /** When true, the 'version' radio is disabled (e.g. quote already converted to SO). */
   disableVersion?: boolean;
   /** Optional reason to show under disabled 'version' radio. */
   versionDisabledReason?: string | null;
   isLoading?: boolean;
+  /** Dealers the user may assign a "New Quote" copy to. Hidden when empty (portal). */
+  dealers?: DuplicateDealerOption[];
+  /** Prefill for the dealer select (active dealer). */
+  defaultDealerId?: string | null;
+  /** Source quote dealer — shown for New version (read-only). */
+  sourceDealerLabel?: string | null;
 }
 
 const DuplicateQuoteModal: React.FC<DuplicateQuoteModalProps> = ({
@@ -24,24 +39,33 @@ const DuplicateQuoteModal: React.FC<DuplicateQuoteModalProps> = ({
   disableVersion = false,
   versionDisabledReason,
   isLoading = false,
+  dealers = [],
+  defaultDealerId = null,
+  sourceDealerLabel = null,
 }) => {
   const [mode, setMode] = useState<DuplicateQuoteMode>(disableVersion ? 'copy' : 'version');
   const [recalculate, setRecalculate] = useState(true);
+  const [dealerId, setDealerId] = useState<string>(defaultDealerId ?? '');
 
   useEffect(() => {
     if (!isOpen) return;
     setMode(disableVersion ? 'copy' : 'version');
     setRecalculate(true);
-  }, [isOpen, disableVersion]);
+    setDealerId(defaultDealerId ?? '');
+  }, [isOpen, disableVersion, defaultDealerId]);
 
   if (!isOpen) return null;
+
+  const showDealerSelect = mode === 'copy' && dealers.length > 0;
+  const missingDealer = mode === 'copy' && dealers.length > 0 && !dealerId;
 
   const handleBackdrop = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget && !isLoading) onClose();
   };
 
   const handleConfirm = async () => {
-    await onConfirm(mode, recalculate);
+    if (missingDealer) return;
+    await onConfirm(mode, recalculate, mode === 'copy' ? dealerId || null : null);
   };
 
   return (
@@ -107,9 +131,15 @@ const DuplicateQuoteModal: React.FC<DuplicateQuoteModalProps> = ({
                   </span>
                 </div>
                 <p className="text-xs text-gray-500 mt-1">
-                  Creates a new version linked to the original quote (e.g. QT-00123_V2). The
-                  previous version is marked as <strong>superseded</strong> and versions are
-                  grouped in the list. Best for iterating on a project.
+                  Creates a new version linked to the original quote (e.g. QT-00123_V2). Stays with
+                  the same dealer
+                  {sourceDealerLabel ? (
+                    <>
+                      {' '}
+                      (<strong>{sourceDealerLabel}</strong>)
+                    </>
+                  ) : null}
+                  .
                 </p>
                 {disableVersion && versionDisabledReason && (
                   <p className="text-xs text-amber-700 mt-1">{versionDisabledReason}</p>
@@ -140,12 +170,39 @@ const DuplicateQuoteModal: React.FC<DuplicateQuoteModalProps> = ({
                   </span>
                 </div>
                 <p className="text-xs text-gray-500 mt-1">
-                  Creates a completely new quote (with its own consecutive number) with no link
-                  to the original. Useful for another customer or a new project.
+                  Creates a completely new quote under the dealer you select (or the active dealer
+                  in the header). Useful for another customer or dealer.
                 </p>
               </div>
             </label>
           </div>
+
+          {showDealerSelect && (
+            <div className="border-t border-gray-100 pt-4 space-y-1.5">
+              <label className="block text-sm font-medium text-gray-900" htmlFor="duplicate-dealer">
+                Dealer for the new quote
+              </label>
+              <select
+                id="duplicate-dealer"
+                value={dealerId}
+                disabled={isLoading}
+                onChange={(e) => setDealerId(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10"
+              >
+                <option value="">— choose dealer —</option>
+                {dealers.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+              {missingDealer && (
+                <p className="text-xs text-amber-700">
+                  Select a dealer, or switch to one in the header before duplicating.
+                </p>
+              )}
+            </div>
+          )}
 
           <div className="border-t border-gray-100 pt-4">
             <label className="flex items-start gap-3 cursor-pointer">
@@ -176,7 +233,7 @@ const DuplicateQuoteModal: React.FC<DuplicateQuoteModalProps> = ({
           <Button
             variant="primary"
             onClick={handleConfirm}
-            disabled={isLoading}
+            disabled={isLoading || missingDealer}
             loading={isLoading}
             className="min-w-[140px]"
           >

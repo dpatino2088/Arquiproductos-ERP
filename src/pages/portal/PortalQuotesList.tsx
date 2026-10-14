@@ -166,11 +166,16 @@ export default function PortalQuotesList() {
     return groups;
   }, [quotes]);
 
-  const handleDuplicateConfirm = async (mode: DuplicateQuoteMode, recalculate: boolean) => {
+  const handleDuplicateConfirm = async (
+    mode: DuplicateQuoteMode,
+    recalculate: boolean,
+    _dealerId: string | null,
+  ) => {
     if (!duplicateTarget) return;
     setDuplicatingLoading(true);
     try {
-      const newId = await duplicateQuote(duplicateTarget.id, mode, recalculate);
+      // Portal: RPC resolves dealer via get_current_dealer_id() / portal membership.
+      const newId = await duplicateQuote(duplicateTarget.id, mode, recalculate, null);
       addNotification({
         type: 'success',
         title: mode === 'version' ? 'Version created' : 'Quote duplicated',
