@@ -77,6 +77,75 @@ function getCommercialAdjustment(line: any): CommercialAdjustmentMeta | null {
   return raw as CommercialAdjustmentMeta;
 }
 
+/** Short label for a line that already has a commercial discount, e.g. "−10%". */
+function commercialDiscountLabel(line: any): string | null {
+  const meta = getCommercialAdjustment(line);
+  if (!meta) return null;
+  if (meta.non_billable === true) return 'Non-billable';
+  const pct = Number(meta.extra_discount_pct ?? meta.effective_discount_pct ?? 0);
+  if (Number.isFinite(pct) && pct > 0) return `−${Number(pct.toFixed(2))}%`;
+  const amount = Number(meta.extra_discount_amount ?? 0);
+  if (Number.isFinite(amount) && amount > 0) return 'Discount';
+  return null;
+}
+
+type GlobalDiscountSummary = {
+  lineCount: number;
+  adjustedCount: number;
+  /** Set only when every line shares the same percentage discount. */
+  uniformPct: number | null;
+  reason: string;
+  note: string;
+  breakdown: { label: string; count: number }[];
+  listTotal: number;
+  currentTotal: number;
+};
+
+function summarizeGlobalDiscount(lines: any[]): GlobalDiscountSummary {
+  const buckets = new Map<string, { label: string; count: number; pct: number | null; reason: string; note: string }>();
+  let listTotal = 0;
+  let currentTotal = 0;
+  let adjustedCount = 0;
+
+  for (const line of lines) {
+    const meta = getCommercialAdjustment(line);
+    const dealerTotal = Number(line?.dealer_price_total);
+    const current = Number.isFinite(dealerTotal) ? dealerTotal : 0;
+    const baseFromMeta = meta?.base_line_total != null ? Number(meta.base_line_total) : NaN;
+    listTotal += Number.isFinite(baseFromMeta) ? baseFromMeta : current;
+    currentTotal += current;
+
+    const nonBillable = meta?.non_billable === true;
+    const pctRaw = Number(meta?.extra_discount_pct ?? 0);
+    const pct = Number.isFinite(pctRaw) && pctRaw > 0 ? Number(pctRaw.toFixed(2)) : 0;
+    const amount = Number(meta?.extra_discount_amount ?? 0);
+    const isAdjusted = nonBillable || pct > 0 || (Number.isFinite(amount) && amount > 0);
+    if (!isAdjusted) continue;
+    adjustedCount += 1;
+
+    const key = nonBillable ? 'nb' : pct > 0 ? `pct:${pct}` : 'amount';
+    const label = nonBillable ? 'Non-billable' : pct > 0 ? `${pct}%` : 'Fixed amount';
+    const existing = buckets.get(key);
+    if (existing) existing.count += 1;
+    else buckets.set(key, { label, count: 1, pct: pct > 0 ? pct : null, reason: meta?.reason ?? '', note: meta?.note ?? '' });
+  }
+
+  const entries = [...buckets.values()];
+  const only = entries.length === 1 ? entries[0] : null;
+  const uniform = only && only.pct != null && only.count === lines.length ? only : null;
+
+  return {
+    lineCount: lines.length,
+    adjustedCount,
+    uniformPct: uniform?.pct ?? null,
+    reason: uniform?.reason ?? '',
+    note: uniform?.note ?? '',
+    breakdown: entries.map((entry) => ({ label: entry.label, count: entry.count })),
+    listTotal,
+    currentTotal,
+  };
+}
+
 function getCommercialBasePricing(
   line: any,
   dealerDiscountPctForDisplay: number
@@ -5388,7 +5457,15 @@ export default function QuoteNew() {
                 {!isOrdered && canManageGlobalDiscount && (
                 <button
                   type="button"
-                  onClick={() => setGlobalCommercialOpen(true)}
+                  onClick={() => {
+                    const summary = summarizeGlobalDiscount(quoteLines);
+                    if (summary.uniformPct != null) {
+                      setGlobalCommercialDiscountPct(String(summary.uniformPct));
+                      setGlobalCommercialReason(summary.reason);
+                      setGlobalCommercialNote(summary.note);
+                    }
+                    setGlobalCommercialOpen(true);
+                  }}
                   className="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium"
                 >
                   Global Discount
@@ -5447,9 +5524,9 @@ export default function QuoteNew() {
                     <th className="text-left py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '32px' }} title="Drag to reorder"> </th>
                     <th className="text-center py-3 px-1 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '28px' }}>#</th>
                     <th className="text-left py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '8%' }}>Area</th>
-                    <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '5%' }}>Position</th>
+                    <th className="text-left py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '10%' }}>Position</th>
                     <th className="text-center py-3 pl-4 pr-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '9%' }}>Product type</th>
-                    <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs" style={{ width: '16%' }}>Description</th>
+                    <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs" style={{ width: '11%' }}>Description</th>
                     <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '11%' }}>System Drive</th>
                     <th className="text-center py-3 px-2 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '10%' }}>Measurements</th>
                     <th className="text-right py-3 pl-2 pr-3 font-medium text-gray-700 text-xs whitespace-nowrap" style={{ width: '36px' }}>Qty</th>
@@ -5575,7 +5652,11 @@ export default function QuoteNew() {
                         <td className="py-4 px-2 text-gray-700 text-sm text-left break-words leading-tight">
                           {area != null && String(area).trim() !== '' ? String(area).trim() : '—'}
                         </td>
-                        <td className="py-4 px-2 text-gray-700 text-sm text-center whitespace-nowrap overflow-hidden text-ellipsis">
+                        <td
+                          className="py-4 px-2 text-gray-700 text-sm text-left break-words leading-tight align-middle"
+                          style={{ overflow: 'hidden' }}
+                          title={position != null && String(position).trim() !== '' ? String(position).trim() : undefined}
+                        >
                           {position != null && String(position).trim() !== '' ? String(position).trim() : '—'}
                         </td>
                         <td className="py-4 pl-4 pr-2 text-gray-900 text-sm font-medium text-center break-words leading-tight">
@@ -5697,17 +5778,23 @@ export default function QuoteNew() {
                         <td className="py-4 pl-2 pr-4 text-right text-gray-900 text-sm font-medium tabular-nums whitespace-nowrap" style={{ width: '96px' }}>
                           {(() => {
                             const effective = getEffectiveLinePrices(line, useDealerPrice, dealerDiscountPctForDisplay);
-                            const rollMsrp = line.roll_msrp_snapshot || 0;
-                            const bomMsrp = line.bom_msrp_snapshot || 0;
-                            const hasDetails = rollMsrp > 0 || bomMsrp > 0;
+                            const discountLabel = !isPortal && effective.isCommercialAdjusted ? commercialDiscountLabel(line) : null;
                             return (
                               <div className="whitespace-nowrap text-right">
-                                <span className="font-semibold inline-flex items-center gap-1">
-                                  {!isPortal && effective.isCommercialAdjusted && (
-                                    <span className="w-1.5 h-1.5 rounded-full bg-orange-400 shrink-0" title="Adjusted" />
+                                <span className="font-semibold inline-flex items-center justify-end gap-1">
+                                  {discountLabel && (
+                                    <span
+                                      className="w-1.5 h-1.5 rounded-full bg-orange-400 shrink-0"
+                                      title={`Commercial discount ${discountLabel}`}
+                                    />
                                   )}
                                   {formatCurrency(effective.lineTotal, watch('currency'))}
                                 </span>
+                                {discountLabel && (
+                                  <div className="text-[11px] font-normal text-orange-600 whitespace-normal">
+                                    {discountLabel}
+                                  </div>
+                                )}
                               </div>
                             );
                           })()}
@@ -6169,6 +6256,39 @@ export default function QuoteNew() {
               </button>
             </div>
             <div className="px-6 py-5 space-y-5">
+              {(() => {
+                const summary = summarizeGlobalDiscount(quoteLines);
+                if (summary.adjustedCount === 0) return null;
+                const currency = watch('currency');
+                const discountAmount = Math.max(summary.listTotal - summary.currentTotal, 0);
+                return (
+                  <div className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2.5 text-xs text-gray-700 space-y-1.5">
+                    <p className="font-medium text-gray-900">
+                      {summary.uniformPct != null
+                        ? `Currently applied: ${summary.uniformPct}% on all ${summary.lineCount} lines`
+                        : summary.breakdown.length === 1
+                          ? `Currently applied: ${summary.breakdown[0].label} on ${summary.adjustedCount} of ${summary.lineCount} lines`
+                          : `Discount applied on ${summary.adjustedCount} of ${summary.lineCount} lines`}
+                    </p>
+                    {summary.breakdown.length > 1 && (
+                      <p>{summary.breakdown.map((entry) => `${entry.count} at ${entry.label}`).join(' · ')}</p>
+                    )}
+                    <div className="flex items-center justify-between">
+                      <span>List price</span>
+                      <span className="tabular-nums">{formatCurrency(summary.listTotal, currency)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>Discount</span>
+                      <span className="tabular-nums text-orange-700">−{formatCurrency(discountAmount, currency)}</span>
+                    </div>
+                    <div className="flex items-center justify-between font-medium text-gray-900">
+                      <span>Price with discount</span>
+                      <span className="tabular-nums">{formatCurrency(summary.currentTotal, currency)}</span>
+                    </div>
+                    <p className="text-[11px] text-gray-500">Line totals, before tax.</p>
+                  </div>
+                );
+              })()}
               <div>
                 <Label className="text-xs text-gray-600 mb-1.5">Discount % for all lines</Label>
                 <Input
