@@ -535,3 +535,211 @@ export function useLaborCoverageGaps(days: number = 90) {
 
   return { gaps, loading, error, refetch };
 }
+
+// ====================================================
+// MANUFACTURER MARGINS (manufacturer, then category)
+// ====================================================
+
+export interface ManufacturerMarginRow {
+  id: string;
+  organization_id: string;
+  manufacturer_id: string;
+  minimum_margin_pct: number;
+  is_active: boolean;
+}
+
+export interface ManufacturerCategoryMarginRow {
+  id: string;
+  organization_id: string;
+  manufacturer_id: string;
+  category_id: string;
+  minimum_margin_pct: number;
+  is_active: boolean;
+}
+
+export interface ManufacturerOption {
+  id: string;
+  name: string;
+}
+
+export interface ManufacturerCategoryOption {
+  manufacturer_id: string;
+  category_id: string;
+  name: string;
+}
+
+export function useManufacturerMargins() {
+  const [manufacturers, setManufacturers] = useState<ManufacturerOption[]>([]);
+  const [margins, setMargins] = useState<ManufacturerMarginRow[]>([]);
+  const [categoryMargins, setCategoryMargins] = useState<ManufacturerCategoryMarginRow[]>([]);
+  const [categories, setCategories] = useState<ManufacturerCategoryOption[]>([]);
+  const [loading, setLoading] = useState(true);
+  const { activeOrganizationId } = useOrganizationContext();
+
+  const refetch = async () => {
+    if (!activeOrganizationId) {
+      setManufacturers([]);
+      setMargins([]);
+      setCategoryMargins([]);
+      setCategories([]);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const pageSize = 1000;
+      const itemRows: Array<{
+        manufacturer_id: string | null;
+        category_id: string | null;
+        CatalogCategories: { name?: string } | { name?: string }[] | null;
+      }> = [];
+      const [mfrRes, marginRes, catMarginRes] = await Promise.all([
+        supabase
+          .from('Manufacturers')
+          .select('id, name')
+          .eq('organization_id', activeOrganizationId)
+          .eq('deleted', false)
+          .order('name'),
+        supabase
+          .from('ManufacturerMargins')
+          .select('id, organization_id, manufacturer_id, minimum_margin_pct, is_active')
+          .eq('organization_id', activeOrganizationId)
+          .eq('is_active', true),
+        supabase
+          .from('ManufacturerCategoryMargins')
+          .select('id, organization_id, manufacturer_id, category_id, minimum_margin_pct, is_active')
+          .eq('organization_id', activeOrganizationId)
+          .eq('is_active', true),
+      ]);
+
+      for (let from = 0; ; from += pageSize) {
+        const itemRes = await supabase
+          .from('CatalogItems')
+          .select('manufacturer_id, category_id, CatalogCategories(name)')
+          .eq('organization_id', activeOrganizationId)
+          .not('manufacturer_id', 'is', null)
+          .not('category_id', 'is', null)
+          .order('id')
+          .range(from, from + pageSize - 1);
+        if (itemRes.error) throw itemRes.error;
+        itemRows.push(...(itemRes.data || []));
+        if (!itemRes.data || itemRes.data.length < pageSize) break;
+      }
+
+      if (mfrRes.error) throw mfrRes.error;
+      if (marginRes.error) throw marginRes.error;
+      if (catMarginRes.error) throw catMarginRes.error;
+
+      const seen = new Set<string>();
+      const categoryOptions: ManufacturerCategoryOption[] = [];
+      for (const row of itemRows) {
+        const manufacturerId = row.manufacturer_id as string;
+        const categoryId = row.category_id as string;
+        const key = `${manufacturerId}:${categoryId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const category = row.CatalogCategories as { name?: string } | { name?: string }[] | null;
+        const name = Array.isArray(category) ? category[0]?.name : category?.name;
+        categoryOptions.push({
+          manufacturer_id: manufacturerId,
+          category_id: categoryId,
+          name: name || 'Category',
+        });
+      }
+      categoryOptions.sort((a, b) => a.name.localeCompare(b.name));
+
+      setManufacturers(mfrRes.data || []);
+      setMargins((marginRes.data || []) as ManufacturerMarginRow[]);
+      setCategoryMargins((catMarginRes.data || []) as ManufacturerCategoryMarginRow[]);
+      setCategories(categoryOptions);
+    } catch (err) {
+      console.error('Error loading manufacturer margins:', err);
+      setManufacturers([]);
+      setMargins([]);
+      setCategoryMargins([]);
+      setCategories([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    refetch();
+  }, [activeOrganizationId]);
+
+  const saveManufacturerMargin = async (manufacturerId: string, minimumMarginPct: number) => {
+    if (!activeOrganizationId) throw new Error('No organization selected');
+    const { error } = await supabase
+      .from('ManufacturerMargins')
+      .upsert(
+        {
+          organization_id: activeOrganizationId,
+          manufacturer_id: manufacturerId,
+          minimum_margin_pct: minimumMarginPct,
+          is_active: true,
+        },
+        { onConflict: 'organization_id,manufacturer_id' }
+      );
+    if (error) throw error;
+    await refetch();
+  };
+
+  const clearManufacturerMargin = async (manufacturerId: string) => {
+    if (!activeOrganizationId) throw new Error('No organization selected');
+    const { error } = await supabase
+      .from('ManufacturerMargins')
+      .delete()
+      .eq('organization_id', activeOrganizationId)
+      .eq('manufacturer_id', manufacturerId);
+    if (error) throw error;
+    await refetch();
+  };
+
+  const saveManufacturerCategoryMargin = async (
+    manufacturerId: string,
+    categoryId: string,
+    minimumMarginPct: number
+  ) => {
+    if (!activeOrganizationId) throw new Error('No organization selected');
+    const { error } = await supabase
+      .from('ManufacturerCategoryMargins')
+      .upsert(
+        {
+          organization_id: activeOrganizationId,
+          manufacturer_id: manufacturerId,
+          category_id: categoryId,
+          minimum_margin_pct: minimumMarginPct,
+          is_active: true,
+        },
+        { onConflict: 'organization_id,manufacturer_id,category_id' }
+      );
+    if (error) throw error;
+    await refetch();
+  };
+
+  const clearManufacturerCategoryMargin = async (manufacturerId: string, categoryId: string) => {
+    if (!activeOrganizationId) throw new Error('No organization selected');
+    const { error } = await supabase
+      .from('ManufacturerCategoryMargins')
+      .delete()
+      .eq('organization_id', activeOrganizationId)
+      .eq('manufacturer_id', manufacturerId)
+      .eq('category_id', categoryId);
+    if (error) throw error;
+    await refetch();
+  };
+
+  return {
+    manufacturers,
+    margins,
+    categoryMargins,
+    categories,
+    loading,
+    refetch,
+    saveManufacturerMargin,
+    clearManufacturerMargin,
+    saveManufacturerCategoryMargin,
+    clearManufacturerCategoryMargin,
+  };
+}

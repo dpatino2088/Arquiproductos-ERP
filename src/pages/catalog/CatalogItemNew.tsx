@@ -342,6 +342,7 @@ export default function CatalogItemNew() {
   // Counter to force re-fetch of msrpRow after save
   const [msrpFetchKey, setMsrpFetchKey] = useState(0);
   const [msrpLoading, setMsrpLoading] = useState(false);
+  const [marginFromItem, setMarginFromItem] = useState(false);
   const msrpAutoRecomputeAttemptedRef = useRef<string | null>(null);
   
   // Conversions state (from CatalogItemConversions table)
@@ -758,6 +759,7 @@ export default function CatalogItemNew() {
         });
 
         setPrimaryLocationId((data.primary_location_id as string | null) ?? null);
+        setMarginFromItem(data.minimum_margin_pct_override != null);
         
         const rawSessionData = sessionKey ? window.sessionStorage.getItem(sessionKey) : null;
         let sessionData: string | null = null;
@@ -2714,7 +2716,7 @@ export default function CatalogItemNew() {
                         <p className="text-lg font-semibold text-purple-600">
                           {(display.minimum_margin_pct * 100).toFixed(2)}%
                         </p>
-                        <p className="text-xs text-gray-500 mt-1">From category</p>
+                        <p className="text-xs text-gray-500 mt-1">{marginFromItem ? 'Item override' : 'Manufacturer or category'}</p>
                       </div>
                       <div>
                         <p className="font-medium text-gray-700">MSRP % Sale Out</p>

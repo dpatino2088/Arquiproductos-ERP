@@ -9,6 +9,7 @@ import Input from '../../components/ui/Input';
 import Label from '../../components/ui/Label';
 import { Save, AlertCircle, Plus, Edit2, X, Check, Search, Filter } from 'lucide-react';
 import DealerTiersSettings from './DealerTiersSettings';
+import ManufacturerMarginsSettings from './ManufacturerMarginsSettings';
 import { useProductTypes } from '../../hooks/useProductTypes';
 
 const costSettingsSchema = z.object({
@@ -25,7 +26,7 @@ const costSettingsSchema = z.object({
 type CostSettingsFormData = z.infer<typeof costSettingsSchema>;
 
 export default function CostEngineSettings() {
-  const [activeTab, setActiveTab] = useState<'defaults' | 'import_taxes' | 'category_margins' | 'dealer_tiers' | 'fabric_pricing' | 'labor_rules'>('defaults');
+  const [activeTab, setActiveTab] = useState<'defaults' | 'import_taxes' | 'category_margins' | 'manufacturer_margins' | 'dealer_tiers' | 'fabric_pricing' | 'labor_rules'>('defaults');
   const [fabricPricingBasis, setFabricPricingBasis] = useState<'auto' | 'linear' | 'sqm'>('auto');
   const [savingFabric, setSavingFabric] = useState(false);
   const [fabricSaveSuccess, setFabricSaveSuccess] = useState(false);
@@ -649,6 +650,29 @@ export default function CostEngineSettings() {
               Category Margins
             </button>
             <button
+              onClick={() => setActiveTab('manufacturer_margins')}
+              className={`transition-colors flex items-center justify-start border-r ${
+                activeTab === 'manufacturer_margins'
+                  ? 'bg-white font-semibold'
+                  : 'hover:bg-white/50 font-normal'
+              }`}
+              style={{
+                fontSize: '12px',
+                padding: '0 48px',
+                height: '100%',
+                minWidth: '140px',
+                width: 'auto',
+                color: 'var(--graphite-black-hex)',
+                borderColor: 'var(--gray-250)',
+                borderBottom: activeTab === 'manufacturer_margins' ? '2px solid var(--tab-active-underline)' : 'none'
+              }}
+              role="tab"
+              aria-selected={activeTab === 'manufacturer_margins'}
+              aria-label={`Manufacturer Margins${activeTab === 'manufacturer_margins' ? ' (current tab)' : ''}`}
+            >
+              Manufacturer
+            </button>
+            <button
               onClick={() => setActiveTab('labor_rules')}
               className={`transition-colors flex items-center justify-start border-r ${
                 activeTab === 'labor_rules'
@@ -991,6 +1015,12 @@ export default function CostEngineSettings() {
                   })}
                 </div>
               )}
+            </div>
+          )}
+
+          {activeTab === 'manufacturer_margins' && (
+            <div className="p-6">
+              <ManufacturerMarginsSettings />
             </div>
           )}
 
